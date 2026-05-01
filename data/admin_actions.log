@@ -1,0 +1,2 @@
+2026-05-01 15:52:15,467 admin_id=1 admin_username=Jason action=approve-claim claim_id=2 item_id=4 note=claim_status=approved item_claimed=True
+2026-05-01 15:52:28,891 admin_id=1 admin_username=Jason action=reject-claim claim_id=1 item_id=5 note=claim_status=rejected

@@ -1,0 +1,7 @@
+fastapi
+pydantic
+python-multipart
+requests
+sqlalchemy
+urllib3<2
+uvicorn

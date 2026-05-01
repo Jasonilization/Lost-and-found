@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>School Lost and Found</title>
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <div class="page-glow page-glow-left" aria-hidden="true"></div>
+    <div class="page-glow page-glow-right" aria-hidden="true"></div>
+
+    <div class="status-strip">
+      <div class="server-pill" id="serverStatus">Checking backend...</div>
+      <div class="server-pill" id="ollamaStatus">Checking Ollama...</div>
+    </div>
+
+    <section class="auth-screen" id="authScreen">
+      <div class="auth-card">
+        <p class="eyebrow">School account</p>
+        <h1>Lost and Found</h1>
+        <p class="hero-copy">Sign in to report lost items, claim matches, and ask questions on item cards.</p>
+
+        <div class="tab-switch" role="tablist" aria-label="Authentication tabs">
+          <button class="tab-button is-active" id="loginTab" type="button">Login</button>
+          <button class="tab-button" id="registerTab" type="button">Register</button>
+        </div>
+
+        <form id="authForm" class="stack-form auth-form">
+          <label>
+            <span>Username</span>
+            <input id="authUsername" type="text" minlength="3" autocomplete="username" required>
+          </label>
+          <label>
+            <span>Password</span>
+            <input id="authPassword" type="password" minlength="6" autocomplete="current-password" required>
+          </label>
+          <div class="register-only is-hidden" id="registerFields">
+            <label>
+              <span>Initials</span>
+              <input id="authInitials" type="text" placeholder="jason.h" autocomplete="off">
+            </label>
+            <label>
+              <span>Class of</span>
+              <input id="authClassOf" type="number" min="2025" max="2035" placeholder="2030">
+            </label>
+          </div>
+          <button class="primary-button" id="authSubmitButton" type="submit">
+            <span class="button-text" id="authSubmitLabel">Login</span>
+            <span class="spinner" aria-hidden="true"></span>
+          </button>
+          <p class="status-message" id="authMessage"></p>
+        </form>
+      </div>
+    </section>
+
+    <div class="app-shell is-hidden" id="appShell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Local campus desk</p>
+          <h2>Lost and Found</h2>
+          <p class="hero-copy">Reports stay local, tags are cached once, and queries help confirm ownership.</p>
+        </div>
+        <div class="topbar-actions">
+          <div class="account-chip">
+            <p class="account-name" id="accountName"></p>
+            <p class="account-meta" id="accountMeta"></p>
+          </div>
+          <button class="ghost-button" id="showReportsButton" type="button">Reports</button>
+          <button class="ghost-button" id="showClaimsButton" type="button">My Claims</button>
+          <button class="ghost-button is-hidden" id="showAdminButton" type="button">Admin Panel</button>
+          <button class="ghost-button danger-button" id="logoutButton" type="button">Logout</button>
+        </div>
+      </header>
+
+      <main class="shell">
+        <aside class="sidebar-stack">
+          <section class="panel upload-panel" aria-labelledby="uploadTitle">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">New report</p>
+                <h3 id="uploadTitle">Upload a lost item</h3>
+              </div>
+              <span class="static-pill">Lost only</span>
+            </div>
+
+            <form id="itemForm" class="item-form">
+              <label class="drop-zone" id="dropZone">
+                <input id="imageInput" type="file" accept="image/png,image/jpeg,image/jpg">
+                <span class="drop-icon">+</span>
+                <strong id="dropTitle">Drop image here</strong>
+                <small id="dropHint">or choose a JPG/PNG file</small>
+              </label>
+
+              <div class="form-grid">
+                <label>
+                  <span>Item title</span>
+                  <input id="titleInput" name="title" type="text" maxlength="80" placeholder="Blue water bottle" required>
+                </label>
+                <label>
+                  <span>Category</span>
+                  <select id="categoryInput" name="category" required></select>
+                </label>
+                <label>
+                  <span>Date</span>
+                  <input id="dateInput" name="event_date" type="date" required>
+                </label>
+                <label>
+                  <span>Display name</span>
+                  <input id="reporterInput" name="reporter_name" type="text" maxlength="80" placeholder="How this report should display" required>
+                </label>
+              </div>
+
+              <fieldset class="location-box">
+                <legend>Location</legend>
+                <div class="location-choice">
+                  <label>
+                    <input type="radio" name="locationMode" value="predefined" checked>
+                    <span>Predefined location</span>
+                  </label>
+                  <label>
+                    <input type="radio" name="locationMode" value="room">
+                    <span>Room code</span>
+                  </label>
+                </div>
+
+                <div class="location-inputs">
+                  <label id="predefinedWrap">
+                    <span>Choose location</span>
+                    <select id="predefinedLocation"></select>
+                  </label>
+                  <label id="roomWrap" class="is-hidden">
+                    <span>Room code</span>
+                    <input id="roomCodeInput" type="text" maxlength="4" placeholder="S302" autocomplete="off">
+                  </label>
+                </div>
+                <p class="field-note" id="locationPreview">Library</p>
+                <p class="error-text" id="locationError"></p>
+              </fieldset>
+
+              <label>
+                <span>Description</span>
+                <textarea id="descriptionInput" name="description" rows="4" maxlength="450" placeholder="Add color, brand, markings, or details that would help someone confirm it." required></textarea>
+              </label>
+
+              <div class="form-actions">
+                <button class="primary-button" id="submitButton" type="submit">
+                  <span class="button-text">Save report</span>
+                  <span class="spinner" aria-hidden="true"></span>
+                </button>
+                <p class="status-message" id="uploadMessage"></p>
+              </div>
+            </form>
+          </section>
+        </aside>
+
+        <section class="content-stack">
+          <section class="panel browse-panel" id="reportsSection" aria-labelledby="galleryTitle">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Reports</p>
+                <h3 id="galleryTitle">Live search</h3>
+              </div>
+              <button class="ghost-button" id="refreshButton" type="button">Refresh</button>
+            </div>
+
+            <div class="filters" role="search">
+              <label class="search-field">
+                <span>Search</span>
+                <input id="searchInput" type="search" placeholder="Search description, tags, or location">
+              </label>
+              <label>
+                <span>Category</span>
+                <select id="categoryFilter"></select>
+              </label>
+              <label>
+                <span>Location</span>
+                <select id="locationFilter"></select>
+              </label>
+              <label>
+                <span>Status</span>
+                <select id="statusFilter"></select>
+              </label>
+            </div>
+
+            <div class="list-meta">
+              <span id="resultCount">0 reports</span>
+              <span class="loading-line" id="searchLoading">Loading items...</span>
+            </div>
+
+            <div class="gallery" id="gallery"></div>
+          </section>
+
+          <section class="panel claims-panel is-hidden" id="claimsSection" aria-labelledby="claimsTitle">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Claim history</p>
+                <h3 id="claimsTitle">My Claims</h3>
+              </div>
+              <button class="ghost-button" id="refreshClaimsButton" type="button">Refresh claims</button>
+            </div>
+            <div class="list-meta">
+              <span id="claimsCount">0 claims</span>
+              <span class="loading-line" id="claimsLoading">Loading claims...</span>
+            </div>
+            <div class="claims-list" id="claimsList"></div>
+          </section>
+
+          <section class="panel admin-panel is-hidden" id="adminSection" aria-labelledby="adminTitle">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Admin tools</p>
+                <h3 id="adminTitle">Admin Panel</h3>
+              </div>
+              <button class="ghost-button" id="refreshAdminButton" type="button">Refresh admin data</button>
+            </div>
+
+            <div class="admin-toolbar">
+              <div class="tab-switch admin-tab-switch" role="tablist" aria-label="Admin tabs">
+                <button class="tab-button is-active" id="adminUsersTab" type="button">Users</button>
+                <button class="tab-button" id="adminClaimsTab" type="button">Claims</button>
+              </div>
+              <div class="list-meta admin-meta">
+                <span id="adminSummary">0 users</span>
+                <span class="loading-line" id="adminLoading">Loading admin data...</span>
+              </div>
+            </div>
+
+            <p class="status-message" id="adminMessage"></p>
+
+            <div id="adminUsersPanel">
+              <div class="admin-table-wrap">
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Initials</th>
+                      <th>Class of</th>
+                      <th>Created</th>
+                    </tr>
+                  </thead>
+                  <tbody id="adminUsersBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="is-hidden" id="adminClaimsPanel">
+              <div class="admin-claims-list" id="adminClaimsList"></div>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <dialog class="claim-dialog" id="claimDialog">
+      <form class="claim-form" id="claimForm" method="dialog">
+        <div class="section-heading compact">
+          <div>
+            <p class="eyebrow">Ownership check</p>
+            <h3 id="claimTitle">Claim item</h3>
+          </div>
+          <button class="icon-button" id="closeClaimDialog" type="button" aria-label="Close claim form">×</button>
+        </div>
+        <p class="dialog-subtitle" id="claimItemLabel"></p>
+        <label>
+          <span>Why are you claiming this item?</span>
+          <textarea id="claimReasonInput" rows="3" maxlength="240" required></textarea>
+        </label>
+        <label>
+          <span>Description of item</span>
+          <textarea id="claimDescriptionInput" rows="3" maxlength="240" required></textarea>
+        </label>
+        <label>
+          <span>Where did you lose it?</span>
+          <input id="claimLocationInput" type="text" maxlength="120" required>
+        </label>
+        <label>
+          <span>Additional identifying info</span>
+          <textarea id="claimIdentifyingInput" rows="3" maxlength="240" required></textarea>
+        </label>
+        <div class="form-actions">
+          <button class="primary-button" id="claimSubmitButton" type="submit">
+            <span class="button-text">Submit claim</span>
+            <span class="spinner" aria-hidden="true"></span>
+          </button>
+          <button class="ghost-button" id="cancelClaimButton" type="button">Cancel</button>
+        </div>
+        <p class="status-message" id="claimMessage"></p>
+      </form>
+    </dialog>
+
+    <template id="itemTemplate">
+      <article class="item-card">
+        <div class="image-frame">
+          <img alt="">
+          <div class="image-placeholder">Image unavailable</div>
+          <div class="card-flag" data-card-flag></div>
+        </div>
+        <div class="item-body">
+          <div class="item-head">
+            <div>
+              <h3></h3>
+              <p class="item-summary"></p>
+            </div>
+            <span class="status-badge"></span>
+          </div>
+          <p class="item-description"></p>
+          <div class="tag-row"></div>
+          <dl class="info-list"></dl>
+          <div class="card-actions">
+            <button class="primary-button card-button" type="button" data-claim-button>Claim item</button>
+            <button class="ghost-button card-button" type="button" data-query-toggle>Queries</button>
+            <button class="ghost-button card-button" type="button" data-mark-claimed-button>Mark as Claimed</button>
+          </div>
+          <section class="query-panel is-hidden" data-query-panel>
+            <div class="query-head">
+              <h4>Queries</h4>
+              <span class="loading-line" data-query-loading>Loading queries...</span>
+            </div>
+            <div class="query-list" data-query-list></div>
+            <form class="query-form" data-query-form>
+              <textarea data-query-input rows="2" maxlength="220" placeholder="Has anyone seen this?"></textarea>
+              <div class="query-actions">
+                <button class="primary-button small-button" type="submit" data-query-submit>
+                  <span class="button-text">Post query</span>
+                  <span class="spinner" aria-hidden="true"></span>
+                </button>
+                <p class="status-message" data-query-message></p>
+              </div>
+            </form>
+          </section>
+        </div>
+      </article>
+    </template>
+
+    <template id="claimHistoryTemplate">
+      <article class="claim-history-card">
+        <div class="claim-history-head">
+          <div>
+            <h3></h3>
+            <p class="claim-history-meta"></p>
+          </div>
+          <span class="status-badge"></span>
+        </div>
+        <p class="claim-history-reason"></p>
+        <dl class="info-list"></dl>
+      </article>
+    </template>
+
+    <script src="script.js"></script>
+  </body>
+</html>
