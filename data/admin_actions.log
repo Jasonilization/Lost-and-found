@@ -35,3 +35,7 @@
 2026-05-02 12:50:46,325 admin_id=1 admin_username=Jason action=promote-user claim_id= item_id= note=target_user_id=2
 2026-05-02 13:39:42,982 admin_id=1 admin_username=Jason action=mark-item-claimed claim_id= item_id=1 note=item_status=Claimed
 2026-05-02 13:39:54,099 admin_id=1 admin_username=Jason action=delete-item claim_id= item_id=1 note=title=flipper zero
+2026-05-02 16:24:15,522 admin_id=1 admin_username=Jason action=reject-claim claim_id=2 item_id=6 note=claim_status=rejected
+2026-05-02 16:31:25,306 admin_id=1 admin_username=Jason action=demote-user claim_id= item_id= note=target_user_id=2
+2026-05-02 16:35:04,532 admin_id=1 admin_username=Jason action=promote-user claim_id= item_id= note=target_user_id=5
+2026-05-02 16:35:20,687 admin_id=1 admin_username=Jason action=review-item claim_id= item_id=8 note=review_status=incomplete
