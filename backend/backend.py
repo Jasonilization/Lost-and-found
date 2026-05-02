@@ -13,14 +13,16 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Form, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import case, or_
 from sqlalchemy.orm import Session
 
-from backend.database import Claim, ItemQuery, LostFoundItem, SessionLocal, User, UserSession, init_db
+from backend.ai_moderation import classify_user_input
+from backend.database import AIInspectionLog, Claim, ItemQuery, LostFoundItem, SessionLocal, User, UserSession, init_db
 from backend.moderation import validate_class_of, validate_initials, validate_text_input
-from backend.ollama_tagger import OLLAMA_URL, build_search_text, fallback_tags, get_ollama_status, moderate_text_with_ollama, tag_item
+from backend.ollama_tagger import OLLAMA_URL, build_search_text, fallback_tags, get_ollama_status, tag_item
 
 app = FastAPI(title="School Lost and Found")
 
@@ -234,6 +236,40 @@ def user_identity(user: Optional[User]) -> str:
     return user.username
 
 
+def build_input_text(*parts: Optional[str]) -> str:
+    return " ".join(str(part or "").strip() for part in parts if str(part or "").strip()).strip()
+
+
+def privilege_rank(user: Optional[User]) -> int:
+    return 1 if bool(user and user.is_admin) else 0
+
+
+def ensure_target_is_manageable(current_user: User, target_user: User, *, action: str) -> None:
+    if privilege_rank(target_user) > privilege_rank(current_user):
+        raise HTTPException(status_code=403, detail=f"Cannot {action} a higher privilege user.")
+
+
+def get_item_reporter(db: Session, item: LostFoundItem) -> Optional[User]:
+    if not item.submitted_by_user_id:
+        return None
+    return db.query(User).filter(User.id == item.submitted_by_user_id).first()
+
+
+def build_query_response(item: LostFoundItem) -> str:
+    location = item.location or "the recorded location"
+    status = item.status or ("Claimed" if item.claimed else "Open")
+    if item.claimed:
+        return (
+            f'This report for "{item.title}" is already marked as claimed. '
+            f"Your message was saved, and the last recorded location is {location}."
+        )
+    return (
+        f'I saved your question for "{item.title}". '
+        f"It is currently marked {status} at {location}. "
+        "If this sounds like your item, use the claim form so an admin can review it."
+    )
+
+
 def get_user_map(db: Session, user_ids: list[int]) -> dict[int, User]:
     unique_ids = sorted({user_id for user_id in user_ids if user_id})
     if not unique_ids:
@@ -250,13 +286,14 @@ def moderate_field(value: str, field_label: str, *, min_meaningful_chars: int, m
         max_chars=max_chars,
     )
     if suspicious:
-        moderation = moderate_text_with_ollama(cleaned)
-        if not moderation.get("safe", True):
-            raise HTTPException(status_code=400, detail=f"{field_label} was blocked: {moderation.get('reason', 'unsafe content')}.")
+        raise HTTPException(status_code=400, detail=f"{field_label} looks invalid or too noisy.")
     return cleaned
 
 
 def ensure_submission_allowed(db: Session, current_user: User) -> None:
+    if current_user.is_admin:
+        return
+
     latest = (
         db.query(LostFoundItem)
         .filter(LostFoundItem.submitted_by_user_id == current_user.id)
@@ -336,8 +373,11 @@ def serialize_claim(claim: Claim, item: LostFoundItem, claimant: Optional[User],
 def serialize_admin_user(user: User) -> dict:
     return {
         "id": user.id,
+        "username": user.username,
         "initials": user.initials,
         "class_of": user.class_of,
+        "identity": user_identity(user),
+        "is_admin": bool(user.is_admin),
         "created_at": user.created_at.isoformat() if user.created_at else None,
     }
 
@@ -354,13 +394,30 @@ def serialize_admin_claim(claim: Claim, item: LostFoundItem, claimant: Optional[
 
 
 def serialize_query(query: ItemQuery, author: Optional[User]) -> dict:
+    role = (query.role or "user").strip().lower() or "user"
     return {
         "id": query.id,
         "item_id": query.item_id,
         "user_id": query.user_id,
-        "user_identity": user_identity(author),
+        "role": role,
+        "user_identity": "System" if role == "system" else user_identity(author),
         "message": query.message,
         "created_at": query.created_at.isoformat() if query.created_at else None,
+    }
+
+
+def serialize_ai_inspection(log: AIInspectionLog, user: Optional[User]) -> dict:
+    return {
+        "id": log.id,
+        "route": log.route,
+        "input_text": log.input_text,
+        "allowed": bool(log.allowed),
+        "reason": log.reason,
+        "confidence": float(log.confidence or 0.0),
+        "tags": log.tags,
+        "raw_output": log.raw_output,
+        "user_identity": user_identity(user),
+        "created_at": log.created_at.isoformat() if log.created_at else None,
     }
 
 
@@ -376,6 +433,55 @@ def fetch_claim_or_404(db: Session, claim_id: int) -> Claim:
     if not claim:
         raise HTTPException(status_code=404, detail="Claim not found.")
     return claim
+
+
+def log_ai_inspection(
+    db: Session,
+    *,
+    current_user: Optional[User],
+    route: str,
+    input_text: str,
+    decision: dict,
+) -> AIInspectionLog:
+    log = AIInspectionLog(
+        user_id=current_user.id if current_user else None,
+        route=route,
+        input_text=input_text,
+        allowed=bool(decision.get("allowed", False)),
+        reason=str(decision.get("reason", "")).strip(),
+        confidence=float(decision.get("confidence", 0.0) or 0.0),
+        raw_output=str(decision.get("raw_output", "")).strip(),
+    )
+    log.tags = decision.get("tags", [])
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+    return log
+
+
+def moderate_request(
+    db: Session,
+    *,
+    current_user: Optional[User],
+    route: str,
+    input_text: str,
+) -> dict:
+    decision = classify_user_input(input_text)
+    log_ai_inspection(
+        db,
+        current_user=current_user,
+        route=route,
+        input_text=input_text,
+        decision=decision,
+    )
+    return decision
+
+
+def blocked_response(reason: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=400,
+        content={"error": "Request blocked", "reason": reason},
+    )
 
 
 def log_admin_action(admin_user: User, action: str, *, claim: Optional[Claim] = None, item: Optional[LostFoundItem] = None, note: str = "") -> None:
@@ -399,7 +505,6 @@ def health() -> dict:
         "ollama_available": ollama_status["available"],
         "ollama_message": ollama_status["message"],
         "ollama_error": ollama_status.get("error", ""),
-        "ollama_vision_model": ollama_status.get("vision_model", ""),
         "ollama_text_model": ollama_status.get("text_model", ""),
     }
 
@@ -497,6 +602,7 @@ async def report_item(
     if not category:
         raise HTTPException(status_code=400, detail="Category is required.")
 
+    reporter_name = moderate_field(reporter_name, "Reporter name", min_meaningful_chars=2, max_chars=80)
     title = moderate_field(payload.title, "Item title", min_meaningful_chars=3, max_chars=80)
     description = moderate_field(payload.description, "Item description", min_meaningful_chars=10, max_chars=450)
     secondary_location = payload.secondary_location.strip()
@@ -504,6 +610,15 @@ async def report_item(
     contact_info = payload.contact_info.strip()
     color = payload.color.strip()
     time_slot = payload.time_slot.strip() or "Unknown"
+
+    moderation = moderate_request(
+        db,
+        current_user=current_user,
+        route="/items/report",
+        input_text=build_input_text(title, description, location, category),
+    )
+    if not moderation.get("allowed", False):
+        return blocked_response(str(moderation.get("reason", "Request is not relevant to the lost-and-found system.")))
 
     image_path = decode_image_payload(payload.image)
     try:
@@ -520,7 +635,11 @@ async def report_item(
         report_logger.exception("AI tagging failed unexpectedly; using fallback tags.")
         ai_result = fallback_tags(title, description, category, color, location)
 
-    tags = ai_result.get("tags", [])
+    tags = []
+    for tag in ai_result.get("tags", []):
+        value = str(tag).strip().lower()
+        if value and value not in tags:
+            tags.append(value)
     item = LostFoundItem(
         report_type=DEFAULT_REPORT_TYPE,
         reporter_name=reporter_name,
@@ -535,7 +654,7 @@ async def report_item(
         time_slot=time_slot,
         event_date=payload.event_date,
         status="Open",
-        tags=tags,
+        tags=tags[:6],
         ai_summary=ai_result.get("summary", ""),
         image_path=image_path,
         search_text=build_search_text(
@@ -553,7 +672,22 @@ async def report_item(
     db.add(item)
     db.commit()
     db.refresh(item)
-    return {"message": "Report saved successfully", "item": serialize_item(item, current_user)}
+    return {
+        "message": "Report saved successfully",
+        "reason": str(moderation.get("reason", "")).strip() or "Accepted: relevant lost-and-found request.",
+        "item": serialize_item(item, current_user),
+    }
+
+
+@app.get("/items/{item_id}")
+def get_item(
+    item_id: int,
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    item = fetch_item_or_404(db, item_id)
+    reporter = get_item_reporter(db, item)
+    return {"item": serialize_item(item, reporter)}
 
 
 @app.get("/items")
@@ -563,7 +697,7 @@ def list_items(
     location: Optional[str] = None,
     category: Optional[str] = None,
     q: Optional[str] = None,
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     base_query = db.query(LostFoundItem)
@@ -580,6 +714,14 @@ def list_items(
     if q:
         lowered = q.strip().lower()
         if lowered:
+            moderation = moderate_request(
+                db,
+                current_user=current_user,
+                route="/items",
+                input_text=lowered,
+            )
+            if not moderation.get("allowed", False):
+                return blocked_response(str(moderation.get("reason", "Search was blocked.")))
             contains = f"%{lowered}%"
             starts = f"{lowered}%"
             score = (
@@ -649,6 +791,20 @@ def claim_item(
     if existing_claim:
         raise HTTPException(status_code=409, detail="You already submitted a claim for this item.")
 
+    moderation = moderate_request(
+        db,
+        current_user=current_user,
+        route=f"/items/{item_id}/claim",
+        input_text=build_input_text(
+            payload.claim_reason,
+            payload.item_description,
+            payload.lost_location,
+            payload.identifying_info,
+        ),
+    )
+    if not moderation.get("allowed", False):
+        return blocked_response(str(moderation.get("reason", "Claim was blocked.")))
+
     claim = Claim(
         item_id=item.id,
         user_id=current_user.id,
@@ -707,6 +863,52 @@ def admin_list_users(
     return {"users": [serialize_admin_user(user) for user in users]}
 
 
+@app.post("/admin/users/{user_id}/promote")
+def admin_promote_user(
+    user_id: int,
+    current_user: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    ensure_target_is_manageable(current_user, user, action="promote")
+    if user.is_admin:
+        raise HTTPException(status_code=409, detail="User is already an admin.")
+
+    user.is_admin = True
+    db.commit()
+    db.refresh(user)
+    log_admin_action(current_user, "promote-user", note=f"target_user_id={user.id}")
+    return {"message": "User promoted to admin.", "user": serialize_admin_user(user)}
+
+
+@app.post("/admin/users/{user_id}/demote")
+def admin_demote_user(
+    user_id: int,
+    current_user: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    ensure_target_is_manageable(current_user, user, action="demote")
+    if not user.is_admin:
+        raise HTTPException(status_code=409, detail="User is not an admin.")
+    if user.id == current_user.id:
+        raise HTTPException(status_code=409, detail="Admin cannot demote their own account.")
+
+    admin_count = db.query(User).filter(User.is_admin.is_(True)).count()
+    if admin_count <= 1:
+        raise HTTPException(status_code=409, detail="Cannot demote the last admin user.")
+
+    user.is_admin = False
+    db.commit()
+    db.refresh(user)
+    log_admin_action(current_user, "demote-user", note=f"target_user_id={user.id}")
+    return {"message": "Admin rights removed.", "user": serialize_admin_user(user)}
+
+
 @app.get("/admin/claims")
 def admin_list_claims(
     _: User = Depends(require_admin_user),
@@ -739,6 +941,102 @@ def admin_list_claims(
             if claim.item_id in item_map
         ]
     }
+
+
+@app.get("/admin/items")
+def admin_list_items(
+    _: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    items = db.query(LostFoundItem).order_by(LostFoundItem.created_at.desc()).all()
+    reporters = get_user_map(db, [item.submitted_by_user_id or 0 for item in items])
+    return {
+        "items": [
+            serialize_item(item, reporters.get(item.submitted_by_user_id or 0))
+            for item in items
+        ]
+    }
+
+
+@app.get("/admin/ai-inspection")
+def admin_ai_inspection(
+    _: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    logs = db.query(AIInspectionLog).order_by(AIInspectionLog.created_at.desc()).all()
+    users = get_user_map(db, [log.user_id or 0 for log in logs])
+    return {
+        "logs": [
+            serialize_ai_inspection(log, users.get(log.user_id or 0))
+            for log in logs
+        ]
+    }
+
+
+@app.delete("/admin/items/{item_id}")
+def admin_delete_item(
+    item_id: int,
+    current_user: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    item = fetch_item_or_404(db, item_id)
+    if item.image_path and item.image_path.startswith("/uploads/"):
+        upload_path = BASE_DIR / item.image_path.lstrip("/")
+        if upload_path.exists():
+            upload_path.unlink()
+    db.query(ItemQuery).filter(ItemQuery.item_id == item.id).delete()
+    db.query(Claim).filter(Claim.item_id == item.id).delete()
+    db.delete(item)
+    db.commit()
+    log_admin_action(current_user, "delete-item", item=item, note=f"title={item.title}")
+    return {"message": "Item deleted."}
+
+
+@app.delete("/admin/users/{user_id}")
+def admin_delete_user(
+    user_id: int,
+    current_user: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if user.id == current_user.id:
+        raise HTTPException(status_code=409, detail="Admin cannot delete their own account.")
+    ensure_target_is_manageable(current_user, user, action="delete")
+    if user.is_admin:
+        admin_count = db.query(User).filter(User.is_admin.is_(True)).count()
+        if admin_count <= 1:
+            raise HTTPException(status_code=409, detail="Cannot delete the last admin user.")
+
+    db.query(LostFoundItem).filter(LostFoundItem.submitted_by_user_id == user.id).update(
+        {LostFoundItem.submitted_by_user_id: None},
+        synchronize_session=False,
+    )
+    db.query(UserSession).filter(UserSession.user_id == user.id).delete()
+    db.query(AIInspectionLog).filter(AIInspectionLog.user_id == user.id).delete()
+    db.query(ItemQuery).filter(ItemQuery.user_id == user.id).delete()
+    db.query(Claim).filter(Claim.user_id == user.id).delete()
+    db.delete(user)
+    db.commit()
+    log_admin_action(current_user, "delete-user", note=f"deleted_user_id={user_id}")
+    return {"message": "User deleted."}
+
+
+@app.delete("/admin/claims/{claim_id}")
+def admin_delete_claim(
+    claim_id: int,
+    current_user: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    claim = fetch_claim_or_404(db, claim_id)
+    if claim.status == "approved":
+        raise HTTPException(status_code=409, detail="Approved claims cannot be deleted.")
+
+    db.delete(claim)
+    db.commit()
+    log_admin_action(current_user, "delete-claim", claim=claim, note=f"claim_status={claim.status}")
+    return {"message": "Claim deleted."}
 
 
 @app.post("/admin/claims/{claim_id}/approve")
@@ -843,13 +1141,41 @@ def create_query(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _ = fetch_item_or_404(db, item_id)
+    item = fetch_item_or_404(db, item_id)
+    moderation = moderate_request(
+        db,
+        current_user=current_user,
+        route=f"/items/{item_id}/query",
+        input_text=payload.message,
+    )
+    if not moderation.get("allowed", False):
+        return blocked_response(str(moderation.get("reason", "Query was blocked.")))
     message = moderate_field(payload.message, "Query message", min_meaningful_chars=6, max_chars=220)
-    item_query = ItemQuery(item_id=item_id, user_id=current_user.id, message=message)
+    item_query = ItemQuery(item_id=item_id, user_id=current_user.id, role="user", message=message)
+    system_query = ItemQuery(
+        item_id=item_id,
+        user_id=current_user.id,
+        role="system",
+        message=build_query_response(item),
+    )
     db.add(item_query)
+    db.add(system_query)
     db.commit()
     db.refresh(item_query)
-    return {"message": "Query posted.", "query": serialize_query(item_query, current_user)}
+    db.refresh(system_query)
+    queries = (
+        db.query(ItemQuery)
+        .filter(ItemQuery.item_id == item_id)
+        .order_by(ItemQuery.created_at.asc(), ItemQuery.id.asc())
+        .all()
+    )
+    authors = get_user_map(db, [query.user_id for query in queries])
+    return {
+        "message": "Query posted.",
+        "query": serialize_query(item_query, current_user),
+        "response": serialize_query(system_query, None),
+        "queries": [serialize_query(query, authors.get(query.user_id)) for query in queries],
+    }
 
 
 @app.get("/items/{item_id}/queries")
@@ -859,7 +1185,12 @@ def list_queries(
     db: Session = Depends(get_db),
 ) -> dict:
     _ = fetch_item_or_404(db, item_id)
-    queries = db.query(ItemQuery).filter(ItemQuery.item_id == item_id).order_by(ItemQuery.created_at.asc()).all()
+    queries = (
+        db.query(ItemQuery)
+        .filter(ItemQuery.item_id == item_id)
+        .order_by(ItemQuery.created_at.asc(), ItemQuery.id.asc())
+        .all()
+    )
     authors = get_user_map(db, [query.user_id for query in queries])
     return {"queries": [serialize_query(query, authors.get(query.user_id)) for query in queries]}
 

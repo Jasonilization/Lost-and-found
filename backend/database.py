@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, String, Text, create_engine, inspect, text
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -62,7 +62,6 @@ class LostFoundItem(Base):
                 cleaned.append(text_value)
         self.tags_json = json.dumps(cleaned[:6])
 
-
 class User(Base):
     __tablename__ = "users"
 
@@ -105,8 +104,41 @@ class ItemQuery(Base):
     id = Column(Integer, primary_key=True, index=True)
     item_id = Column(Integer, ForeignKey("lost_found_items.id"), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    role = Column(String, default="user", nullable=False)
     message = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AIInspectionLog(Base):
+    __tablename__ = "ai_inspection_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    route = Column(String, nullable=False, index=True)
+    input_text = Column(Text, nullable=False)
+    allowed = Column(Boolean, default=False, nullable=False)
+    reason = Column(Text, default="")
+    confidence = Column(Float, default=0.0)
+    keywords_json = Column(Text, default="[]")
+    raw_output = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    @property
+    def tags(self) -> list[str]:
+        try:
+            value = json.loads(self.keywords_json or "[]")
+            return [str(keyword) for keyword in value if str(keyword).strip()]
+        except json.JSONDecodeError:
+            return []
+
+    @tags.setter
+    def tags(self, value: list[str]) -> None:
+        cleaned = []
+        for keyword in value:
+            text_value = str(keyword).strip().lower()
+            if text_value and text_value not in cleaned:
+                cleaned.append(text_value)
+        self.keywords_json = json.dumps(cleaned[:12])
 
 
 def _add_column_if_missing(table_name: str, column_name: str, column_sql: str) -> None:
@@ -129,11 +161,23 @@ def _create_index_if_missing(index_name: str, table_name: str, column_name: str)
         connection.execute(text(f"CREATE INDEX {index_name} ON {table_name} ({column_name})"))
 
 
+def _drop_table_if_exists(table_name: str) -> None:
+    inspector = inspect(engine)
+    if table_name not in inspector.get_table_names():
+        return
+
+    with engine.begin() as connection:
+        connection.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
+
+
 def init_db() -> None:
+    _drop_table_if_exists("ai_routing_audits")
     Base.metadata.create_all(bind=engine)
     _add_column_if_missing("lost_found_items", "claimed", "BOOLEAN NOT NULL DEFAULT 0")
     _add_column_if_missing("lost_found_items", "submitted_by_user_id", "INTEGER")
     _add_column_if_missing("lost_found_items", "tag_source", "VARCHAR DEFAULT 'fallback-text'")
     _add_column_if_missing("users", "initials", "VARCHAR DEFAULT ''")
     _add_column_if_missing("users", "class_of", "INTEGER")
+    _add_column_if_missing("item_queries", "role", "VARCHAR NOT NULL DEFAULT 'user'")
     _create_index_if_missing("ix_lost_found_items_submitted_by_user_id", "lost_found_items", "submitted_by_user_id")
+    _create_index_if_missing("ix_ai_inspection_logs_user_id", "ai_inspection_logs", "user_id")

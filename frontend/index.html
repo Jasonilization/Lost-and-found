@@ -16,10 +16,10 @@
     </div>
 
     <section class="auth-screen" id="authScreen">
-      <div class="auth-card">
+      <div class="auth-card surface-card">
         <p class="eyebrow">School account</p>
         <h1>Lost and Found</h1>
-        <p class="hero-copy">Sign in to report lost items, claim matches, and ask questions on item cards.</p>
+        <p class="hero-copy">Sign in to report lost items, track claims, and move item questions into a dedicated chat page.</p>
 
         <div class="tab-switch" role="tablist" aria-label="Authentication tabs">
           <button class="tab-button is-active" id="loginTab" type="button">Login</button>
@@ -59,195 +59,291 @@
         <div>
           <p class="eyebrow">Local campus desk</p>
           <h2>Lost and Found</h2>
-          <p class="hero-copy">Reports stay local, tags are cached once, and queries help confirm ownership.</p>
+          <p class="hero-copy">Reports stay local, admin actions stay guarded, and item questions live in their own chat page.</p>
         </div>
         <div class="topbar-actions">
-          <div class="account-chip">
+          <div class="account-chip surface-card">
             <p class="account-name" id="accountName"></p>
             <p class="account-meta" id="accountMeta"></p>
           </div>
+          <label class="theme-select-wrap">
+            <span>Theme</span>
+            <select id="themeSelect" aria-label="Theme selector">
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+              <option value="aurora">Aurora</option>
+            </select>
+          </label>
           <button class="ghost-button" id="showReportsButton" type="button">Reports</button>
           <button class="ghost-button" id="showClaimsButton" type="button">My Claims</button>
+          <button class="ghost-button" id="showAccountButton" type="button">Account</button>
           <button class="ghost-button is-hidden" id="showAdminButton" type="button">Admin Panel</button>
           <button class="ghost-button danger-button" id="logoutButton" type="button">Logout</button>
         </div>
       </header>
 
-      <main class="shell">
-        <aside class="sidebar-stack">
-          <section class="panel upload-panel" aria-labelledby="uploadTitle">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">New report</p>
-                <h3 id="uploadTitle">Upload a lost item</h3>
-              </div>
-              <span class="static-pill">Lost only</span>
+      <main class="page-stack">
+        <section id="reportsSection">
+          <div class="shell">
+            <aside class="sidebar-stack">
+              <section class="panel upload-panel surface-card" aria-labelledby="uploadTitle">
+                <div class="section-heading">
+                  <div>
+                    <p class="eyebrow">New report</p>
+                    <h3 id="uploadTitle">Upload a lost item</h3>
+                  </div>
+                  <span class="static-pill">Lost only</span>
+                </div>
+
+                <form id="itemForm" class="item-form">
+                  <label class="drop-zone" id="dropZone">
+                    <input id="imageInput" type="file" accept="image/png,image/jpeg,image/jpg">
+                    <span class="drop-icon">+</span>
+                    <strong id="dropTitle">Drop image here</strong>
+                    <small id="dropHint">or choose a JPG/PNG file</small>
+                  </label>
+
+                  <div class="form-grid">
+                    <label>
+                      <span>Item title</span>
+                      <input id="titleInput" name="title" type="text" maxlength="80" placeholder="Blue water bottle" required>
+                    </label>
+                    <label>
+                      <span>Category</span>
+                      <select id="categoryInput" name="category" required></select>
+                    </label>
+                    <label>
+                      <span>Date</span>
+                      <input id="dateInput" name="event_date" type="date" required>
+                    </label>
+                    <label>
+                      <span>Display name</span>
+                      <input id="reporterInput" name="reporter_name" type="text" maxlength="80" placeholder="How this report should display" required>
+                    </label>
+                  </div>
+
+                  <fieldset class="location-box">
+                    <legend>Location</legend>
+                    <div class="location-choice">
+                      <label>
+                        <input type="radio" name="locationMode" value="predefined" checked>
+                        <span>Predefined location</span>
+                      </label>
+                      <label>
+                        <input type="radio" name="locationMode" value="room">
+                        <span>Room code</span>
+                      </label>
+                    </div>
+
+                    <div class="location-inputs">
+                      <label id="predefinedWrap">
+                        <span>Choose location</span>
+                        <select id="predefinedLocation"></select>
+                      </label>
+                      <label id="roomWrap" class="is-hidden">
+                        <span>Room code</span>
+                        <input id="roomCodeInput" type="text" maxlength="4" placeholder="S302" autocomplete="off">
+                      </label>
+                    </div>
+                    <p class="field-note" id="locationPreview">Library</p>
+                    <p class="error-text" id="locationError"></p>
+                  </fieldset>
+
+                  <label>
+                    <span>Description</span>
+                    <textarea id="descriptionInput" name="description" rows="4" maxlength="450" placeholder="Add color, brand, markings, or details that would help someone confirm it." required></textarea>
+                  </label>
+
+                  <div class="form-actions">
+                    <button class="primary-button" id="submitButton" type="submit">
+                      <span class="button-text">Save report</span>
+                      <span class="spinner" aria-hidden="true"></span>
+                    </button>
+                    <p class="status-message" id="uploadMessage"></p>
+                  </div>
+                  <div class="warning-card is-hidden" id="reportWarningCard"></div>
+                </form>
+              </section>
+            </aside>
+
+            <section class="content-stack">
+              <section class="panel browse-panel surface-card" aria-labelledby="galleryTitle">
+                <div class="section-heading">
+                  <div>
+                    <p class="eyebrow">Reports</p>
+                    <h3 id="galleryTitle">Live search</h3>
+                  </div>
+                  <button class="ghost-button" id="refreshButton" type="button">Refresh</button>
+                </div>
+
+                <div class="filters" role="search">
+                  <label class="search-field">
+                    <span>Search</span>
+                    <input id="searchInput" type="search" placeholder="Search description, tags, or location">
+                  </label>
+                  <label>
+                    <span>Category</span>
+                    <select id="categoryFilter"></select>
+                  </label>
+                  <label>
+                    <span>Location</span>
+                    <select id="locationFilter"></select>
+                  </label>
+                  <label>
+                    <span>Status</span>
+                    <select id="statusFilter"></select>
+                  </label>
+                </div>
+
+                <div class="list-meta">
+                  <span id="resultCount">0 reports</span>
+                  <span class="loading-line" id="searchLoading">Loading items...</span>
+                </div>
+                <div class="warning-card is-hidden" id="searchWarningCard"></div>
+
+                <div class="gallery" id="gallery"></div>
+              </section>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel page-panel surface-card is-hidden" id="claimsSection" aria-labelledby="claimsTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Claim history</p>
+              <h3 id="claimsTitle">My Claims</h3>
             </div>
+            <button class="ghost-button" id="refreshClaimsButton" type="button">Refresh claims</button>
+          </div>
+          <div class="list-meta">
+            <span id="claimsCount">0 claims</span>
+            <span class="loading-line" id="claimsLoading">Loading claims...</span>
+          </div>
+          <div class="claims-list" id="claimsList"></div>
+        </section>
 
-            <form id="itemForm" class="item-form">
-              <label class="drop-zone" id="dropZone">
-                <input id="imageInput" type="file" accept="image/png,image/jpeg,image/jpg">
-                <span class="drop-icon">+</span>
-                <strong id="dropTitle">Drop image here</strong>
-                <small id="dropHint">or choose a JPG/PNG file</small>
-              </label>
+        <section class="panel page-panel surface-card is-hidden" id="accountSection" aria-labelledby="accountTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Profile</p>
+              <h3 id="accountTitle">Account</h3>
+            </div>
+          </div>
 
-              <div class="form-grid">
-                <label>
-                  <span>Item title</span>
-                  <input id="titleInput" name="title" type="text" maxlength="80" placeholder="Blue water bottle" required>
-                </label>
-                <label>
-                  <span>Category</span>
-                  <select id="categoryInput" name="category" required></select>
-                </label>
-                <label>
-                  <span>Date</span>
-                  <input id="dateInput" name="event_date" type="date" required>
-                </label>
-                <label>
-                  <span>Display name</span>
-                  <input id="reporterInput" name="reporter_name" type="text" maxlength="80" placeholder="How this report should display" required>
-                </label>
+          <div class="account-page-grid">
+            <article class="account-hero surface-card">
+              <div class="account-avatar" id="accountAvatar">LF</div>
+              <div class="account-hero-copy">
+                <p class="account-name-large" id="accountPageName"></p>
+                <p class="account-role-line">
+                  <span class="status-badge is-safe is-hidden" id="accountAdminBadge">Admin</span>
+                  <span id="accountPageIdentity"></span>
+                </p>
               </div>
+            </article>
 
-              <fieldset class="location-box">
-                <legend>Location</legend>
-                <div class="location-choice">
-                  <label>
-                    <input type="radio" name="locationMode" value="predefined" checked>
-                    <span>Predefined location</span>
-                  </label>
-                  <label>
-                    <input type="radio" name="locationMode" value="room">
-                    <span>Room code</span>
-                  </label>
-                </div>
+            <article class="detail-card surface-card">
+              <p class="eyebrow">Details</p>
+              <dl class="info-list account-info-list" id="accountInfoList"></dl>
+            </article>
+          </div>
+        </section>
 
-                <div class="location-inputs">
-                  <label id="predefinedWrap">
-                    <span>Choose location</span>
-                    <select id="predefinedLocation"></select>
-                  </label>
-                  <label id="roomWrap" class="is-hidden">
-                    <span>Room code</span>
-                    <input id="roomCodeInput" type="text" maxlength="4" placeholder="S302" autocomplete="off">
-                  </label>
-                </div>
-                <p class="field-note" id="locationPreview">Library</p>
-                <p class="error-text" id="locationError"></p>
-              </fieldset>
+        <section class="panel page-panel surface-card is-hidden" id="adminSection" aria-labelledby="adminTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Admin tools</p>
+              <h3 id="adminTitle">Admin Panel</h3>
+            </div>
+            <button class="ghost-button" id="refreshAdminButton" type="button">Refresh admin data</button>
+          </div>
 
-              <label>
-                <span>Description</span>
-                <textarea id="descriptionInput" name="description" rows="4" maxlength="450" placeholder="Add color, brand, markings, or details that would help someone confirm it." required></textarea>
-              </label>
+          <div class="admin-toolbar">
+            <div class="tab-switch admin-tab-switch" role="tablist" aria-label="Admin tabs">
+              <button class="tab-button is-active" id="adminUsersTab" type="button">Users</button>
+              <button class="tab-button" id="adminItemsTab" type="button">Items</button>
+              <button class="tab-button" id="adminClaimsTab" type="button">Claims</button>
+              <button class="tab-button" id="adminInspectionTab" type="button">AI Inspection</button>
+            </div>
+            <div class="list-meta admin-meta">
+              <span id="adminSummary">0 users</span>
+              <span class="loading-line" id="adminLoading">Loading admin data...</span>
+            </div>
+          </div>
 
+          <p class="status-message" id="adminMessage"></p>
+
+          <div id="adminUsersPanel">
+            <div class="admin-table-wrap">
+              <table class="admin-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Username</th>
+                    <th>Identity</th>
+                    <th>Role</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="adminUsersBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="is-hidden" id="adminItemsPanel">
+            <div class="admin-claims-list" id="adminItemsList"></div>
+          </div>
+
+          <div class="is-hidden" id="adminClaimsPanel">
+            <div class="admin-claims-list" id="adminClaimsList"></div>
+          </div>
+
+          <div class="is-hidden" id="adminInspectionPanel">
+            <div class="admin-router-list" id="adminInspectionList"></div>
+          </div>
+        </section>
+
+        <section class="panel page-panel surface-card is-hidden" id="querySection" aria-labelledby="queryPageTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Item chat</p>
+              <h3 id="queryPageTitle">Query page</h3>
+            </div>
+            <button class="ghost-button" id="queryBackButton" type="button">Back to reports</button>
+          </div>
+
+          <article class="query-context-card surface-card" id="queryContextCard">
+            <div class="query-context-head">
+              <div>
+                <h4 id="queryItemTitle">Select an item</h4>
+                <p class="item-summary" id="queryItemMeta">Open an item chat from a report card.</p>
+              </div>
+              <span class="status-badge is-lost" id="queryItemStatus">Open</span>
+            </div>
+            <p class="item-description" id="queryItemDescription"></p>
+            <div class="tag-row" id="queryItemTags"></div>
+          </article>
+
+          <div class="query-page-shell">
+            <div class="query-list-meta">
+              <span id="queryItemContextLabel">Conversation</span>
+              <span class="loading-line" id="queryLoading">Loading conversation...</span>
+            </div>
+            <div class="warning-card is-hidden" id="queryWarningCard"></div>
+            <div class="query-page-messages" id="queryMessages"></div>
+            <p class="status-message is-hidden" id="queryEmptyState">No messages yet.</p>
+            <form class="query-page-form" id="queryForm">
+              <textarea id="queryInput" rows="3" maxlength="220" placeholder="Ask about this item"></textarea>
               <div class="form-actions">
-                <button class="primary-button" id="submitButton" type="submit">
-                  <span class="button-text">Save report</span>
+                <button class="primary-button" id="querySubmitButton" type="submit">
+                  <span class="button-text">Send message</span>
                   <span class="spinner" aria-hidden="true"></span>
                 </button>
-                <p class="status-message" id="uploadMessage"></p>
+                <p class="status-message" id="queryMessage"></p>
               </div>
             </form>
-          </section>
-        </aside>
-
-        <section class="content-stack">
-          <section class="panel browse-panel" id="reportsSection" aria-labelledby="galleryTitle">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">Reports</p>
-                <h3 id="galleryTitle">Live search</h3>
-              </div>
-              <button class="ghost-button" id="refreshButton" type="button">Refresh</button>
-            </div>
-
-            <div class="filters" role="search">
-              <label class="search-field">
-                <span>Search</span>
-                <input id="searchInput" type="search" placeholder="Search description, tags, or location">
-              </label>
-              <label>
-                <span>Category</span>
-                <select id="categoryFilter"></select>
-              </label>
-              <label>
-                <span>Location</span>
-                <select id="locationFilter"></select>
-              </label>
-              <label>
-                <span>Status</span>
-                <select id="statusFilter"></select>
-              </label>
-            </div>
-
-            <div class="list-meta">
-              <span id="resultCount">0 reports</span>
-              <span class="loading-line" id="searchLoading">Loading items...</span>
-            </div>
-
-            <div class="gallery" id="gallery"></div>
-          </section>
-
-          <section class="panel claims-panel is-hidden" id="claimsSection" aria-labelledby="claimsTitle">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">Claim history</p>
-                <h3 id="claimsTitle">My Claims</h3>
-              </div>
-              <button class="ghost-button" id="refreshClaimsButton" type="button">Refresh claims</button>
-            </div>
-            <div class="list-meta">
-              <span id="claimsCount">0 claims</span>
-              <span class="loading-line" id="claimsLoading">Loading claims...</span>
-            </div>
-            <div class="claims-list" id="claimsList"></div>
-          </section>
-
-          <section class="panel admin-panel is-hidden" id="adminSection" aria-labelledby="adminTitle">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">Admin tools</p>
-                <h3 id="adminTitle">Admin Panel</h3>
-              </div>
-              <button class="ghost-button" id="refreshAdminButton" type="button">Refresh admin data</button>
-            </div>
-
-            <div class="admin-toolbar">
-              <div class="tab-switch admin-tab-switch" role="tablist" aria-label="Admin tabs">
-                <button class="tab-button is-active" id="adminUsersTab" type="button">Users</button>
-                <button class="tab-button" id="adminClaimsTab" type="button">Claims</button>
-              </div>
-              <div class="list-meta admin-meta">
-                <span id="adminSummary">0 users</span>
-                <span class="loading-line" id="adminLoading">Loading admin data...</span>
-              </div>
-            </div>
-
-            <p class="status-message" id="adminMessage"></p>
-
-            <div id="adminUsersPanel">
-              <div class="admin-table-wrap">
-                <table class="admin-table">
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Initials</th>
-                      <th>Class of</th>
-                      <th>Created</th>
-                    </tr>
-                  </thead>
-                  <tbody id="adminUsersBody"></tbody>
-                </table>
-              </div>
-            </div>
-
-            <div class="is-hidden" id="adminClaimsPanel">
-              <div class="admin-claims-list" id="adminClaimsList"></div>
-            </div>
-          </section>
+          </div>
         </section>
       </main>
     </div>
@@ -309,26 +405,9 @@
           <dl class="info-list"></dl>
           <div class="card-actions">
             <button class="primary-button card-button" type="button" data-claim-button>Claim item</button>
-            <button class="ghost-button card-button" type="button" data-query-toggle>Queries</button>
+            <button class="ghost-button card-button" type="button" data-open-query-button>Open chat</button>
             <button class="ghost-button card-button" type="button" data-mark-claimed-button>Mark as Claimed</button>
           </div>
-          <section class="query-panel is-hidden" data-query-panel>
-            <div class="query-head">
-              <h4>Queries</h4>
-              <span class="loading-line" data-query-loading>Loading queries...</span>
-            </div>
-            <div class="query-list" data-query-list></div>
-            <form class="query-form" data-query-form>
-              <textarea data-query-input rows="2" maxlength="220" placeholder="Has anyone seen this?"></textarea>
-              <div class="query-actions">
-                <button class="primary-button small-button" type="submit" data-query-submit>
-                  <span class="button-text">Post query</span>
-                  <span class="spinner" aria-hidden="true"></span>
-                </button>
-                <p class="status-message" data-query-message></p>
-              </div>
-            </form>
-          </section>
         </div>
       </article>
     </template>
