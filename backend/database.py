@@ -43,6 +43,14 @@ class LostFoundItem(Base):
     tag_source = Column(String, default="fallback-text")
     submitted_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     claimed = Column(Boolean, default=False, nullable=False)
+    evidence_details = Column(Text, default="")
+    evidence_images_json = Column(Text, default="[]")
+    evidence_summary = Column(Text, default="")
+    evidence_inconsistencies = Column(Text, default="")
+    evidence_missing_info = Column(Text, default="")
+    evidence_validity = Column(String, default="Needs review")
+    review_status = Column(String, default="needs-review", index=True)
+    review_notes = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     @property
@@ -62,6 +70,23 @@ class LostFoundItem(Base):
                 cleaned.append(text_value)
         self.tags_json = json.dumps(cleaned[:6])
 
+    @property
+    def evidence_images(self) -> list[str]:
+        try:
+            value = json.loads(self.evidence_images_json or "[]")
+            return [str(path) for path in value if str(path).strip()]
+        except json.JSONDecodeError:
+            return []
+
+    @evidence_images.setter
+    def evidence_images(self, value: list[str]) -> None:
+        cleaned = []
+        for path in value:
+            text_value = str(path).strip()
+            if text_value and text_value not in cleaned:
+                cleaned.append(text_value)
+        self.evidence_images_json = json.dumps(cleaned[:6])
+
 class User(Base):
     __tablename__ = "users"
 
@@ -71,6 +96,7 @@ class User(Base):
     initials = Column(String, default="")
     class_of = Column(Integer, nullable=True)
     is_admin = Column(Boolean, default=False, nullable=False)
+    avatar_path = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -121,6 +147,13 @@ class AIInspectionLog(Base):
     confidence = Column(Float, default=0.0)
     keywords_json = Column(Text, default="[]")
     raw_output = Column(Text, default="")
+    feature = Column(String, default="moderation", index=True)
+    prompt_text = Column(Text, default="")
+    output_text = Column(Text, default="")
+    model_name = Column(String, default="")
+    model_size = Column(String, default="")
+    fallback_triggered = Column(Boolean, default=False, nullable=False)
+    request_metadata_json = Column(Text, default="{}")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     @property
@@ -139,6 +172,29 @@ class AIInspectionLog(Base):
             if text_value and text_value not in cleaned:
                 cleaned.append(text_value)
         self.keywords_json = json.dumps(cleaned[:12])
+
+    @property
+    def request_metadata(self) -> dict:
+        try:
+            value = json.loads(self.request_metadata_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+
+    @request_metadata.setter
+    def request_metadata(self, value: dict) -> None:
+        self.request_metadata_json = json.dumps(value or {})
+
+
+class QueryMessage(Base):
+    __tablename__ = "query_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    item_id = Column(Integer, ForeignKey("lost_found_items.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    role = Column(String, default="user", nullable=False)
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 def _add_column_if_missing(table_name: str, column_name: str, column_sql: str) -> None:
@@ -176,8 +232,26 @@ def init_db() -> None:
     _add_column_if_missing("lost_found_items", "claimed", "BOOLEAN NOT NULL DEFAULT 0")
     _add_column_if_missing("lost_found_items", "submitted_by_user_id", "INTEGER")
     _add_column_if_missing("lost_found_items", "tag_source", "VARCHAR DEFAULT 'fallback-text'")
+    _add_column_if_missing("lost_found_items", "evidence_details", "TEXT DEFAULT ''")
+    _add_column_if_missing("lost_found_items", "evidence_images_json", "TEXT DEFAULT '[]'")
+    _add_column_if_missing("lost_found_items", "evidence_summary", "TEXT DEFAULT ''")
+    _add_column_if_missing("lost_found_items", "evidence_inconsistencies", "TEXT DEFAULT ''")
+    _add_column_if_missing("lost_found_items", "evidence_missing_info", "TEXT DEFAULT ''")
+    _add_column_if_missing("lost_found_items", "evidence_validity", "VARCHAR DEFAULT 'Needs review'")
+    _add_column_if_missing("lost_found_items", "review_status", "VARCHAR DEFAULT 'needs-review'")
+    _add_column_if_missing("lost_found_items", "review_notes", "TEXT DEFAULT ''")
     _add_column_if_missing("users", "initials", "VARCHAR DEFAULT ''")
     _add_column_if_missing("users", "class_of", "INTEGER")
+    _add_column_if_missing("users", "avatar_path", "VARCHAR")
     _add_column_if_missing("item_queries", "role", "VARCHAR NOT NULL DEFAULT 'user'")
+    _add_column_if_missing("ai_inspection_logs", "feature", "VARCHAR DEFAULT 'moderation'")
+    _add_column_if_missing("ai_inspection_logs", "prompt_text", "TEXT DEFAULT ''")
+    _add_column_if_missing("ai_inspection_logs", "output_text", "TEXT DEFAULT ''")
+    _add_column_if_missing("ai_inspection_logs", "model_name", "VARCHAR DEFAULT ''")
+    _add_column_if_missing("ai_inspection_logs", "model_size", "VARCHAR DEFAULT ''")
+    _add_column_if_missing("ai_inspection_logs", "fallback_triggered", "BOOLEAN NOT NULL DEFAULT 0")
+    _add_column_if_missing("ai_inspection_logs", "request_metadata_json", "TEXT DEFAULT '{}'")
     _create_index_if_missing("ix_lost_found_items_submitted_by_user_id", "lost_found_items", "submitted_by_user_id")
+    _create_index_if_missing("ix_lost_found_items_review_status", "lost_found_items", "review_status")
     _create_index_if_missing("ix_ai_inspection_logs_user_id", "ai_inspection_logs", "user_id")
+    _create_index_if_missing("ix_ai_inspection_logs_feature", "ai_inspection_logs", "feature")

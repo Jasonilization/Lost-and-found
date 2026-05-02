@@ -66,7 +66,9 @@ const state = {
   currentView: "reports",
   currentItemId: Number(localStorage.getItem(CURRENT_ITEM_STORAGE_KEY) || "") || null,
   currentQueryItem: null,
+  queryItems: [],
   queryMessages: [],
+  querySuggestions: [],
   queryRequestToken: null,
 };
 
@@ -88,6 +90,7 @@ const serverStatus = document.querySelector("#serverStatus");
 const ollamaStatus = document.querySelector("#ollamaStatus");
 
 const showReportsButton = document.querySelector("#showReportsButton");
+const showQueryButton = document.querySelector("#showQueryButton");
 const showClaimsButton = document.querySelector("#showClaimsButton");
 const showAccountButton = document.querySelector("#showAccountButton");
 const showAdminButton = document.querySelector("#showAdminButton");
@@ -120,6 +123,7 @@ const locationPreview = document.querySelector("#locationPreview");
 const locationError = document.querySelector("#locationError");
 const dateInput = document.querySelector("#dateInput");
 const descriptionInput = document.querySelector("#descriptionInput");
+const evidenceDetailsInput = document.querySelector("#evidenceDetailsInput");
 const uploadMessage = document.querySelector("#uploadMessage");
 const reportWarningCard = document.querySelector("#reportWarningCard");
 const submitButton = document.querySelector("#submitButton");
@@ -143,6 +147,9 @@ const accountPageName = document.querySelector("#accountPageName");
 const accountPageIdentity = document.querySelector("#accountPageIdentity");
 const accountAdminBadge = document.querySelector("#accountAdminBadge");
 const accountInfoList = document.querySelector("#accountInfoList");
+const profileImageInput = document.querySelector("#profileImageInput");
+const profileImageButton = document.querySelector("#profileImageButton");
+const profileImageMessage = document.querySelector("#profileImageMessage");
 
 const refreshAdminButton = document.querySelector("#refreshAdminButton");
 const adminUsersTab = document.querySelector("#adminUsersTab");
@@ -162,6 +169,8 @@ const adminClaimsList = document.querySelector("#adminClaimsList");
 const adminInspectionList = document.querySelector("#adminInspectionList");
 
 const queryBackButton = document.querySelector("#queryBackButton");
+const queryItemSelect = document.querySelector("#queryItemSelect");
+const refreshQueryItemsButton = document.querySelector("#refreshQueryItemsButton");
 const queryItemTitle = document.querySelector("#queryItemTitle");
 const queryItemMeta = document.querySelector("#queryItemMeta");
 const queryItemStatus = document.querySelector("#queryItemStatus");
@@ -541,8 +550,39 @@ function userAvatarLabel(user) {
   return source.slice(0, 2).toUpperCase();
 }
 
+function initialsFromText(value, fallback = "LF") {
+  const text = String(value || "").trim();
+  if (!text) return fallback;
+  return text
+    .split(/\s+/)
+    .map((part) => part[0] || "")
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || fallback;
+}
+
+function applyAvatar(element, imageUrl, fallbackText) {
+  element.textContent = fallbackText;
+  if (imageUrl) {
+    element.style.backgroundImage = `url("${imageUrl}")`;
+    element.style.color = "transparent";
+  } else {
+    element.style.backgroundImage = "";
+    element.style.color = "";
+  }
+}
+
+function createMiniAvatar(label, imageUrl = "") {
+  const avatar = document.createElement("span");
+  avatar.className = "mini-avatar";
+  applyAvatar(avatar, imageUrl, initialsFromText(label, "LF"));
+  return avatar;
+}
+
 function findItemById(itemId) {
-  return state.items.find((item) => item.id === itemId) || null;
+  return state.queryItems.find((item) => item.id === itemId)
+    || state.items.find((item) => item.id === itemId)
+    || null;
 }
 
 function buildHash(section, itemId = null) {
@@ -582,6 +622,7 @@ function navigateTo(section, itemId = null) {
 function updateTopbarState() {
   const toggle = (button, active) => button.classList.toggle("is-active", active);
   toggle(showReportsButton, state.currentView === "reports");
+  toggle(showQueryButton, state.currentView === "query");
   toggle(showClaimsButton, state.currentView === "claims");
   toggle(showAccountButton, state.currentView === "account");
   toggle(showAdminButton, state.currentView === "admin");
@@ -679,7 +720,7 @@ async function checkBackend() {
     serverStatus.classList.add("is-online");
     serverStatus.classList.remove("is-offline");
 
-    ollamaStatus.textContent = data.ollama_message || `Ollama status at ${data.ollama_url}`;
+    ollamaStatus.textContent = `${data.ollama_message || `Ollama status at ${data.ollama_url}`} • Model ${data.ai_chat_model || data.ollama_text_model || "unknown"}`;
     ollamaStatus.classList.add(data.ollama_available ? "is-online" : "is-offline");
     ollamaStatus.classList.remove(data.ollama_available ? "is-offline" : "is-online");
   } catch (error) {
@@ -729,6 +770,9 @@ async function loadItems() {
     const data = await apiFetch(`/items${suffix ? `?${suffix}` : ""}`);
     state.items = data.items || [];
     renderItems(state.items);
+    if (state.currentView === "query") {
+      renderQueryItemSelector(state.currentQueryItem?.id || state.currentItemId || null);
+    }
   } catch (error) {
     setWarningCard(searchWarningCard, error.message);
     gallery.replaceChildren();
@@ -740,6 +784,16 @@ async function loadItems() {
     logClientError("loading items failed", error);
   } finally {
     setLoadingLine(searchLoading, false);
+  }
+}
+
+async function loadQueryItemOptions() {
+  try {
+    const data = await apiFetch("/items");
+    state.queryItems = data.items || [];
+    renderQueryItemSelector(state.currentQueryItem?.id || state.currentItemId || null);
+  } catch (error) {
+    logClientError("loading query item options failed", error);
   }
 }
 
@@ -791,7 +845,13 @@ function renderItems(items) {
     const markClaimedButton = card.querySelector("[data-mark-claimed-button]");
 
     title.textContent = item.title || "Untitled item";
-    summary.textContent = item.ai_summary || `Tags cached via ${item.tag_source || "local tagging"}.`;
+    const reporterLine = document.createElement("span");
+    reporterLine.className = "person-line";
+    reporterLine.append(
+      createMiniAvatar(item.reporter_identity || item.reporter_name || "Reporter", item.reporter_avatar_url || ""),
+      document.createTextNode(item.ai_summary || `Evidence: ${item.evidence_summary || "Awaiting review"}`),
+    );
+    summary.replaceChildren(reporterLine);
     description.textContent = item.description || "";
 
     const statusLabel = itemStatusLabel(item);
@@ -824,6 +884,8 @@ function renderItems(items) {
     addInfo(info, "Category", item.category);
     addInfo(info, "Location", item.location);
     addInfo(info, "Date", item.event_date);
+    addInfo(info, "Evidence", item.evidence_validity);
+    addInfo(info, "Review", item.review_status);
     addInfo(info, "Created", formatDateTime(item.created_at));
 
     claimButton.disabled = item.claimed;
@@ -864,7 +926,7 @@ function renderClaims(claims) {
     const reason = card.querySelector(".claim-history-reason");
     const info = card.querySelector(".info-list");
 
-    title.textContent = claim.item?.title || `Item #${claim.item_id}`;
+    title.textContent = claim.item?.title || "Unavailable item";
     meta.textContent = `${claim.user_identity || "User"} • Submitted ${formatDateTime(claim.timestamp)}`;
     status.textContent = titleCase(claim.status);
     status.classList.add(statusBadgeClass(claim.status));
@@ -884,7 +946,7 @@ function renderClaims(claims) {
 function renderAccount() {
   if (!state.user) return;
 
-  accountAvatar.textContent = userAvatarLabel(state.user);
+  applyAvatar(accountAvatar, state.user.avatar_url || "", userAvatarLabel(state.user));
   accountPageName.textContent = userDisplayName(state.user);
   accountPageIdentity.textContent = `@${state.user.username}`;
   accountAdminBadge.classList.toggle("is-hidden", !currentUserCanAdmin());
@@ -941,19 +1003,28 @@ function renderAdminUsers(users) {
 
   users.forEach((user) => {
     const row = document.createElement("tr");
-    const values = [
-      user.id,
-      user.username,
-      user.identity || `${user.initials || "-"} / ${user.class_of || "-"}`,
-      user.is_admin ? "Admin" : "User",
-      formatDateTime(user.created_at),
-    ];
+    const idCell = document.createElement("td");
+    idCell.textContent = String(user.id || "-");
 
-    values.forEach((value) => {
-      const cell = document.createElement("td");
-      cell.textContent = String(value || "-");
-      row.append(cell);
-    });
+    const usernameCell = document.createElement("td");
+    const usernameLine = document.createElement("div");
+    usernameLine.className = "person-line";
+    usernameLine.append(
+      createMiniAvatar(user.identity || user.username || "User", user.avatar_url || ""),
+      document.createTextNode(user.username || "-"),
+    );
+    usernameCell.append(usernameLine);
+
+    const identityCell = document.createElement("td");
+    identityCell.textContent = user.identity || `${user.initials || "-"} / ${user.class_of || "-"}`;
+
+    const roleCell = document.createElement("td");
+    roleCell.textContent = user.is_admin ? "Admin" : "User";
+
+    const createdCell = document.createElement("td");
+    createdCell.textContent = formatDateTime(user.created_at) || "-";
+
+    row.append(idCell, usernameCell, identityCell, roleCell, createdCell);
 
     const actions = document.createElement("td");
     const wrap = document.createElement("div");
@@ -1006,7 +1077,7 @@ function renderAdminItems(items) {
     head.className = "admin-claim-head";
     const headText = document.createElement("div");
     const title = document.createElement("h4");
-    title.textContent = item.title || `Item #${item.id}`;
+    title.textContent = item.title || "Unavailable item";
     const meta = document.createElement("p");
     meta.className = "admin-claim-meta";
     meta.textContent = `${item.category || "Category"} • ${item.location || "Location"} • ${formatDateTime(item.created_at)}`;
@@ -1023,16 +1094,40 @@ function renderAdminItems(items) {
     addInfo(info, "ID", item.id);
     addInfo(info, "Reporter", item.reporter_identity || item.reporter_name || "");
     addInfo(info, "Description", item.description || "");
+    addInfo(info, "Evidence", item.evidence_summary || "");
+    addInfo(info, "Missing info", item.evidence_missing_info || "");
+    addInfo(info, "Inconsistencies", item.evidence_inconsistencies || "");
+    addInfo(info, "Validity", item.evidence_validity || "");
+    addInfo(info, "Review", item.review_status || "");
     addInfo(info, "Tags", (item.tags || []).join(", "));
 
     const actions = document.createElement("div");
     actions.className = "card-actions";
+
+    const approveButton = document.createElement("button");
+    approveButton.className = "primary-button card-button";
+    approveButton.type = "button";
+    approveButton.textContent = "Approve";
+    approveButton.addEventListener("click", () => handleAdminItemReview(item.id, "approved"));
+
+    const rejectButton = document.createElement("button");
+    rejectButton.className = "ghost-button card-button";
+    rejectButton.type = "button";
+    rejectButton.textContent = "Reject";
+    rejectButton.addEventListener("click", () => handleAdminItemReview(item.id, "rejected"));
+
+    const incompleteButton = document.createElement("button");
+    incompleteButton.className = "ghost-button card-button";
+    incompleteButton.type = "button";
+    incompleteButton.textContent = "Needs info";
+    incompleteButton.addEventListener("click", () => handleAdminItemReview(item.id, "incomplete"));
+
     const deleteButton = document.createElement("button");
     deleteButton.className = "ghost-button card-button danger-button";
     deleteButton.type = "button";
     deleteButton.textContent = "Delete item";
     deleteButton.addEventListener("click", () => handleAdminDelete(`/admin/items/${item.id}`, `Delete item #${item.id}?`));
-    actions.append(deleteButton);
+    actions.append(approveButton, rejectButton, incompleteButton, deleteButton);
 
     card.append(head, info, actions);
     adminItemsList.append(card);
@@ -1062,7 +1157,7 @@ function renderAdminClaims(claims) {
 
     const headText = document.createElement("div");
     const title = document.createElement("h4");
-    title.textContent = claim.item?.title || `Item #${claim.item_id}`;
+    title.textContent = claim.item?.title || "Unavailable item";
     const meta = document.createElement("p");
     meta.className = "admin-claim-meta";
     meta.textContent = `User #${claim.user?.id || claim.user_id} • ${claim.user_identity || "User"} • Submitted ${formatDateTime(claim.timestamp)}`;
@@ -1156,13 +1251,32 @@ function renderAIInspection(logs) {
 
     const info = document.createElement("dl");
     info.className = "info-list";
+    addInfo(info, "Feature", log.feature || "");
     addInfo(info, "Decision", log.allowed ? "Allowed" : "Blocked");
     addInfo(info, "Reason", log.reason || "");
+    addInfo(info, "Model", `${log.model_name || "Unknown"} ${log.model_size ? `(${log.model_size})` : ""}`.trim());
+    addInfo(info, "Fallback", log.fallback_triggered ? "Yes" : "No");
     addInfo(info, "Tags", (log.tags || []).join(", "));
     addInfo(info, "Confidence", `${Math.round((log.confidence || 0) * 100)}%`);
-    addInfo(info, "Raw output", log.raw_output || "");
+    addInfo(info, "Metadata", JSON.stringify(log.request_metadata || {}));
 
-    card.append(head, reason, info);
+    const promptBlock = document.createElement("div");
+    promptBlock.className = "admin-debug-block";
+    const promptLabel = document.createElement("strong");
+    promptLabel.textContent = "Raw AI prompt";
+    const promptText = document.createElement("pre");
+    promptText.textContent = log.prompt_text || log.input_text || "";
+    promptBlock.append(promptLabel, promptText);
+
+    const outputBlock = document.createElement("div");
+    outputBlock.className = "admin-debug-block";
+    const outputLabel = document.createElement("strong");
+    outputLabel.textContent = "Raw AI output";
+    const outputText = document.createElement("pre");
+    outputText.textContent = log.output_text || log.raw_output || "";
+    outputBlock.append(outputLabel, outputText);
+
+    card.append(head, reason, info, promptBlock, outputBlock);
     adminInspectionList.append(card);
   });
 }
@@ -1262,17 +1376,50 @@ async function handleAdminUserRoleAction(user, action) {
   }
 }
 
+async function handleAdminItemReview(itemId, status) {
+  const notes = window.prompt(`Optional notes for marking this item as ${status}:`, "") || "";
+  setMessage(adminMessage, `Updating item review to ${status}...`);
+  try {
+    const data = await apiFetch(`/admin/items/${itemId}/review`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status, notes }),
+    });
+    setMessage(adminMessage, data.message || "Item review updated.");
+    await Promise.all([loadAdminData(), loadItems()]);
+  } catch (error) {
+    setMessage(adminMessage, error.message, true);
+    logClientError("admin item review failed", error, { itemId, status });
+  }
+}
+
 function setQueryComposerEnabled(enabled, placeholder = "Ask about the selected item") {
   queryInput.disabled = !enabled;
   querySubmitButton.disabled = !enabled;
   queryInput.placeholder = placeholder;
 }
 
+function renderQueryItemSelector(selectedItemId = null) {
+  const previousValue = selectedItemId ? String(selectedItemId) : "";
+  queryItemSelect.replaceChildren(new Option("General inquiry", ""));
+  state.queryItems.forEach((item) => {
+    const label = [item.title, item.category, item.location].filter(Boolean).join(" • ");
+    queryItemSelect.append(new Option(label || "Untitled report", String(item.id)));
+  });
+  queryItemSelect.value = previousValue;
+}
+
+function setCurrentQueryItem(item) {
+  state.currentQueryItem = item || null;
+  persistCurrentItemId(item?.id || null);
+  console.log("[Query] selected item", state.currentQueryItem);
+}
+
 function clearQueryState() {
   state.queryRequestToken = null;
-  state.currentQueryItem = null;
+  setCurrentQueryItem(null);
   state.queryMessages = [];
-  persistCurrentItemId(null);
+  state.querySuggestions = [];
   queryInput.value = "";
   queryMessages.replaceChildren();
   queryItemTags.replaceChildren();
@@ -1285,15 +1432,16 @@ function clearQueryState() {
 
 function renderQuerySelectionState() {
   clearQueryState();
-  queryItemTitle.textContent = "Select an item to inquire about";
+  queryItemSelect.value = "";
+  queryItemTitle.textContent = "General inquiry";
   queryItemMeta.textContent = "Ask about a lost item that hasn't been reported yet.";
-  queryItemDescription.textContent = "Choose a report card first to open its item-specific chat.";
-  queryItemStatus.textContent = "Waiting";
+  queryItemDescription.textContent = "You can ask general questions without selecting an item, or choose a specific report for item-aware chat.";
+  queryItemStatus.textContent = "General";
   queryItemStatus.className = "status-badge is-lost";
-  queryItemContextLabel.textContent = "Conversation";
+  queryItemContextLabel.textContent = "General conversation";
   queryEmptyState.textContent = "Select an item to inquire about";
   queryEmptyState.classList.remove("is-hidden");
-  setQueryComposerEnabled(false, "Select an item before sending a message");
+  setQueryComposerEnabled(true, "Ask about recent reports, locations, or lost items");
 }
 
 function renderQueryErrorState(message) {
@@ -1311,49 +1459,37 @@ function renderQueryErrorState(message) {
   setQueryComposerEnabled(false, "This item is unavailable");
 }
 
-function buildQuerySuggestions(item) {
-  if (!item || !item.title || !item.category) {
-    return [];
+function fallbackQuerySuggestions(item = null) {
+  if (!item) {
+    return [
+      "What items were found today?",
+      "Has anyone reported a lost phone?",
+      "Which locations have the most recent reports?",
+      "How do I claim an item?",
+    ];
   }
 
-  const suggestions = [];
-  const description = String(item.description || "").trim();
-  const category = String(item.category || "").trim().toLowerCase();
-  const location = String(item.location || "").trim();
-  const detailSnippet = description
-    .replace(/\s+/g, " ")
-    .split(/[.!?]/)
-    .map((part) => part.trim())
-    .find(Boolean);
-
-  if (location) {
-    suggestions.push(`Where around ${location} was this item found?`);
-  } else {
-    suggestions.push("Where was this item found?");
-  }
-
-  suggestions.push("When was it reported?");
-  suggestions.push("How can I claim this item?");
-
-  if (detailSnippet) {
-    suggestions.push(`Does it match this detail: ${detailSnippet.slice(0, 72)}${detailSnippet.length > 72 ? "..." : ""}?`);
-  }
-
-  suggestions.push(`Has anyone shared more details about this ${category}?`);
-
-  return [...new Set(suggestions)].slice(0, 5);
+  return [
+    `Where was ${item.title || "this item"} found?`,
+    "When was it reported?",
+    "What evidence was included with this report?",
+    "How can I claim this item?",
+  ];
 }
 
-function renderQuerySuggestions(item) {
-  const suggestions = buildQuerySuggestions(item);
+function renderQuerySuggestions(suggestions = [], item = null) {
+  const nextSuggestions = Array.isArray(suggestions) && suggestions.length
+    ? suggestions
+    : fallbackQuerySuggestions(item);
+  state.querySuggestions = nextSuggestions;
   querySuggestions.replaceChildren();
 
-  if (!suggestions.length) {
+  if (!nextSuggestions.length) {
     querySuggestions.classList.add("is-hidden");
     return;
   }
 
-  suggestions.forEach((suggestion) => {
+  nextSuggestions.forEach((suggestion) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "ghost-button small-button";
@@ -1371,23 +1507,26 @@ function renderQuerySuggestions(item) {
 }
 
 function renderQueryContext(item) {
-  if (!item || !item.id || !item.title || !item.category || !item.location) {
+  if (!item) {
+    renderQuerySelectionState();
+    return;
+  }
+  if (!item.id || !item.title || !item.category || !item.location) {
     throw new Error("This item is missing required data for the query page.");
   }
 
-  state.currentQueryItem = item;
-  persistCurrentItemId(item.id);
+  setCurrentQueryItem(item);
+  queryItemSelect.value = String(item.id);
 
   queryItemTitle.textContent = item.title;
   queryItemMeta.textContent = `${item.category} • ${item.location} • ${formatDateTime(item.created_at)}`;
-  queryItemDescription.textContent = item.description || "";
+  queryItemDescription.textContent = item.evidence_summary || item.description || "";
   queryItemStatus.textContent = itemStatusLabel(item);
   queryItemStatus.className = "status-badge";
   queryItemStatus.classList.add(itemStatusClass(item));
   queryItemContextLabel.textContent = `Conversation for ${item.title}`;
   queryEmptyState.textContent = "No messages yet.";
   renderTags(queryItemTags, item.tags || []);
-  renderQuerySuggestions(item);
   setQueryComposerEnabled(true, "Ask about this item");
 }
 
@@ -1400,15 +1539,20 @@ function renderQueryMessages(messages) {
     const isSystem = entry.role === "system";
     bubble.className = `query-bubble ${isSystem ? "is-system" : "is-user"}`;
 
+    const metaRow = document.createElement("div");
+    metaRow.className = "query-meta-row";
+    metaRow.append(createMiniAvatar(entry.user_identity || (isSystem ? "System" : "User"), entry.avatar_url || ""));
+
     const meta = document.createElement("p");
     meta.className = "query-meta";
     meta.textContent = `${entry.user_identity || (isSystem ? "System" : "User")} • ${formatDateTime(entry.created_at)}`;
+    metaRow.append(meta);
 
     const text = document.createElement("p");
     text.className = "query-text";
     text.textContent = entry.message || "";
 
-    bubble.append(meta, text);
+    bubble.append(metaRow, text);
     queryMessages.append(bubble);
   });
 
@@ -1417,28 +1561,41 @@ function renderQueryMessages(messages) {
   });
 }
 
+function handleQueryItemSelection() {
+  const nextItemId = Number(queryItemSelect.value) || null;
+  const nextItem = nextItemId ? findItemById(nextItemId) : null;
+  state.currentQueryItem = nextItem;
+  persistCurrentItemId(nextItemId);
+  console.log("[Query] selector changed", { nextItemId, nextItem });
+  navigateTo("query", nextItemId);
+}
+
 async function loadQueryPage(itemId) {
   const requestToken = {};
   state.queryRequestToken = requestToken;
   setLoadingLine(queryLoading, true);
   setMessage(queryMessage, "");
   setWarningCard(queryWarningCard, "");
+  await loadQueryItemOptions();
+  renderQueryItemSelector(itemId);
   queryMessages.replaceChildren();
   queryEmptyState.classList.add("is-hidden");
   querySuggestions.replaceChildren();
   querySuggestions.classList.add("is-hidden");
   queryInput.value = "";
 
-  if (!itemId) {
-    renderQuerySelectionState();
-    return;
-  }
-
   try {
-    const [itemData, queryData] = await Promise.all([
-      apiFetch(`/items/${itemId}`),
-      apiFetch(`/items/${itemId}/queries`),
-    ]);
+    const hasItem = Boolean(itemId);
+    console.log("[Query] loading page", { selectedItemId: itemId || null, mode: hasItem ? "item" : "general" });
+    const [itemData, queryData] = await Promise.all(hasItem
+      ? [
+          apiFetch(`/items/${itemId}`),
+          apiFetch(`/items/${itemId}/queries`),
+        ]
+      : [
+          Promise.resolve({ item: null }),
+          apiFetch("/query"),
+        ]);
     if (state.queryRequestToken !== requestToken || state.currentView !== "query") {
       return;
     }
@@ -1447,6 +1604,7 @@ async function loadQueryPage(itemId) {
     renderQueryContext(item);
     state.queryMessages = messages;
     renderQueryMessages(messages);
+    renderQuerySuggestions(queryData?.suggestions || [], item);
     setLoadingLine(queryLoading, false);
   } catch (error) {
     if (state.queryRequestToken !== requestToken || state.currentView !== "query") {
@@ -1461,11 +1619,6 @@ async function loadQueryPage(itemId) {
 async function submitQuery(event) {
   event.preventDefault();
   const itemId = state.currentQueryItem?.id || null;
-  if (!itemId) {
-    renderQuerySelectionState();
-    setMessage(queryMessage, "Select an item before sending a message.", true);
-    return;
-  }
 
   const value = queryInput.value.trim();
   if (value.length < 6) {
@@ -1478,7 +1631,9 @@ async function submitQuery(event) {
   setMessage(queryMessage, "Sending message...");
   setWarningCard(queryWarningCard, "");
   try {
-    const data = await apiFetch(`/items/${itemId}/query`, {
+    const path = itemId ? `/items/${itemId}/query` : "/query";
+    console.log("[Query] submitting", { selectedItem: state.currentQueryItem, itemId, path });
+    const data = await apiFetch(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: value }),
@@ -1486,6 +1641,7 @@ async function submitQuery(event) {
     queryInput.value = "";
     state.queryMessages = Array.isArray(data.queries) ? data.queries : [];
     renderQueryMessages(state.queryMessages);
+    renderQuerySuggestions(data.suggestions || [], state.currentQueryItem);
     setMessage(queryMessage, data.response?.message || data.message || "Message sent.");
     await loadItems();
   } catch (error) {
@@ -1600,6 +1756,7 @@ async function submitReport(event) {
       reporter_name: reporterInput.value.trim(),
       title: titleInput.value.trim(),
       description: descriptionInput.value.trim(),
+      evidence_details: evidenceDetailsInput.value.trim(),
       location: location.value,
       secondary_location: location.meta,
       category: categoryInput.value,
@@ -1647,6 +1804,39 @@ async function submitReport(event) {
     logClientError("submitting report failed", error);
   } finally {
     setButtonLoading(submitButton, false);
+  }
+}
+
+async function uploadProfileImage() {
+  const file = profileImageInput.files?.[0];
+  if (!file) {
+    setMessage(profileImageMessage, "Choose an image first.", true);
+    return;
+  }
+
+  setButtonLoading(profileImageButton, true);
+  setMessage(profileImageMessage, "Uploading profile image...");
+  try {
+    const data = await apiFetch("/account/profile-image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: file.name,
+        content_type: file.type || "application/octet-stream",
+        data: await readFileAsDataUrl(file),
+      }),
+    });
+    state.user = data.user || state.user;
+    renderAccount();
+    accountName.textContent = userDisplayName(state.user);
+    accountMeta.textContent = currentUserCanAdmin() ? "Admin access" : `@${state.user.username}`;
+    setMessage(profileImageMessage, data.message || "Profile image updated.");
+    await Promise.all([loadItems(), currentUserCanAdmin() ? loadAdminData() : Promise.resolve()]);
+  } catch (error) {
+    setMessage(profileImageMessage, error.message, true);
+    logClientError("uploading profile image failed", error);
+  } finally {
+    setButtonLoading(profileImageButton, false);
   }
 }
 
@@ -1742,6 +1932,7 @@ function logout() {
   clearSession();
   resetPreviewUrls();
   state.items = [];
+  state.queryItems = [];
   state.claims = [];
   state.adminUsers = [];
   state.adminItems = [];
@@ -1763,6 +1954,7 @@ function logout() {
   setWarningCard(searchWarningCard, "");
   setWarningCard(queryWarningCard, "");
   setMessage(queryMessage, "");
+  setMessage(profileImageMessage, "");
   form.reset();
   updateReportSubmitState();
   switchAdminTab("users");
@@ -1778,6 +1970,7 @@ function bindEvents() {
   registerTab.addEventListener("click", () => setAuthView("register"));
 
   showReportsButton.addEventListener("click", () => navigateTo("reports"));
+  showQueryButton.addEventListener("click", () => navigateTo("query"));
   showClaimsButton.addEventListener("click", () => navigateTo("claims"));
   showAccountButton.addEventListener("click", () => navigateTo("account"));
   showAdminButton.addEventListener("click", () => navigateTo("admin"));
@@ -1788,6 +1981,7 @@ function bindEvents() {
   form.addEventListener("submit", submitReport);
   imageInput.addEventListener("change", () => selectFile(imageInput.files[0]));
   refreshButton.addEventListener("click", loadItems);
+  refreshQueryItemsButton.addEventListener("click", loadQueryItemOptions);
   refreshClaimsButton.addEventListener("click", loadClaims);
   refreshAdminButton.addEventListener("click", loadAdminData);
   adminUsersTab.addEventListener("click", () => switchAdminTab("users"));
@@ -1800,6 +1994,7 @@ function bindEvents() {
   locationFilter.addEventListener("change", loadItems);
   predefinedLocation.addEventListener("change", updateLocationUi);
   roomCodeInput.addEventListener("input", updateLocationUi);
+  queryItemSelect.addEventListener("change", handleQueryItemSelection);
   queryForm.addEventListener("submit", submitQuery);
   queryInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -1811,6 +2006,7 @@ function bindEvents() {
   claimForm.addEventListener("submit", submitClaim);
   cancelClaimButton.addEventListener("click", closeClaimModal);
   closeClaimDialog.addEventListener("click", closeClaimModal);
+  profileImageButton.addEventListener("click", uploadProfileImage);
 
   window.addEventListener("hashchange", () => {
     if (state.user) {

@@ -4,6 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>School Lost and Found</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="apple-touch-icon" href="favicon.svg">
     <link rel="stylesheet" href="style.css">
   </head>
   <body>
@@ -75,6 +77,7 @@
             </select>
           </label>
           <button class="ghost-button" id="showReportsButton" type="button">Reports</button>
+          <button class="ghost-button" id="showQueryButton" type="button">Query</button>
           <button class="ghost-button" id="showClaimsButton" type="button">My Claims</button>
           <button class="ghost-button" id="showAccountButton" type="button">Account</button>
           <button class="ghost-button is-hidden" id="showAdminButton" type="button">Admin Panel</button>
@@ -152,6 +155,11 @@
                   <label>
                     <span>Description</span>
                     <textarea id="descriptionInput" name="description" rows="4" maxlength="450" placeholder="Add color, brand, markings, or details that would help someone confirm it." required></textarea>
+                  </label>
+
+                  <label>
+                    <span>Supporting evidence</span>
+                    <textarea id="evidenceDetailsInput" name="evidence_details" rows="3" maxlength="320" placeholder="Optional: ownership clues, identifying marks, timeline, or extra evidence."></textarea>
                   </label>
 
                   <div class="form-actions">
@@ -239,6 +247,12 @@
                   <span class="status-badge is-safe is-hidden" id="accountAdminBadge">Admin</span>
                   <span id="accountPageIdentity"></span>
                 </p>
+                <div class="form-actions">
+                  <label class="ghost-button" for="profileImageInput">Choose profile image</label>
+                  <input id="profileImageInput" type="file" accept="image/png,image/jpeg,image/jpg" class="is-hidden">
+                  <button class="primary-button" id="profileImageButton" type="button">Upload photo</button>
+                </div>
+                <p class="status-message" id="profileImageMessage"></p>
               </div>
             </article>
 
@@ -314,10 +328,22 @@
           </div>
 
           <article class="query-context-card surface-card" id="queryContextCard">
+            <div class="form-grid query-selector-grid">
+              <label>
+                <span>Select item</span>
+                <select id="queryItemSelect">
+                  <option value="">General inquiry</option>
+                </select>
+              </label>
+              <div class="query-selector-actions">
+                <span class="field-note">Use general inquiry for questions without a selected item.</span>
+                <button class="ghost-button" id="refreshQueryItemsButton" type="button">Refresh item list</button>
+              </div>
+            </div>
             <div class="query-context-head">
               <div>
                 <h4 id="queryItemTitle">Select an item</h4>
-                <p class="item-summary" id="queryItemMeta">Open an item chat from a report card.</p>
+                <p class="item-summary" id="queryItemMeta">Select a report or use general inquiry mode.</p>
               </div>
               <span class="status-badge is-lost" id="queryItemStatus">Open</span>
             </div>

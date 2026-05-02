@@ -11,8 +11,8 @@ from typing import Optional
 import requests
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_TEXT_MODEL = os.getenv("OLLAMA_TEXT_MODEL", "smollm2:135m")
-OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "3"))
+OLLAMA_TEXT_MODEL = os.getenv("OLLAMA_TEXT_MODEL", "llama3:8b")
+OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "20"))
 OLLAMA_HEALTH_TIMEOUT = float(os.getenv("OLLAMA_HEALTH_TIMEOUT", "2"))
 
 TAGGING_PROMPT_TEMPLATE = "Generate 3 short tags for this item: {description}"

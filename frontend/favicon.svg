@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Lost and Found icon">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#67c49c"/>
+      <stop offset="100%" stop-color="#6ea7d7"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="18" fill="#101612"/>
+  <path d="M18 23c0-6.6 5.4-12 12-12h4c6.6 0 12 5.4 12 12v5h3c2.2 0 4 1.8 4 4v16c0 2.2-1.8 4-4 4H15c-2.2 0-4-1.8-4-4V32c0-2.2 1.8-4 4-4h3v-5Zm8 5h12v-5c0-2.2-1.8-4-4-4h-4c-2.2 0-4 1.8-4 4v5Z" fill="url(#g)"/>
+  <circle cx="32" cy="39" r="5" fill="#101612"/>
+</svg>

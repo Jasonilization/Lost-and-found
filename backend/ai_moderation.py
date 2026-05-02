@@ -170,6 +170,7 @@ def _fallback_decision(text: str, fallback_reason: str, raw_output: str = "") ->
         "confidence": 0.5,
         "tags": _extract_keywords(text),
         "raw_output": _format_raw_log(raw_output, None, fallback_reason),
+        "fallback_triggered": True,
     }
 
 
@@ -200,6 +201,7 @@ def _finalize_decision(text: str, parsed: dict, raw_output: str) -> dict:
         "confidence": confidence,
         "tags": _extract_keywords(text),
         "raw_output": _format_raw_log(raw_output, parsed, None),
+        "fallback_triggered": False,
     }
 
 

@@ -19,8 +19,9 @@ from pydantic import BaseModel
 from sqlalchemy import case, or_
 from sqlalchemy.orm import Session
 
+from backend.ai_assistant import AI_MODEL, analyze_evidence, generate_query_package, model_size_label
 from backend.ai_moderation import classify_user_input
-from backend.database import AIInspectionLog, Claim, ItemQuery, LostFoundItem, SessionLocal, User, UserSession, init_db
+from backend.database import AIInspectionLog, Claim, ItemQuery, LostFoundItem, QueryMessage, SessionLocal, User, UserSession, init_db
 from backend.moderation import validate_class_of, validate_initials, validate_text_input
 from backend.ollama_tagger import OLLAMA_URL, build_search_text, fallback_tags, get_ollama_status, tag_item
 
@@ -93,6 +94,7 @@ STATUSES = ["Open", "Matched", "Claimed", "Archived"]
 REPORT_TYPES = ["lost", "found"]
 DEFAULT_REPORT_TYPE = "lost"
 CLAIM_STATUSES = ["pending", "approved", "rejected"]
+REVIEW_STATUSES = ["approved", "rejected", "incomplete", "needs-review"]
 REPORT_SUBMISSION_COOLDOWN = timedelta(hours=1)
 
 
@@ -131,6 +133,7 @@ class ReportPayload(BaseModel):
     description: str
     location: str
     category: str
+    evidence_details: str = ""
     student_id: str = ""
     contact_info: str = ""
     secondary_location: str = ""
@@ -138,6 +141,17 @@ class ReportPayload(BaseModel):
     time_slot: str = "Unknown"
     event_date: Optional[date] = None
     image: Optional[ReportImagePayload] = None
+
+
+class ProfileImagePayload(BaseModel):
+    filename: str
+    content_type: Optional[str] = None
+    data: str
+
+
+class AdminItemReviewPayload(BaseModel):
+    status: str
+    notes: str = ""
 
 
 @app.on_event("startup")
@@ -320,6 +334,7 @@ def serialize_item(item: LostFoundItem, reporter: Optional[User]) -> dict:
         "report_type": item.report_type,
         "reporter_name": item.reporter_name,
         "reporter_identity": user_identity(reporter),
+        "reporter_avatar_url": reporter.avatar_path if reporter and reporter.avatar_path else "",
         "student_id": item.student_id,
         "contact_info": item.contact_info,
         "title": item.title,
@@ -337,6 +352,14 @@ def serialize_item(item: LostFoundItem, reporter: Optional[User]) -> dict:
         "tag_source": item.tag_source,
         "image_path": item.image_path,
         "image_url": item.image_path,
+        "evidence_details": item.evidence_details,
+        "evidence_images": item.evidence_images,
+        "evidence_summary": item.evidence_summary,
+        "evidence_inconsistencies": item.evidence_inconsistencies,
+        "evidence_missing_info": item.evidence_missing_info,
+        "evidence_validity": item.evidence_validity,
+        "review_status": item.review_status,
+        "review_notes": item.review_notes,
         "created_at": item.created_at.isoformat() if item.created_at else None,
     }
 
@@ -349,6 +372,7 @@ def serialize_user(user: User) -> dict:
         "class_of": user.class_of,
         "identity": user_identity(user),
         "is_admin": bool(user.is_admin),
+        "avatar_url": user.avatar_path or "",
         "created_at": user.created_at.isoformat() if user.created_at else None,
     }
 
@@ -378,6 +402,7 @@ def serialize_admin_user(user: User) -> dict:
         "class_of": user.class_of,
         "identity": user_identity(user),
         "is_admin": bool(user.is_admin),
+        "avatar_url": user.avatar_path or "",
         "created_at": user.created_at.isoformat() if user.created_at else None,
     }
 
@@ -393,7 +418,7 @@ def serialize_admin_claim(claim: Claim, item: LostFoundItem, claimant: Optional[
     return claim_data
 
 
-def serialize_query(query: ItemQuery, author: Optional[User]) -> dict:
+def serialize_query(query: QueryMessage, author: Optional[User]) -> dict:
     role = (query.role or "user").strip().lower() or "user"
     return {
         "id": query.id,
@@ -401,6 +426,7 @@ def serialize_query(query: ItemQuery, author: Optional[User]) -> dict:
         "user_id": query.user_id,
         "role": role,
         "user_identity": "System" if role == "system" else user_identity(author),
+        "avatar_url": "" if role == "system" else (author.avatar_path if author and author.avatar_path else ""),
         "message": query.message,
         "created_at": query.created_at.isoformat() if query.created_at else None,
     }
@@ -409,6 +435,7 @@ def serialize_query(query: ItemQuery, author: Optional[User]) -> dict:
 def serialize_ai_inspection(log: AIInspectionLog, user: Optional[User]) -> dict:
     return {
         "id": log.id,
+        "feature": log.feature,
         "route": log.route,
         "input_text": log.input_text,
         "allowed": bool(log.allowed),
@@ -416,6 +443,12 @@ def serialize_ai_inspection(log: AIInspectionLog, user: Optional[User]) -> dict:
         "confidence": float(log.confidence or 0.0),
         "tags": log.tags,
         "raw_output": log.raw_output,
+        "prompt_text": log.prompt_text,
+        "output_text": log.output_text,
+        "model_name": log.model_name,
+        "model_size": log.model_size,
+        "fallback_triggered": bool(log.fallback_triggered),
+        "request_metadata": log.request_metadata,
         "user_identity": user_identity(user),
         "created_at": log.created_at.isoformat() if log.created_at else None,
     }
@@ -435,6 +468,68 @@ def fetch_claim_or_404(db: Session, claim_id: int) -> Claim:
     return claim
 
 
+def list_catalog_items(db: Session, *, limit: int = 20) -> list[dict]:
+    items = (
+        db.query(LostFoundItem)
+        .order_by(LostFoundItem.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    reporters = get_user_map(db, [item.submitted_by_user_id or 0 for item in items])
+    return [serialize_item(item, reporters.get(item.submitted_by_user_id or 0)) for item in items]
+
+
+def get_query_messages_for_scope(db: Session, *, user_id: int, item_id: Optional[int]) -> list[QueryMessage]:
+    query = db.query(QueryMessage).filter(QueryMessage.user_id == user_id)
+    if item_id is None:
+        query = query.filter(QueryMessage.item_id.is_(None))
+    else:
+        query = query.filter(QueryMessage.item_id == item_id)
+    return query.order_by(QueryMessage.created_at.asc(), QueryMessage.id.asc()).all()
+
+
+def serialize_query_list(db: Session, queries: list[QueryMessage]) -> list[dict]:
+    authors = get_user_map(db, [query.user_id for query in queries])
+    return [serialize_query(query, authors.get(query.user_id)) for query in queries]
+
+
+def item_to_query_context(item: Optional[LostFoundItem], reporter: Optional[User]) -> Optional[dict]:
+    if not item:
+        return None
+    return serialize_item(item, reporter)
+
+
+def log_ai_package(
+    db: Session,
+    *,
+    current_user: Optional[User],
+    route: str,
+    input_text: str,
+    package: dict,
+    feature: str,
+) -> None:
+    log_ai_inspection(
+        db,
+        current_user=current_user,
+        route=route,
+        input_text=input_text,
+        decision={
+            "allowed": True,
+            "reason": package.get("reasoning_focus", "") or "AI response generated.",
+            "confidence": 1.0,
+            "tags": [],
+            "raw_output": package.get("output_text", ""),
+        },
+        feature=feature,
+        prompt_text=package.get("prompt_text", ""),
+        output_text=package.get("output_text", ""),
+        model_name=package.get("model_name", AI_MODEL),
+        model_size=package.get("model_size", model_size_label(AI_MODEL)),
+        fallback_triggered=bool(package.get("fallback_triggered")),
+        request_metadata=package.get("request_metadata", {}),
+    )
+
+
 def log_ai_inspection(
     db: Session,
     *,
@@ -442,6 +537,13 @@ def log_ai_inspection(
     route: str,
     input_text: str,
     decision: dict,
+    feature: str = "moderation",
+    prompt_text: str = "",
+    output_text: str = "",
+    model_name: str = "",
+    model_size: str = "",
+    fallback_triggered: bool = False,
+    request_metadata: Optional[dict] = None,
 ) -> AIInspectionLog:
     log = AIInspectionLog(
         user_id=current_user.id if current_user else None,
@@ -451,8 +553,15 @@ def log_ai_inspection(
         reason=str(decision.get("reason", "")).strip(),
         confidence=float(decision.get("confidence", 0.0) or 0.0),
         raw_output=str(decision.get("raw_output", "")).strip(),
+        feature=feature,
+        prompt_text=prompt_text,
+        output_text=output_text,
+        model_name=model_name,
+        model_size=model_size,
+        fallback_triggered=fallback_triggered,
     )
     log.tags = decision.get("tags", [])
+    log.request_metadata = request_metadata or {}
     db.add(log)
     db.commit()
     db.refresh(log)
@@ -473,6 +582,11 @@ def moderate_request(
         route=route,
         input_text=input_text,
         decision=decision,
+        feature="moderation",
+        model_name=AI_MODEL,
+        model_size=model_size_label(AI_MODEL),
+        fallback_triggered=bool(decision.get("fallback_triggered")),
+        request_metadata={"route": route},
     )
     return decision
 
@@ -506,6 +620,8 @@ def health() -> dict:
         "ollama_message": ollama_status["message"],
         "ollama_error": ollama_status.get("error", ""),
         "ollama_text_model": ollama_status.get("text_model", ""),
+        "ai_chat_model": AI_MODEL,
+        "ai_chat_model_size": model_size_label(AI_MODEL),
     }
 
 
@@ -559,6 +675,24 @@ def session_status(current_user: User = Depends(get_current_user)) -> dict:
     return {"user": serialize_user(current_user)}
 
 
+@app.post("/account/profile-image")
+def upload_profile_image(
+    payload: ProfileImagePayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    image = ReportImagePayload(filename=payload.filename, content_type=payload.content_type, data=payload.data)
+    avatar_path = decode_image_payload(image)
+    if current_user.avatar_path and current_user.avatar_path.startswith("/uploads/"):
+        old_path = BASE_DIR / current_user.avatar_path.lstrip("/")
+        if old_path.exists():
+            old_path.unlink()
+    current_user.avatar_path = avatar_path
+    db.commit()
+    db.refresh(current_user)
+    return {"message": "Profile image updated.", "user": serialize_user(current_user)}
+
+
 @app.get("/filters")
 def filters(_: User = Depends(get_current_user)) -> dict:
     return {
@@ -585,6 +719,7 @@ async def report_item(
             "title": payload.title,
             "location": payload.location,
             "category": payload.category,
+            "evidence_details": payload.evidence_details,
             "event_date": payload.event_date.isoformat() if payload.event_date else None,
             "has_image": bool(payload.image),
             "image_filename": payload.image.filename if payload.image else "",
@@ -605,6 +740,7 @@ async def report_item(
     reporter_name = moderate_field(reporter_name, "Reporter name", min_meaningful_chars=2, max_chars=80)
     title = moderate_field(payload.title, "Item title", min_meaningful_chars=3, max_chars=80)
     description = moderate_field(payload.description, "Item description", min_meaningful_chars=10, max_chars=450)
+    evidence_details = payload.evidence_details.strip()
     secondary_location = payload.secondary_location.strip()
     student_id = payload.student_id.strip()
     contact_info = payload.contact_info.strip()
@@ -635,6 +771,23 @@ async def report_item(
         report_logger.exception("AI tagging failed unexpectedly; using fallback tags.")
         ai_result = fallback_tags(title, description, category, color, location)
 
+    evidence_result = analyze_evidence(
+        title=title,
+        description=description,
+        category=category,
+        location=location,
+        evidence_details=evidence_details,
+        has_image=bool(image_path),
+    )
+    log_ai_package(
+        db,
+        current_user=current_user,
+        route="/items/report/evidence-analysis",
+        input_text=build_input_text(title, description, evidence_details, location),
+        package=evidence_result,
+        feature="evidence-analysis",
+    )
+
     tags = []
     for tag in ai_result.get("tags", []):
         value = str(tag).strip().lower()
@@ -657,6 +810,13 @@ async def report_item(
         tags=tags[:6],
         ai_summary=ai_result.get("summary", ""),
         image_path=image_path,
+        evidence_details=evidence_details,
+        evidence_summary=evidence_result.get("summary", ""),
+        evidence_inconsistencies=evidence_result.get("inconsistencies", ""),
+        evidence_missing_info=evidence_result.get("missing_info", ""),
+        evidence_validity=evidence_result.get("validity", "Needs review"),
+        review_status="needs-review",
+        review_notes="",
         search_text=build_search_text(
             title=title,
             description=description,
@@ -669,6 +829,7 @@ async def report_item(
         submitted_by_user_id=current_user.id,
         claimed=False,
     )
+    item.evidence_images = [image_path] if image_path else []
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -985,6 +1146,7 @@ def admin_delete_item(
         if upload_path.exists():
             upload_path.unlink()
     db.query(ItemQuery).filter(ItemQuery.item_id == item.id).delete()
+    db.query(QueryMessage).filter(QueryMessage.item_id == item.id).delete()
     db.query(Claim).filter(Claim.item_id == item.id).delete()
     db.delete(item)
     db.commit()
@@ -1016,6 +1178,7 @@ def admin_delete_user(
     db.query(UserSession).filter(UserSession.user_id == user.id).delete()
     db.query(AIInspectionLog).filter(AIInspectionLog.user_id == user.id).delete()
     db.query(ItemQuery).filter(ItemQuery.user_id == user.id).delete()
+    db.query(QueryMessage).filter(QueryMessage.user_id == user.id).delete()
     db.query(Claim).filter(Claim.user_id == user.id).delete()
     db.delete(user)
     db.commit()
@@ -1134,6 +1297,135 @@ def mark_item_claimed(
     return {"message": "Item marked as claimed.", "item": serialize_item(item, reporter)}
 
 
+@app.post("/admin/items/{item_id}/review")
+def admin_review_item(
+    item_id: int,
+    payload: AdminItemReviewPayload,
+    current_user: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    if payload.status not in REVIEW_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid review status.")
+
+    item = fetch_item_or_404(db, item_id)
+    item.review_status = payload.status
+    item.review_notes = payload.notes.strip()
+    db.commit()
+    db.refresh(item)
+    log_admin_action(current_user, "review-item", item=item, note=f"review_status={item.review_status}")
+    reporter = db.query(User).filter(User.id == item.submitted_by_user_id).first() if item.submitted_by_user_id else None
+    return {"message": "Item review updated.", "item": serialize_item(item, reporter)}
+
+
+@app.get("/query")
+def list_general_queries(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    queries = get_query_messages_for_scope(db, user_id=current_user.id, item_id=None)
+    serialized_queries = serialize_query_list(db, queries)
+    package = generate_query_package(
+        user_message=serialized_queries[-1]["message"] if serialized_queries else "Show starter suggestions.",
+        item=None,
+        history=serialized_queries,
+        catalog_items=list_catalog_items(db),
+    )
+    log_ai_package(
+        db,
+        current_user=current_user,
+        route="/query/suggestions",
+        input_text=serialized_queries[-1]["message"] if serialized_queries else "Show starter suggestions.",
+        package=package,
+        feature="query-suggestions",
+    )
+    return {
+        "queries": serialized_queries,
+        "response": {"message": ""},
+        "suggestions": package.get("suggestions", []),
+    }
+
+
+@app.post("/query")
+def create_general_query(
+    payload: QueryPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    moderation = moderate_request(
+        db,
+        current_user=current_user,
+        route="/query",
+        input_text=payload.message,
+    )
+    if not moderation.get("allowed", False):
+        return blocked_response(str(moderation.get("reason", "Query was blocked.")))
+
+    message = moderate_field(payload.message, "Query message", min_meaningful_chars=6, max_chars=220)
+    existing_queries = get_query_messages_for_scope(db, user_id=current_user.id, item_id=None)
+    serialized_history = serialize_query_list(db, existing_queries)
+    package = generate_query_package(
+        user_message=message,
+        item=None,
+        history=serialized_history,
+        catalog_items=list_catalog_items(db),
+    )
+    log_ai_package(
+        db,
+        current_user=current_user,
+        route="/query",
+        input_text=message,
+        package=package,
+        feature="general-query",
+    )
+
+    user_query = QueryMessage(item_id=None, user_id=current_user.id, role="user", message=message)
+    system_query = QueryMessage(item_id=None, user_id=current_user.id, role="system", message=package["reply"])
+    db.add(user_query)
+    db.add(system_query)
+    db.commit()
+    db.refresh(user_query)
+    db.refresh(system_query)
+
+    queries = get_query_messages_for_scope(db, user_id=current_user.id, item_id=None)
+    return {
+        "queries": serialize_query_list(db, queries),
+        "response": {"message": package["reply"]},
+        "suggestions": package.get("suggestions", []),
+    }
+
+
+@app.get("/items/{item_id}/queries")
+def list_queries(
+    item_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    item = fetch_item_or_404(db, item_id)
+    reporter = get_item_reporter(db, item)
+    item_context = item_to_query_context(item, reporter)
+    queries = get_query_messages_for_scope(db, user_id=current_user.id, item_id=item_id)
+    serialized_queries = serialize_query_list(db, queries)
+    package = generate_query_package(
+        user_message=serialized_queries[-1]["message"] if serialized_queries else "Show starter suggestions.",
+        item=item_context,
+        history=serialized_queries,
+        catalog_items=list_catalog_items(db),
+    )
+    log_ai_package(
+        db,
+        current_user=current_user,
+        route=f"/items/{item_id}/queries/suggestions",
+        input_text=serialized_queries[-1]["message"] if serialized_queries else "Show starter suggestions.",
+        package=package,
+        feature="query-suggestions",
+    )
+    return {
+        "queries": serialized_queries,
+        "response": {"message": ""},
+        "suggestions": package.get("suggestions", []),
+    }
+
+
 @app.post("/items/{item_id}/query")
 def create_query(
     item_id: int,
@@ -1142,6 +1434,7 @@ def create_query(
     db: Session = Depends(get_db),
 ) -> dict:
     item = fetch_item_or_404(db, item_id)
+    reporter = get_item_reporter(db, item)
     moderation = moderate_request(
         db,
         current_user=current_user,
@@ -1150,49 +1443,39 @@ def create_query(
     )
     if not moderation.get("allowed", False):
         return blocked_response(str(moderation.get("reason", "Query was blocked.")))
+
     message = moderate_field(payload.message, "Query message", min_meaningful_chars=6, max_chars=220)
-    item_query = ItemQuery(item_id=item_id, user_id=current_user.id, role="user", message=message)
-    system_query = ItemQuery(
-        item_id=item_id,
-        user_id=current_user.id,
-        role="system",
-        message=build_query_response(item),
+    existing_queries = get_query_messages_for_scope(db, user_id=current_user.id, item_id=item_id)
+    serialized_history = serialize_query_list(db, existing_queries)
+    package = generate_query_package(
+        user_message=message,
+        item=item_to_query_context(item, reporter),
+        history=serialized_history,
+        catalog_items=list_catalog_items(db),
     )
-    db.add(item_query)
+    log_ai_package(
+        db,
+        current_user=current_user,
+        route=f"/items/{item_id}/query",
+        input_text=message,
+        package=package,
+        feature="item-query",
+    )
+
+    user_query = QueryMessage(item_id=item_id, user_id=current_user.id, role="user", message=message)
+    system_query = QueryMessage(item_id=item_id, user_id=current_user.id, role="system", message=package["reply"])
+    db.add(user_query)
     db.add(system_query)
     db.commit()
-    db.refresh(item_query)
+    db.refresh(user_query)
     db.refresh(system_query)
-    queries = (
-        db.query(ItemQuery)
-        .filter(ItemQuery.item_id == item_id)
-        .order_by(ItemQuery.created_at.asc(), ItemQuery.id.asc())
-        .all()
-    )
-    authors = get_user_map(db, [query.user_id for query in queries])
+
+    queries = get_query_messages_for_scope(db, user_id=current_user.id, item_id=item_id)
     return {
-        "message": "Query posted.",
-        "query": serialize_query(item_query, current_user),
-        "response": serialize_query(system_query, None),
-        "queries": [serialize_query(query, authors.get(query.user_id)) for query in queries],
+        "queries": serialize_query_list(db, queries),
+        "response": {"message": package["reply"]},
+        "suggestions": package.get("suggestions", []),
     }
-
-
-@app.get("/items/{item_id}/queries")
-def list_queries(
-    item_id: int,
-    _: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    _ = fetch_item_or_404(db, item_id)
-    queries = (
-        db.query(ItemQuery)
-        .filter(ItemQuery.item_id == item_id)
-        .order_by(ItemQuery.created_at.asc(), ItemQuery.id.asc())
-        .all()
-    )
-    authors = get_user_map(db, [query.user_id for query in queries])
-    return {"queries": [serialize_query(query, authors.get(query.user_id)) for query in queries]}
 
 
 app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")

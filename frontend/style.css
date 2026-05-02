@@ -1043,11 +1043,45 @@ textarea:focus {
   font-size: 1.9rem;
   font-weight: 800;
   letter-spacing: 0.04em;
+  background-size: cover;
+  background-position: center;
 }
 
 .account-hero-copy {
   display: grid;
   gap: var(--space-2);
+}
+
+.query-selector-grid {
+  align-items: end;
+}
+
+.query-selector-actions {
+  display: grid;
+  gap: var(--space-2);
+  align-self: stretch;
+}
+
+.mini-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--gradient-primary);
+  color: var(--text-inverse);
+  font-size: 0.78rem;
+  font-weight: 800;
+  flex: 0 0 auto;
+  background-size: cover;
+  background-position: center;
+}
+
+.person-line,
+.query-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .account-name-large {
@@ -1129,10 +1163,36 @@ textarea:focus {
   font-weight: 700;
 }
 
+.query-meta-row .query-meta {
+  margin: 0;
+}
+
 .query-text {
   color: var(--text-primary);
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+#querySuggestions .ghost-button {
+  min-width: 0;
+  text-align: left;
+  white-space: normal;
+}
+
+.admin-debug-block {
+  display: grid;
+  gap: 8px;
+  border: var(--line-width) solid var(--line-soft);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  background: var(--surface-soft);
+}
+
+.admin-debug-block pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-muted);
 }
 
 .claim-dialog {
