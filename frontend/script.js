@@ -67,6 +67,7 @@ const state = {
   currentItemId: Number(localStorage.getItem(CURRENT_ITEM_STORAGE_KEY) || "") || null,
   currentQueryItem: null,
   queryMessages: [],
+  queryRequestToken: null,
 };
 
 const authScreen = document.querySelector("#authScreen");
@@ -175,6 +176,7 @@ const queryMessage = document.querySelector("#queryMessage");
 const queryLoading = document.querySelector("#queryLoading");
 const queryWarningCard = document.querySelector("#queryWarningCard");
 const queryEmptyState = document.querySelector("#queryEmptyState");
+const querySuggestions = document.querySelector("#querySuggestions");
 
 const claimDialog = document.querySelector("#claimDialog");
 const claimForm = document.querySelector("#claimForm");
@@ -544,8 +546,8 @@ function findItemById(itemId) {
 }
 
 function buildHash(section, itemId = null) {
-  if (section === "query" && itemId) {
-    return `#query-${itemId}`;
+  if (section === "query") {
+    return itemId ? `#query-${itemId}` : "#query";
   }
   return `#${section}`;
 }
@@ -555,8 +557,11 @@ function readRoute() {
   if (!raw) {
     return { section: "reports", itemId: state.currentItemId };
   }
+  if (raw === "query") {
+    return { section: "query", itemId: null };
+  }
   if (raw.startsWith("query-")) {
-    const itemId = Number(raw.slice("query-".length)) || state.currentItemId;
+    const itemId = Number(raw.slice("query-".length)) || null;
     return { section: "query", itemId };
   }
   if (["reports", "claims", "account", "admin"].includes(raw)) {
@@ -596,6 +601,9 @@ async function activateRoute(route = readRoute()) {
   if (!state.user) return;
 
   const section = route.section || "reports";
+  if (section !== "query" && state.currentView === "query") {
+    clearQueryState();
+  }
   if (section === "claims") {
     switchSection("claims");
     await loadClaims();
@@ -620,13 +628,8 @@ async function activateRoute(route = readRoute()) {
   }
 
   if (section === "query") {
-    const itemId = route.itemId || state.currentItemId;
-    if (!itemId) {
-      navigateTo("reports");
-      return;
-    }
     switchSection("query");
-    await loadQueryPage(itemId);
+    await loadQueryPage(route.itemId || null);
     return;
   }
 
@@ -1259,18 +1262,133 @@ async function handleAdminUserRoleAction(user, action) {
   }
 }
 
+function setQueryComposerEnabled(enabled, placeholder = "Ask about the selected item") {
+  queryInput.disabled = !enabled;
+  querySubmitButton.disabled = !enabled;
+  queryInput.placeholder = placeholder;
+}
+
+function clearQueryState() {
+  state.queryRequestToken = null;
+  state.currentQueryItem = null;
+  state.queryMessages = [];
+  persistCurrentItemId(null);
+  queryInput.value = "";
+  queryMessages.replaceChildren();
+  queryItemTags.replaceChildren();
+  querySuggestions.replaceChildren();
+  querySuggestions.classList.add("is-hidden");
+  setWarningCard(queryWarningCard, "");
+  setMessage(queryMessage, "");
+  setLoadingLine(queryLoading, false);
+}
+
+function renderQuerySelectionState() {
+  clearQueryState();
+  queryItemTitle.textContent = "Select an item to inquire about";
+  queryItemMeta.textContent = "Ask about a lost item that hasn't been reported yet.";
+  queryItemDescription.textContent = "Choose a report card first to open its item-specific chat.";
+  queryItemStatus.textContent = "Waiting";
+  queryItemStatus.className = "status-badge is-lost";
+  queryItemContextLabel.textContent = "Conversation";
+  queryEmptyState.textContent = "Select an item to inquire about";
+  queryEmptyState.classList.remove("is-hidden");
+  setQueryComposerEnabled(false, "Select an item before sending a message");
+}
+
+function renderQueryErrorState(message) {
+  clearQueryState();
+  queryItemTitle.textContent = "Item unavailable";
+  queryItemMeta.textContent = "The selected item could not be loaded.";
+  queryItemDescription.textContent = "";
+  queryItemStatus.textContent = "Error";
+  queryItemStatus.className = "status-badge is-flagged";
+  queryItemContextLabel.textContent = "Conversation";
+  queryEmptyState.textContent = "Select another item to continue.";
+  queryEmptyState.classList.remove("is-hidden");
+  setWarningCard(queryWarningCard, message);
+  setMessage(queryMessage, message, true);
+  setQueryComposerEnabled(false, "This item is unavailable");
+}
+
+function buildQuerySuggestions(item) {
+  if (!item || !item.title || !item.category) {
+    return [];
+  }
+
+  const suggestions = [];
+  const description = String(item.description || "").trim();
+  const category = String(item.category || "").trim().toLowerCase();
+  const location = String(item.location || "").trim();
+  const detailSnippet = description
+    .replace(/\s+/g, " ")
+    .split(/[.!?]/)
+    .map((part) => part.trim())
+    .find(Boolean);
+
+  if (location) {
+    suggestions.push(`Where around ${location} was this item found?`);
+  } else {
+    suggestions.push("Where was this item found?");
+  }
+
+  suggestions.push("When was it reported?");
+  suggestions.push("How can I claim this item?");
+
+  if (detailSnippet) {
+    suggestions.push(`Does it match this detail: ${detailSnippet.slice(0, 72)}${detailSnippet.length > 72 ? "..." : ""}?`);
+  }
+
+  suggestions.push(`Has anyone shared more details about this ${category}?`);
+
+  return [...new Set(suggestions)].slice(0, 5);
+}
+
+function renderQuerySuggestions(item) {
+  const suggestions = buildQuerySuggestions(item);
+  querySuggestions.replaceChildren();
+
+  if (!suggestions.length) {
+    querySuggestions.classList.add("is-hidden");
+    return;
+  }
+
+  suggestions.forEach((suggestion) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ghost-button small-button";
+    button.textContent = suggestion;
+    button.addEventListener("click", () => {
+      if (queryInput.disabled) return;
+      queryInput.value = suggestion;
+      queryInput.focus();
+      queryInput.setSelectionRange(queryInput.value.length, queryInput.value.length);
+    });
+    querySuggestions.append(button);
+  });
+
+  querySuggestions.classList.remove("is-hidden");
+}
+
 function renderQueryContext(item) {
+  if (!item || !item.id || !item.title || !item.category || !item.location) {
+    throw new Error("This item is missing required data for the query page.");
+  }
+
   state.currentQueryItem = item;
   persistCurrentItemId(item.id);
 
-  queryItemTitle.textContent = item.title || `Item #${item.id}`;
-  queryItemMeta.textContent = `${item.category || "Category"} • ${item.location || "Location"} • ${formatDateTime(item.created_at)}`;
+  queryItemTitle.textContent = item.title;
+  queryItemMeta.textContent = `${item.category} • ${item.location} • ${formatDateTime(item.created_at)}`;
   queryItemDescription.textContent = item.description || "";
   queryItemStatus.textContent = itemStatusLabel(item);
   queryItemStatus.className = "status-badge";
   queryItemStatus.classList.add(itemStatusClass(item));
-  queryItemContextLabel.textContent = `Conversation for item #${item.id}`;
+  queryItemContextLabel.textContent = `Conversation for ${item.title}`;
+  queryEmptyState.textContent = "No messages yet.";
   renderTags(queryItemTags, item.tags || []);
+  renderQuerySuggestions(item);
+  setQueryComposerEnabled(true, "Ask about this item");
 }
 
 function renderQueryMessages(messages) {
@@ -1300,38 +1418,52 @@ function renderQueryMessages(messages) {
 }
 
 async function loadQueryPage(itemId) {
+  const requestToken = {};
+  state.queryRequestToken = requestToken;
   setLoadingLine(queryLoading, true);
   setMessage(queryMessage, "");
   setWarningCard(queryWarningCard, "");
+  queryMessages.replaceChildren();
+  queryEmptyState.classList.add("is-hidden");
+  querySuggestions.replaceChildren();
+  querySuggestions.classList.add("is-hidden");
+  queryInput.value = "";
+
+  if (!itemId) {
+    renderQuerySelectionState();
+    return;
+  }
 
   try {
     const [itemData, queryData] = await Promise.all([
       apiFetch(`/items/${itemId}`),
       apiFetch(`/items/${itemId}/queries`),
     ]);
-    const item = itemData.item;
-    const messages = queryData.queries || [];
+    if (state.queryRequestToken !== requestToken || state.currentView !== "query") {
+      return;
+    }
+    const item = itemData?.item || null;
+    const messages = Array.isArray(queryData?.queries) ? queryData.queries : [];
     renderQueryContext(item);
     state.queryMessages = messages;
     renderQueryMessages(messages);
+    setLoadingLine(queryLoading, false);
   } catch (error) {
-    setWarningCard(queryWarningCard, error.message);
-    renderQueryMessages([]);
-    queryItemTitle.textContent = "Item unavailable";
-    queryItemMeta.textContent = "The selected item could not be loaded.";
-    queryItemDescription.textContent = "";
-    queryItemTags.replaceChildren();
-    setMessage(queryMessage, error.message, true);
+    if (state.queryRequestToken !== requestToken || state.currentView !== "query") {
+      return;
+    }
+    renderQueryErrorState(error.message);
     logClientError("loading query page failed", error, { itemId });
-  } finally {
     setLoadingLine(queryLoading, false);
   }
 }
 
 async function submitQuery(event) {
   event.preventDefault();
-  if (!state.currentItemId) {
-    setMessage(queryMessage, "Choose an item before sending a message.", true);
+  const itemId = state.currentQueryItem?.id || null;
+  if (!itemId) {
+    renderQuerySelectionState();
+    setMessage(queryMessage, "Select an item before sending a message.", true);
     return;
   }
 
@@ -1346,20 +1478,20 @@ async function submitQuery(event) {
   setMessage(queryMessage, "Sending message...");
   setWarningCard(queryWarningCard, "");
   try {
-    const data = await apiFetch(`/items/${state.currentItemId}/query`, {
+    const data = await apiFetch(`/items/${itemId}/query`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: value }),
     });
     queryInput.value = "";
-    state.queryMessages = data.queries || [];
+    state.queryMessages = Array.isArray(data.queries) ? data.queries : [];
     renderQueryMessages(state.queryMessages);
     setMessage(queryMessage, data.response?.message || data.message || "Message sent.");
     await loadItems();
   } catch (error) {
     setMessage(queryMessage, error.message, true);
     setWarningCard(queryWarningCard, error.message);
-    logClientError("submitting query failed", error, { itemId: state.currentItemId });
+    logClientError("submitting query failed", error, { itemId });
   } finally {
     setButtonLoading(querySubmitButton, false);
   }

@@ -6,3 +6,4 @@
 2026-05-02 09:31:56,102 admin_id=1 admin_username=Jason action=delete-claim claim_id=5 item_id= note=claim_status=pending
 2026-05-02 09:31:59,273 admin_id=1 admin_username=Jason action=delete-claim claim_id=4 item_id= note=claim_status=rejected
 2026-05-02 09:32:56,077 admin_id=1 admin_username=Jason action=mark-item-claimed claim_id= item_id=12 note=item_status=Claimed
+2026-05-02 10:26:07,309 admin_id=1 admin_username=Jason action=delete-user claim_id= item_id= note=deleted_user_id=5
