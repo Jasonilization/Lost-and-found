@@ -7,3 +7,9 @@
 2026-05-02 09:31:59,273 admin_id=1 admin_username=Jason action=delete-claim claim_id=4 item_id= note=claim_status=rejected
 2026-05-02 09:32:56,077 admin_id=1 admin_username=Jason action=mark-item-claimed claim_id= item_id=12 note=item_status=Claimed
 2026-05-02 10:26:07,309 admin_id=1 admin_username=Jason action=delete-user claim_id= item_id= note=deleted_user_id=5
+2026-05-02 10:38:31,907 admin_id=1 admin_username=Jason action=mark-item-claimed claim_id= item_id=15 note=item_status=Claimed
+2026-05-02 10:38:45,547 admin_id=1 admin_username=Jason action=promote-user claim_id= item_id= note=target_user_id=4
+2026-05-02 10:38:49,048 admin_id=1 admin_username=Jason action=demote-user claim_id= item_id= note=target_user_id=4
+2026-05-02 10:41:12,244 admin_id=1 admin_username=Jason action=promote-user claim_id= item_id= note=target_user_id=4
+2026-05-02 10:41:15,622 admin_id=1 admin_username=Jason action=demote-user claim_id= item_id= note=target_user_id=4
+2026-05-02 10:41:36,903 admin_id=1 admin_username=Jason action=delete-item claim_id= item_id=10 note=title=I want to kill you
