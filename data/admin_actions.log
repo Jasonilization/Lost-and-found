@@ -78,3 +78,16 @@
 2026-05-03 15:57:09,382 route=/query user_id=1 username=Jason reason=Extremely low-effort input with under 6 meaningful characters content=this one right?
 2026-05-03 15:57:23,849 route=/query user_id=1 username=Jason reason=not a specific item report content=is this the water bottle your looking for? at libary
 2026-05-03 16:00:38,837 admin_id=1 admin_username=Jason action=approve-claim claim_id=3 item_id=4 note=claim_status=approved item_claimed=True
+2026-05-03 17:02:41,982 route=/items/report user_id=1 username=Jason reason=Repeated characters and obvious keyboard mash, low-effort input with under 6 meaningful characters content=blue water bottle testing testing testing everything dissapeared New Sports Hall Electronics
+2026-05-03 17:03:07,043 route=/items/report user_id=1 username=Jason reason=Lack of semantic content and unclear relevance to lost-and-found content=blue water bottle sports hall found New Sports Hall Electronics
+2026-05-03 17:13:00,988 route=/items/1/query user_id=1 username=student1 reason=Blocked content=bad ai chat
+2026-05-03 17:13:01,023 route=/query user_id=1 username=student1 reason=Blocked content=bad free chat
+2026-05-03 17:13:01,058 route=/items/1/claim user_id=1 username=student1 reason=Claim rejected because the provided details do not match the reported item closely enough. content=This is definitely mine because I used it in class. A blue metal bottle with a dent on the side. Sports Hall Blue metal dented bottle
+2026-05-03 17:13:55,346 route=/items/1/query user_id=1 username=student1 reason=Blocked content=bad ai chat
+2026-05-03 17:13:55,383 route=/query user_id=1 username=student1 reason=Blocked content=bad free chat
+2026-05-03 17:13:55,422 route=/items/1/claim user_id=1 username=student1 reason=Claim rejected because the provided details do not match the reported item closely enough. content=This is definitely mine because I used it in class. A blue metal bottle with a dent on the side. Sports Hall Blue metal dented bottle
+2026-05-03 17:14:46,287 route=/items/report user_id=1 username=Jason reason=Gibberish input content=fadsfdsfdsfds fdsafdsfasdfsd New Sports Hall Electronics
+2026-05-03 17:17:10,051 route=/query user_id=1 username=Jason reason=No semantic content related to lost-and-found content=what is aerobic respiration?
+2026-05-03 17:48:10,033 route=/items/1/query user_id=1 username=student1 reason=Blocked content=bad ai chat
+2026-05-03 17:48:10,072 route=/query user_id=1 username=student1 reason=Blocked content=bad free chat
+2026-05-03 17:48:10,111 route=/items/1/claim user_id=1 username=student1 reason=Claim rejected because the provided details do not match the reported item closely enough. content=This is definitely mine because I used it in class. A blue metal bottle with a dent on the side. Sports Hall Blue metal dented bottle

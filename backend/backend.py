@@ -5,6 +5,7 @@ import binascii
 import hashlib
 import hmac
 import logging
+import os
 import re
 import secrets
 import stat
@@ -49,6 +50,10 @@ LOG_DIR.mkdir(exist_ok=True)
 CLAIMS_LOG_PATH = LOG_DIR / "claims.log"
 ADMIN_LOG_PATH = LOG_DIR / "admin_actions.log"
 SECURITY_LOG_PATH = LOG_DIR / "security.log"
+BOOTSTRAP_ADMIN_ENV_KEYS = (
+    "ADMIN_USERNAME",
+    "ADMIN_PASSWORD",
+)
 
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
@@ -202,6 +207,8 @@ class AdminAbuseOverridePayload(BaseModel):
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
+    with SessionLocal() as db:
+        ensure_admin_user(db)
 
 
 def get_db():
@@ -217,6 +224,77 @@ def get_client_ip(request: Request) -> str:
     if forwarded_for:
         return forwarded_for.split(",", 1)[0].strip()
     return request.client.host if request.client else "unknown"
+
+
+def admin_count(db: Session) -> int:
+    return db.query(User).filter(User.is_admin.is_(True)).count()
+
+
+def bootstrap_admin_from_env(db: Session) -> Optional[User]:
+    username = os.getenv("ADMIN_USERNAME", "").strip()
+    password = os.getenv("ADMIN_PASSWORD", "").strip()
+
+    provided = {
+        key: bool(os.getenv(key, "").strip())
+        for key in BOOTSTRAP_ADMIN_ENV_KEYS
+    }
+    if not any(provided.values()):
+        return None
+    if not all(provided.values()):
+        missing = [key for key, value in provided.items() if not value]
+        security_log(
+            "bootstrap_admin_skipped",
+            level=logging.WARNING,
+            reason="missing_env",
+            missing=",".join(missing),
+        )
+        return None
+
+    if len(username) < 3 or len(password) < 6:
+        security_log(
+            "bootstrap_admin_skipped",
+            level=logging.WARNING,
+            reason="invalid_credentials_shape",
+        )
+        return None
+
+    existing_user = db.query(User).filter(User.username == username).first()
+    if existing_user:
+        if existing_user.is_admin:
+            return existing_user
+        security_log(
+            "bootstrap_admin_skipped",
+            level=logging.WARNING,
+            reason="username_conflict",
+            username=username,
+        )
+        return None
+
+    user = User(
+        username=username,
+        password_hash=hash_password(password),
+        initials="admin.user",
+        class_of=None,
+        is_admin=True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    security_log("bootstrap_admin_created", username=username)
+    return user
+
+
+def ensure_admin_user(db: Session) -> None:
+    if admin_count(db) > 0:
+        return
+    created = bootstrap_admin_from_env(db)
+    if created:
+        return
+    security_log(
+        "admin_bootstrap_pending",
+        level=logging.WARNING,
+        mode="env_admin_bootstrap_required",
+    )
 
 
 def security_log(event: str, *, level: int = logging.INFO, **details: object) -> None:
