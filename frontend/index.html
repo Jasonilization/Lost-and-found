@@ -377,6 +377,15 @@
             <p class="status-message is-hidden" id="queryEmptyState" data-i18n="query.noMessages">No messages yet.</p>
             <form class="query-page-form" id="queryForm">
               <div class="tag-row is-hidden" id="querySuggestions" aria-label="Suggested questions"></div>
+              <input id="queryFileInput" type="file" accept=".png,.jpg,.jpeg,.pdf,.txt,image/png,image/jpeg,application/pdf,text/plain" class="is-hidden">
+              <div class="query-upload-row">
+                <label class="ghost-button" for="queryFileInput" id="queryUploadButton">Attach file</label>
+                <div class="query-file-pill is-hidden" id="queryFileInfo">
+                  <span id="queryFileName"></span>
+                  <span id="queryFileSize"></span>
+                  <button class="icon-button" id="queryFileRemoveButton" type="button" aria-label="Remove selected file">×</button>
+                </div>
+              </div>
               <textarea id="queryInput" rows="3" maxlength="220" placeholder="Ask about this item" data-i18n-placeholder="query.askAboutItem"></textarea>
               <div class="form-actions">
                 <button class="primary-button" id="querySubmitButton" type="submit">

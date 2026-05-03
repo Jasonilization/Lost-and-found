@@ -185,6 +185,10 @@ button {
   cursor: pointer;
 }
 
+a {
+  color: inherit;
+}
+
 h1,
 h2,
 h3,
@@ -256,6 +260,40 @@ p {
   color: var(--text-muted);
   padding: 10px 14px;
   backdrop-filter: blur(12px);
+}
+
+.query-upload-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.query-file-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  padding: 10px 14px;
+  border: var(--line-width) solid var(--line-accent);
+  border-radius: 999px;
+  background: var(--surface-soft);
+}
+
+.query-file-pill span {
+  white-space: nowrap;
+}
+
+.query-attachment {
+  display: inline-flex;
+  margin-top: var(--space-2);
+  color: var(--accent-strong);
+  text-decoration: none;
+}
+
+.query-attachment:hover,
+.query-attachment:focus-visible {
+  text-decoration: underline;
 }
 
 .server-pill.is-online {

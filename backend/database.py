@@ -205,6 +205,10 @@ class QueryMessage(Base):
     message = Column(Text, nullable=False)
     chat_mode = Column(String, default="ai", nullable=False)
     language = Column(String, default="en", nullable=False)
+    attachment_name = Column(String, default="")
+    attachment_path = Column(String, default="")
+    attachment_size = Column(Integer, nullable=True)
+    attachment_mime_type = Column(String, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -266,6 +270,10 @@ def init_db() -> None:
     _add_column_if_missing("item_queries", "role", "VARCHAR NOT NULL DEFAULT 'user'")
     _add_column_if_missing("query_messages", "chat_mode", "VARCHAR NOT NULL DEFAULT 'ai'")
     _add_column_if_missing("query_messages", "language", "VARCHAR NOT NULL DEFAULT 'en'")
+    _add_column_if_missing("query_messages", "attachment_name", "VARCHAR DEFAULT ''")
+    _add_column_if_missing("query_messages", "attachment_path", "VARCHAR DEFAULT ''")
+    _add_column_if_missing("query_messages", "attachment_size", "INTEGER")
+    _add_column_if_missing("query_messages", "attachment_mime_type", "VARCHAR DEFAULT ''")
     _add_column_if_missing("ai_inspection_logs", "feature", "VARCHAR DEFAULT 'moderation'")
     _add_column_if_missing("ai_inspection_logs", "prompt_text", "TEXT DEFAULT ''")
     _add_column_if_missing("ai_inspection_logs", "output_text", "TEXT DEFAULT ''")

@@ -1,0 +1,5 @@
+2026-05-03 15:58:58,882 WARNING request_size_blocked client_ip='127.0.0.1' content_length=10555724 route='/items/report'
+2026-05-03 15:59:33,350 WARNING rate_limit_blocked limit=15 route='/query' scope='chat' subject='user:1'
+2026-05-03 15:59:36,310 WARNING rate_limit_blocked limit=15 route='/query' scope='chat' subject='user:1'
+2026-05-03 15:59:36,989 WARNING rate_limit_blocked limit=15 route='/query' scope='chat' subject='user:1'
+2026-05-03 15:59:37,438 WARNING rate_limit_blocked limit=15 route='/query' scope='chat' subject='user:1'

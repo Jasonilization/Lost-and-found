@@ -14,6 +14,14 @@ const INITIALS_PATTERN = /^[a-z]+(?:\.[a-z]+)+$/;
 const THEMES = ["dark", "light", "aurora"];
 const SUPPORTED_LANGUAGES = ["en", "zh-CN"];
 const CHAT_MODES = ["ai", "free"];
+const CHAT_UPLOAD_LIMIT_BYTES = 5 * 1024 * 1024;
+const CHAT_ALLOWED_FILE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".pdf", ".txt"];
+const CHAT_ALLOWED_FILE_MIME_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "application/pdf",
+  "text/plain",
+];
 
 const translations = {
   en: {
@@ -268,6 +276,7 @@ const state = {
   adminTab: "users",
   filters: fallbackFilters,
   selectedFile: null,
+  selectedQueryFile: null,
   previewUrls: new Map(),
   searchTimer: null,
   activeClaimItem: null,
@@ -392,6 +401,11 @@ const queryItemTags = document.querySelector("#queryItemTags");
 const queryItemContextLabel = document.querySelector("#queryItemContextLabel");
 const queryMessages = document.querySelector("#queryMessages");
 const queryForm = document.querySelector("#queryForm");
+const queryFileInput = document.querySelector("#queryFileInput");
+const queryFileInfo = document.querySelector("#queryFileInfo");
+const queryFileName = document.querySelector("#queryFileName");
+const queryFileSize = document.querySelector("#queryFileSize");
+const queryFileRemoveButton = document.querySelector("#queryFileRemoveButton");
 const queryInput = document.querySelector("#queryInput");
 const querySubmitButton = document.querySelector("#querySubmitButton");
 const queryMessage = document.querySelector("#queryMessage");
@@ -491,6 +505,14 @@ function formatDateTime(value) {
   return new Date(value).toLocaleString(currentLanguage() === "zh-CN" ? "zh-CN" : "en-US");
 }
 
+function formatFileSize(size) {
+  const bytes = Number(size || 0);
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
 function titleCase(value) {
   if (!value) return "";
   if (currentLanguage() === "zh-CN") return value;
@@ -569,6 +591,32 @@ function extractApiMessage(data, fallback = "Request failed") {
   }
 
   return fallback;
+}
+
+function fileExtension(name) {
+  const match = String(name || "").toLowerCase().match(/(\.[a-z0-9]+)$/);
+  return match ? match[1] : "";
+}
+
+function validateChatFile(file) {
+  if (!file) return "";
+  const extension = fileExtension(file.name);
+  if (!CHAT_ALLOWED_FILE_EXTENSIONS.includes(extension)) {
+    return currentLanguage() === "zh-CN"
+      ? "聊天附件仅支持 PNG、JPG、JPEG、PDF 或 TXT。"
+      : "Chat attachments must be PNG, JPG, JPEG, PDF, or TXT.";
+  }
+  if (file.size > CHAT_UPLOAD_LIMIT_BYTES) {
+    return currentLanguage() === "zh-CN"
+      ? "聊天附件必须小于或等于 5 MB。"
+      : "Chat attachments must be 5 MB or smaller.";
+  }
+  if (file.type && !CHAT_ALLOWED_FILE_MIME_TYPES.includes(file.type)) {
+    return currentLanguage() === "zh-CN"
+      ? "该文件的浏览器 MIME 类型不受支持。"
+      : "This file's browser MIME type is not supported.";
+  }
+  return "";
 }
 
 function applyTheme(theme) {
@@ -1772,6 +1820,8 @@ async function handleAdminAbuseOverride(itemId, status) {
 function setQueryComposerEnabled(enabled, placeholder = "Ask about the selected item") {
   queryInput.disabled = !enabled;
   querySubmitButton.disabled = !enabled;
+  queryFileInput.disabled = !enabled;
+  queryFileRemoveButton.disabled = !enabled;
   queryInput.placeholder = placeholder;
 }
 
@@ -1801,9 +1851,37 @@ function clearQueryState() {
   queryItemTags.replaceChildren();
   querySuggestions.replaceChildren();
   querySuggestions.classList.add("is-hidden");
+  clearSelectedQueryFile();
   setWarningCard(queryWarningCard, "");
   setMessage(queryMessage, "");
   setLoadingLine(queryLoading, false);
+}
+
+function renderSelectedQueryFile() {
+  const file = state.selectedQueryFile;
+  queryFileInfo.classList.toggle("is-hidden", !file);
+  queryFileName.textContent = file?.name || "";
+  queryFileSize.textContent = file ? formatFileSize(file.size) : "";
+}
+
+function clearSelectedQueryFile() {
+  state.selectedQueryFile = null;
+  queryFileInput.value = "";
+  renderSelectedQueryFile();
+}
+
+function selectQueryFile(file) {
+  const validationError = validateChatFile(file);
+  if (validationError) {
+    clearSelectedQueryFile();
+    setMessage(queryMessage, validationError, true);
+    setWarningCard(queryWarningCard, validationError);
+    return;
+  }
+  state.selectedQueryFile = file || null;
+  renderSelectedQueryFile();
+  setMessage(queryMessage, "");
+  setWarningCard(queryWarningCard, "");
 }
 
 function renderQuerySelectionState() {
@@ -1933,6 +2011,19 @@ function renderQueryMessages(messages) {
     text.textContent = entry.message || "";
 
     bubble.append(metaRow, text);
+
+    if (entry.attachment?.url) {
+      const attachment = document.createElement("a");
+      attachment.className = "query-attachment";
+      attachment.href = entry.attachment.url.startsWith("/")
+        ? `${API_BASE}${entry.attachment.url}`
+        : entry.attachment.url;
+      attachment.target = "_blank";
+      attachment.rel = "noopener noreferrer";
+      attachment.textContent = `${entry.attachment.name || "Attachment"} • ${formatFileSize(entry.attachment.size || 0)}`;
+      bubble.append(attachment);
+    }
+
     queryMessages.append(bubble);
   });
 
@@ -2001,6 +2092,12 @@ async function submitQuery(event) {
   const itemId = state.currentQueryItem?.id || null;
 
   const value = queryInput.value.trim();
+  const fileValidationMessage = validateChatFile(state.selectedQueryFile);
+  if (fileValidationMessage) {
+    setMessage(queryMessage, fileValidationMessage, true);
+    setWarningCard(queryWarningCard, fileValidationMessage);
+    return;
+  }
   if (value.length < 6) {
     const shortMessage = currentLanguage() === "zh-CN" ? "消息至少需要 6 个字符。" : "Message must be at least 6 characters.";
     setMessage(queryMessage, shortMessage, true);
@@ -2014,12 +2111,26 @@ async function submitQuery(event) {
   try {
     const path = itemId ? `/items/${itemId}/query` : "/query";
     console.log("[Query] submitting", { selectedItem: state.currentQueryItem, itemId, path });
-    const data = await apiFetch(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: value, language: currentLanguage(), chat_mode: currentChatMode() }),
-    });
+    let data;
+    if (state.selectedQueryFile) {
+      const formData = new FormData();
+      formData.set("message", value);
+      formData.set("language", currentLanguage());
+      formData.set("chat_mode", currentChatMode());
+      formData.set("file", state.selectedQueryFile);
+      data = await apiFetch(path, {
+        method: "POST",
+        body: formData,
+      });
+    } else {
+      data = await apiFetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: value, language: currentLanguage(), chat_mode: currentChatMode() }),
+      });
+    }
     queryInput.value = "";
+    clearSelectedQueryFile();
     state.queryMessages = Array.isArray(data.queries) ? data.queries : [];
     renderQueryMessages(state.queryMessages);
     renderQuerySuggestions(data.suggestions || [], state.currentQueryItem);
@@ -2330,6 +2441,7 @@ function logout() {
   state.adminTab = "users";
   state.currentQueryItem = null;
   state.queryMessages = [];
+  state.selectedQueryFile = null;
   gallery.replaceChildren();
   claimsList.replaceChildren();
   adminUsersBody.replaceChildren();
@@ -2345,6 +2457,7 @@ function logout() {
   setMessage(queryMessage, "");
   setMessage(profileImageMessage, "");
   form.reset();
+  clearSelectedQueryFile();
   updateReportSubmitState();
   switchAdminTab("users");
   persistCurrentItemId(null);
@@ -2407,6 +2520,8 @@ function bindEvents() {
   roomCodeInput.addEventListener("input", updateLocationUi);
   queryItemSelect.addEventListener("change", handleQueryItemSelection);
   queryForm.addEventListener("submit", submitQuery);
+  queryFileInput.addEventListener("change", () => selectQueryFile(queryFileInput.files?.[0] || null));
+  queryFileRemoveButton.addEventListener("click", clearSelectedQueryFile);
   queryInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -2455,6 +2570,7 @@ async function init() {
   setAuthView("login");
   switchAdminTab("users");
   bindEvents();
+  renderSelectedQueryFile();
   updateReportSubmitState();
   dateInput.value = todayIso();
   await checkBackend();

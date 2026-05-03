@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from unittest.mock import patch
 
@@ -9,6 +10,33 @@ from sqlalchemy.orm import sessionmaker
 
 from backend import backend as backend_app
 from backend.database import AIInspectionLog, Base, Claim, LostFoundItem, QueryMessage, User
+
+
+class DummyClient:
+    host = "127.0.0.1"
+
+
+class DummyURL:
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+
+class DummyJSONRequest:
+    def __init__(self, path: str, payload: dict) -> None:
+        self.headers = {"content-type": "application/json"}
+        self.client = DummyClient()
+        self.url = DummyURL(path)
+        self._payload = payload
+
+    async def json(self) -> dict:
+        return self._payload
+
+
+class DummyRequest:
+    def __init__(self, path: str) -> None:
+        self.headers = {}
+        self.client = DummyClient()
+        self.url = DummyURL(path)
 
 
 class BlockingFlowTests(unittest.TestCase):
@@ -43,8 +71,13 @@ class BlockingFlowTests(unittest.TestCase):
         self.db.add(self.item)
         self.db.commit()
         self.db.refresh(self.item)
+        self.created_upload_paths: list[str] = []
 
     def tearDown(self) -> None:
+        for path in self.created_upload_paths:
+            upload_path = backend_app.BASE_DIR / path.lstrip("/")
+            if upload_path.exists():
+                upload_path.unlink()
         self.db.close()
 
     def test_moderate_request_does_not_write_db_log_when_blocked(self) -> None:
@@ -60,12 +93,15 @@ class BlockingFlowTests(unittest.TestCase):
         self.assertEqual(self.db.query(AIInspectionLog).count(), 0)
 
     def test_free_chat_blocking_stops_before_save_or_ai(self) -> None:
-        payload = backend_app.QueryPayload(message="bad free chat", language="en", chat_mode="free")
+        request = DummyJSONRequest(
+            "/query",
+            {"message": "bad free chat", "language": "en", "chat_mode": "free"},
+        )
 
         with patch("backend.backend.classify_user_input", return_value={"allowed": False, "reason": "Blocked", "confidence": 0.99}), \
              patch("backend.backend.generate_query_package") as generate_query_package:
             with self.assertRaises(HTTPException) as exc:
-                backend_app.create_general_query(payload, current_user=self.user, db=self.db)
+                asyncio.run(backend_app.create_general_query(request, current_user=self.user, db=self.db))
 
         self.assertEqual(exc.exception.status_code, 400)
         self.assertEqual(exc.exception.detail, "Message rejected due to content policy.")
@@ -74,12 +110,15 @@ class BlockingFlowTests(unittest.TestCase):
         generate_query_package.assert_not_called()
 
     def test_ai_chat_blocking_stops_before_save_or_ai_reply(self) -> None:
-        payload = backend_app.QueryPayload(message="bad ai chat", language="en", chat_mode="ai")
+        request = DummyJSONRequest(
+            f"/items/{self.item.id}/query",
+            {"message": "bad ai chat", "language": "en", "chat_mode": "ai"},
+        )
 
         with patch("backend.backend.classify_user_input", return_value={"allowed": False, "reason": "Blocked", "confidence": 0.99}), \
              patch("backend.backend.generate_query_package") as generate_query_package:
             with self.assertRaises(HTTPException) as exc:
-                backend_app.create_query(self.item.id, payload, current_user=self.user, db=self.db)
+                asyncio.run(backend_app.create_query(self.item.id, request, current_user=self.user, db=self.db))
 
         self.assertEqual(exc.exception.status_code, 400)
         self.assertEqual(exc.exception.detail, "Message rejected due to content policy.")
@@ -94,11 +133,12 @@ class BlockingFlowTests(unittest.TestCase):
             lost_location="Sports Hall",
             identifying_info="Blue metal dented bottle",
         )
+        request = DummyRequest(f"/items/{self.item.id}/claim")
 
         with patch("backend.backend.classify_user_input", return_value={"allowed": True, "reason": "Allowed", "confidence": 0.95}), \
              patch("backend.backend.analyze_claim_match", return_value={"match_score": 24, "reasoning": "Too weak"}), \
              patch("backend.backend.apply_abuse_analysis") as apply_abuse_analysis:
-            response = backend_app.claim_item(self.item.id, payload, current_user=self.user, db=self.db)
+            response = backend_app.claim_item(self.item.id, payload, request=request, current_user=self.user, db=self.db)
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(self.db.query(Claim).count(), 0)
@@ -112,15 +152,36 @@ class BlockingFlowTests(unittest.TestCase):
             lost_location="Sports Hall",
             identifying_info="Blue metal dent scratched-lid",
         )
+        request = DummyRequest(f"/items/{self.item.id}/claim")
 
         with patch("backend.backend.classify_user_input", return_value={"allowed": True, "reason": "Allowed", "confidence": 0.95}), \
              patch("backend.backend.analyze_claim_match", return_value={"match_score": 78, "reasoning": "Strong match"}), \
              patch("backend.backend.apply_abuse_analysis"):
-            result = backend_app.claim_item(self.item.id, payload, current_user=self.user, db=self.db)
+            result = backend_app.claim_item(self.item.id, payload, request=request, current_user=self.user, db=self.db)
 
         self.assertEqual(result["message"], "Claim submitted.")
         self.assertEqual(self.db.query(Claim).count(), 1)
         self.assertEqual(self.db.query(AIInspectionLog).count(), 2)
+
+    def test_save_upload_bytes_rejects_extension_spoof(self) -> None:
+        with self.assertRaises(HTTPException) as exc:
+            backend_app.save_upload_bytes(
+                "photo.jpg",
+                b"This is not a real jpeg file.",
+            )
+
+        self.assertEqual(exc.exception.status_code, 415)
+
+    def test_save_upload_bytes_accepts_plain_text_attachment(self) -> None:
+        saved = backend_app.save_upload_bytes(
+            "note.txt",
+            b"Lost near the library after lunch.",
+        )
+
+        self.assertIsNotNone(saved)
+        self.assertEqual(saved["mime_type"], "text/plain")
+        self.assertTrue(saved["path"].startswith("/uploads/"))
+        self.created_upload_paths.append(saved["path"])
 
 
 if __name__ == "__main__":

@@ -7,15 +7,17 @@ import hmac
 import logging
 import re
 import secrets
+import stat
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Form, Header, HTTPException
+from fastapi import Depends, FastAPI, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import UploadFile as StarletteUploadFile
 from pydantic import BaseModel
 from sqlalchemy import case, or_
 from sqlalchemy.orm import Session
@@ -26,7 +28,7 @@ from backend.database import AIInspectionLog, Claim, ItemQuery, LostFoundItem, Q
 from backend.moderation import validate_class_of, validate_initials, validate_text_input
 from backend.ollama_tagger import OLLAMA_URL, build_search_text, fallback_tags, get_ollama_status, tag_item
 
-app = FastAPI(title="School Lost and Found")
+app = FastAPI(title="School Lost and Found", debug=False)
 
 app.add_middleware(
     CORSMiddleware,
@@ -46,6 +48,7 @@ LOG_DIR.mkdir(exist_ok=True)
 
 CLAIMS_LOG_PATH = LOG_DIR / "claims.log"
 ADMIN_LOG_PATH = LOG_DIR / "admin_actions.log"
+SECURITY_LOG_PATH = LOG_DIR / "security.log"
 
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
@@ -60,6 +63,7 @@ claims_logger.propagate = False
 report_logger = logging.getLogger("report_submission")
 admin_logger = logging.getLogger("admin_actions")
 block_logger = logging.getLogger("blocked_actions")
+security_logger = logging.getLogger("security")
 if not admin_logger.handlers:
     admin_handler = logging.FileHandler(ADMIN_LOG_PATH)
     admin_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
@@ -72,6 +76,12 @@ if not block_logger.handlers:
     block_logger.addHandler(block_handler)
 block_logger.setLevel(logging.INFO)
 block_logger.propagate = False
+if not security_logger.handlers:
+    security_handler = logging.FileHandler(SECURITY_LOG_PATH)
+    security_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    security_logger.addHandler(security_handler)
+security_logger.setLevel(logging.INFO)
+security_logger.propagate = False
 
 SCHOOL_LOCATIONS = [
     "New Sports Hall",
@@ -106,6 +116,24 @@ REVIEW_STATUSES = ["approved", "rejected", "incomplete", "needs-review"]
 CHAT_MODES = ["ai", "free"]
 ABUSE_OVERRIDE_STATUSES = ["", "allow", "flag"]
 REPORT_SUBMISSION_COOLDOWN = timedelta(hours=1)
+MAX_UPLOAD_SIZE = 5 * 1024 * 1024
+MAX_REQUEST_SIZE = 5 * 1024 * 1024
+UPLOAD_CHUNK_SIZE = 1024 * 1024
+RATE_LIMIT_WINDOW = timedelta(minutes=1)
+RATE_LIMITS = {
+    "chat": {"limit": 15, "window": RATE_LIMIT_WINDOW},
+    "report": {"limit": 6, "window": RATE_LIMIT_WINDOW},
+    "claim": {"limit": 6, "window": RATE_LIMIT_WINDOW},
+}
+ALLOWED_UPLOAD_TYPES = {
+    ".png": {"mime_types": {"image/png"}, "kind": "png"},
+    ".jpg": {"mime_types": {"image/jpeg"}, "kind": "jpeg"},
+    ".jpeg": {"mime_types": {"image/jpeg"}, "kind": "jpeg"},
+    ".pdf": {"mime_types": {"application/pdf"}, "kind": "pdf"},
+    ".txt": {"mime_types": {"text/plain"}, "kind": "txt"},
+}
+IMAGE_UPLOAD_EXTENSIONS = {".png", ".jpg", ".jpeg"}
+REQUEST_TIMESTAMPS: dict[str, list[datetime]] = {}
 
 
 class RegisterPayload(BaseModel):
@@ -184,6 +212,253 @@ def get_db():
         db.close()
 
 
+def get_client_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for", "").strip()
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def security_log(event: str, *, level: int = logging.INFO, **details: object) -> None:
+    payload = " ".join(
+        f"{key}={details[key]!r}"
+        for key in sorted(details)
+    )
+    security_logger.log(level, "%s %s", event, payload)
+
+
+def enforce_rate_limit(
+    scope: str,
+    *,
+    request: Request,
+    current_user: Optional[User],
+) -> None:
+    config = RATE_LIMITS[scope]
+    now = datetime.utcnow()
+    subject = f"user:{current_user.id}" if current_user else f"ip:{get_client_ip(request)}"
+    key = f"{scope}:{subject}"
+    timestamps = REQUEST_TIMESTAMPS.setdefault(key, [])
+    cutoff = now - config["window"]
+    timestamps[:] = [timestamp for timestamp in timestamps if timestamp >= cutoff]
+    if len(timestamps) >= config["limit"]:
+        security_log(
+            "rate_limit_blocked",
+            level=logging.WARNING,
+            scope=scope,
+            subject=subject,
+            route=request.url.path,
+            limit=config["limit"],
+        )
+        raise HTTPException(status_code=429, detail="Too many requests. Please slow down and try again shortly.")
+    timestamps.append(now)
+
+
+def sniff_file_type(sample: bytes) -> Optional[str]:
+    if sample.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if sample.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if sample.startswith(b"%PDF-"):
+        return "application/pdf"
+    if b"\x00" in sample:
+        return None
+    try:
+        sample.decode("utf-8")
+        return "text/plain"
+    except UnicodeDecodeError:
+        return None
+
+
+def validate_upload_metadata(filename: str, expected_extensions: Optional[set[str]] = None) -> str:
+    original_name = Path(filename or "").name
+    extension = Path(original_name).suffix.lower()
+    allowed_extensions = expected_extensions or set(ALLOWED_UPLOAD_TYPES)
+    if extension not in allowed_extensions or extension not in ALLOWED_UPLOAD_TYPES:
+        security_log(
+            "blocked_upload",
+            level=logging.WARNING,
+            reason="unsupported_extension",
+            filename=original_name,
+            extension=extension,
+        )
+        raise HTTPException(status_code=415, detail="Unsupported file type. Allowed: PNG, JPG, JPEG, PDF, TXT.")
+    return extension
+
+
+def safe_upload_path(extension: str) -> Path:
+    destination = UPLOAD_DIR / f"{uuid4().hex}{extension}"
+    return destination
+
+
+def finalize_upload_permissions(destination: Path) -> None:
+    destination.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+
+def validate_detected_mime(extension: str, detected_mime_type: str) -> None:
+    if detected_mime_type not in ALLOWED_UPLOAD_TYPES[extension]["mime_types"]:
+        security_log(
+            "blocked_upload",
+            level=logging.WARNING,
+            reason="mime_mismatch",
+            extension=extension,
+            detected_mime_type=detected_mime_type,
+        )
+        raise HTTPException(status_code=415, detail="Uploaded file content does not match the allowed file type.")
+
+
+async def save_upload_file(
+    upload: UploadFile | StarletteUploadFile,
+    *,
+    expected_extensions: Optional[set[str]] = None,
+) -> dict:
+    extension = validate_upload_metadata(upload.filename or "", expected_extensions)
+    destination = safe_upload_path(extension)
+    total_size = 0
+    first_chunk = b""
+    client_mime_type = (upload.content_type or "").strip().lower()
+    try:
+        with destination.open("xb") as output_file:
+            while True:
+                chunk = await upload.read(UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                if not first_chunk:
+                    first_chunk = chunk[: min(len(chunk), 8192)]
+                total_size += len(chunk)
+                if total_size > MAX_UPLOAD_SIZE:
+                    security_log(
+                        "blocked_upload",
+                        level=logging.WARNING,
+                        reason="file_too_large",
+                        filename=Path(upload.filename or "").name,
+                        size=total_size,
+                    )
+                    raise HTTPException(status_code=413, detail="Uploaded file exceeds the 5 MB limit.")
+                output_file.write(chunk)
+    except FileExistsError:
+        destination = safe_upload_path(extension)
+        return await save_upload_file(upload, expected_extensions=expected_extensions)
+    except HTTPException:
+        if destination.exists():
+            destination.unlink()
+        raise
+    except Exception:
+        if destination.exists():
+            destination.unlink()
+        raise
+    finally:
+        await upload.close()
+
+    detected_mime_type = sniff_file_type(first_chunk)
+    if not detected_mime_type:
+        if destination.exists():
+            destination.unlink()
+        security_log(
+            "blocked_upload",
+            level=logging.WARNING,
+            reason="unverified_type",
+            filename=Path(upload.filename or "").name,
+        )
+        raise HTTPException(status_code=415, detail="Could not verify the uploaded file type.")
+
+    validate_detected_mime(extension, detected_mime_type)
+    if client_mime_type and client_mime_type not in ALLOWED_UPLOAD_TYPES[extension]["mime_types"]:
+        if destination.exists():
+            destination.unlink()
+        security_log(
+            "blocked_upload",
+            level=logging.WARNING,
+            reason="client_mime_mismatch",
+            filename=Path(upload.filename or "").name,
+            client_mime_type=client_mime_type,
+            detected_mime_type=detected_mime_type,
+        )
+        raise HTTPException(status_code=415, detail="Client MIME type does not match the allowed file type.")
+
+    finalize_upload_permissions(destination)
+    return {
+        "original_name": Path(upload.filename or "").name,
+        "stored_name": destination.name,
+        "path": f"/uploads/{destination.name}",
+        "size": total_size,
+        "mime_type": detected_mime_type,
+        "extension": extension,
+    }
+
+
+def save_upload_bytes(
+    filename: str,
+    file_bytes: bytes,
+    *,
+    expected_extensions: Optional[set[str]] = None,
+    client_mime_type: Optional[str] = None,
+) -> Optional[dict]:
+    if not filename or not file_bytes:
+        return None
+
+    extension = validate_upload_metadata(filename, expected_extensions)
+    if len(file_bytes) > MAX_UPLOAD_SIZE:
+        security_log(
+            "blocked_upload",
+            level=logging.WARNING,
+            reason="file_too_large",
+            filename=Path(filename).name,
+            size=len(file_bytes),
+        )
+        raise HTTPException(status_code=413, detail="Uploaded file exceeds the 5 MB limit.")
+
+    detected_mime_type = sniff_file_type(file_bytes[:8192])
+    if not detected_mime_type:
+        security_log(
+            "blocked_upload",
+            level=logging.WARNING,
+            reason="unverified_type",
+            filename=Path(filename).name,
+        )
+        raise HTTPException(status_code=415, detail="Could not verify the uploaded file type.")
+    validate_detected_mime(extension, detected_mime_type)
+    normalized_client_mime_type = str(client_mime_type or "").strip().lower()
+    if normalized_client_mime_type and normalized_client_mime_type not in ALLOWED_UPLOAD_TYPES[extension]["mime_types"]:
+        security_log(
+            "blocked_upload",
+            level=logging.WARNING,
+            reason="client_mime_mismatch",
+            filename=Path(filename).name,
+            client_mime_type=normalized_client_mime_type,
+            detected_mime_type=detected_mime_type,
+        )
+        raise HTTPException(status_code=415, detail="Client MIME type does not match the allowed file type.")
+
+    destination = safe_upload_path(extension)
+    destination.write_bytes(file_bytes)
+    finalize_upload_permissions(destination)
+    return {
+        "original_name": Path(filename).name,
+        "stored_name": destination.name,
+        "path": f"/uploads/{destination.name}",
+        "size": len(file_bytes),
+        "mime_type": detected_mime_type,
+        "extension": extension,
+    }
+
+
+async def parse_query_submission(request: Request) -> tuple[QueryPayload, Optional[dict]]:
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        message = str(form.get("message") or "")
+        language = str(form.get("language") or "en")
+        chat_mode = str(form.get("chat_mode") or "ai")
+        uploaded_file = form.get("file")
+        attachment = None
+        if hasattr(uploaded_file, "filename") and hasattr(uploaded_file, "read") and uploaded_file.filename:
+            attachment = await save_upload_file(uploaded_file)
+        return QueryPayload(message=message, language=language, chat_mode=chat_mode), attachment
+
+    payload = QueryPayload(**(await request.json()))
+    return payload, None
+
+
 def hash_password(password: str, salt: Optional[str] = None) -> str:
     real_salt = salt or secrets.token_hex(16)
     derived = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), real_salt.encode("utf-8"), 100_000)
@@ -232,17 +507,6 @@ def require_admin_user(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 
-def save_upload_bytes(filename: str, file_bytes: bytes) -> Optional[str]:
-    if not filename or not file_bytes:
-        return None
-
-    original_name = Path(filename).name
-    safe_name = f"{date.today().isoformat()}_{uuid4().hex[:8]}_{original_name}".replace(" ", "_")
-    destination = UPLOAD_DIR / safe_name
-    destination.write_bytes(file_bytes)
-    return f"/uploads/{safe_name}"
-
-
 def decode_image_payload(image: Optional[ReportImagePayload]) -> Optional[str]:
     if not image or not image.data.strip():
         return None
@@ -256,7 +520,13 @@ def decode_image_payload(image: Optional[ReportImagePayload]) -> Optional[str]:
     except (ValueError, binascii.Error) as exc:
         raise HTTPException(status_code=400, detail="Image payload is not valid base64.") from exc
 
-    return save_upload_bytes(image.filename, file_bytes)
+    saved = save_upload_bytes(
+        image.filename,
+        file_bytes,
+        expected_extensions=IMAGE_UPLOAD_EXTENSIONS,
+        client_mime_type=image.content_type,
+    )
+    return saved["path"] if saved else None
 
 
 def user_identity(user: Optional[User]) -> str:
@@ -563,6 +833,12 @@ def serialize_query(query: QueryMessage, author: Optional[User]) -> dict:
         "message": query.message,
         "chat_mode": query.chat_mode or "ai",
         "language": normalize_language(query.language),
+        "attachment": {
+            "name": query.attachment_name or "",
+            "url": query.attachment_path or "",
+            "size": int(query.attachment_size or 0),
+            "content_type": query.attachment_mime_type or "",
+        } if query.attachment_path else None,
         "created_at": query.created_at.isoformat() if query.created_at else None,
     }
 
@@ -745,6 +1021,64 @@ def log_blocked_attempt(*, route: str, current_user: Optional[User], reason: str
     )
 
 
+@app.middleware("http")
+async def enforce_request_size_limit(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_REQUEST_SIZE:
+                security_log(
+                    "request_size_blocked",
+                    level=logging.WARNING,
+                    route=request.url.path,
+                    client_ip=get_client_ip(request),
+                    content_length=int(content_length),
+                )
+                return JSONResponse(status_code=413, content={"detail": "Request body exceeds the 5 MB limit."})
+        except ValueError:
+            pass
+
+    received_bytes = 0
+    original_receive = request.receive
+
+    async def limited_receive():
+        nonlocal received_bytes
+        message = await original_receive()
+        if message["type"] == "http.request":
+            body = message.get("body", b"")
+            received_bytes += len(body)
+            if received_bytes > MAX_REQUEST_SIZE:
+                security_log(
+                    "streaming_request_size_blocked",
+                    level=logging.WARNING,
+                    route=request.url.path,
+                    client_ip=get_client_ip(request),
+                    received_bytes=received_bytes,
+                )
+                raise HTTPException(status_code=413, detail="Request body exceeds the 5 MB limit.")
+        return message
+
+    request._receive = limited_receive
+    return await call_next(request)
+
+
+@app.exception_handler(HTTPException)
+async def handle_http_exception(request: Request, exc: HTTPException) -> JSONResponse:
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+@app.exception_handler(Exception)
+async def handle_unexpected_exception(request: Request, exc: Exception) -> JSONResponse:
+    security_log(
+        "unhandled_exception",
+        level=logging.ERROR,
+        route=request.url.path,
+        client_ip=get_client_ip(request),
+        error=str(exc),
+    )
+    return JSONResponse(status_code=500, content={"detail": "Internal server error."})
+
+
 def reject_blocked_request(*, route: str, current_user: Optional[User], reason: str, content: str) -> JSONResponse:
     log_blocked_attempt(route=route, current_user=current_user, reason=reason, content=content)
     return blocked_response(reason)
@@ -884,9 +1218,11 @@ def filters(_: User = Depends(get_current_user)) -> dict:
 @app.post("/items/report")
 async def report_item(
     payload: ReportPayload,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    enforce_rate_limit("report", request=request, current_user=current_user)
     ensure_submission_allowed(db, current_user)
 
     report_logger.info(
@@ -1129,9 +1465,11 @@ def update_item_status(
 def claim_item(
     item_id: int,
     payload: ClaimPayload,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    enforce_rate_limit("claim", request=request, current_user=current_user)
     route = f"/items/{item_id}/claim"
     claim_input_text = build_input_text(
         payload.claim_reason,
@@ -1605,11 +1943,13 @@ def list_general_queries(
 
 
 @app.post("/query")
-def create_general_query(
-    payload: QueryPayload,
+async def create_general_query(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    enforce_rate_limit("chat", request=request, current_user=current_user)
+    payload, attachment = await parse_query_submission(request)
     route = "/query"
     normalized_language, normalized_chat_mode = resolve_query_preferences(
         current_user,
@@ -1651,6 +1991,10 @@ def create_general_query(
         message=message,
         chat_mode=normalized_chat_mode,
         language=normalized_language,
+        attachment_name=attachment["original_name"] if attachment else "",
+        attachment_path=attachment["path"] if attachment else "",
+        attachment_size=attachment["size"] if attachment else None,
+        attachment_mime_type=attachment["mime_type"] if attachment else "",
     )
     db.add(user_query)
     if package:
@@ -1722,12 +2066,14 @@ def list_queries(
 
 
 @app.post("/items/{item_id}/query")
-def create_query(
+async def create_query(
     item_id: int,
-    payload: QueryPayload,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    enforce_rate_limit("chat", request=request, current_user=current_user)
+    payload, attachment = await parse_query_submission(request)
     route = f"/items/{item_id}/query"
     normalized_language, normalized_chat_mode = resolve_query_preferences(
         current_user,
@@ -1771,6 +2117,10 @@ def create_query(
         message=message,
         chat_mode=normalized_chat_mode,
         language=normalized_language,
+        attachment_name=attachment["original_name"] if attachment else "",
+        attachment_path=attachment["path"] if attachment else "",
+        attachment_size=attachment["size"] if attachment else None,
+        attachment_mime_type=attachment["mime_type"] if attachment else "",
     )
     db.add(user_query)
     if package:
