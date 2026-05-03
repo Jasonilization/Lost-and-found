@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>School Lost and Found</title>
+    <title data-i18n="page.title">School Lost and Found</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="apple-touch-icon" href="favicon.svg">
     <link rel="stylesheet" href="style.css">
@@ -13,42 +13,42 @@
     <div class="page-glow page-glow-right" aria-hidden="true"></div>
 
     <div class="status-strip">
-      <div class="server-pill" id="serverStatus">Checking backend...</div>
-      <div class="server-pill" id="ollamaStatus">Checking Ollama...</div>
+      <div class="server-pill" id="serverStatus" data-i18n="status.checkingBackend">Checking backend...</div>
+      <div class="server-pill" id="ollamaStatus" data-i18n="status.checkingOllama">Checking Ollama...</div>
     </div>
 
     <section class="auth-screen" id="authScreen">
       <div class="auth-card surface-card">
-        <p class="eyebrow">School account</p>
-        <h1>Lost and Found</h1>
-        <p class="hero-copy">Sign in to report lost items, track claims, and move item questions into a dedicated chat page.</p>
+        <p class="eyebrow" data-i18n="auth.eyebrow">School account</p>
+        <h1 data-i18n="app.name">Lost and Found</h1>
+        <p class="hero-copy" data-i18n="auth.hero">Sign in to report lost items, track claims, and move item questions into a dedicated chat page.</p>
 
-        <div class="tab-switch" role="tablist" aria-label="Authentication tabs">
-          <button class="tab-button is-active" id="loginTab" type="button">Login</button>
-          <button class="tab-button" id="registerTab" type="button">Register</button>
+        <div class="tab-switch" role="tablist" aria-label="Authentication tabs" data-i18n-aria-label="auth.tabs">
+          <button class="tab-button is-active" id="loginTab" type="button" data-i18n="auth.login">Login</button>
+          <button class="tab-button" id="registerTab" type="button" data-i18n="auth.register">Register</button>
         </div>
 
         <form id="authForm" class="stack-form auth-form">
           <label>
-            <span>Username</span>
+            <span data-i18n="auth.username">Username</span>
             <input id="authUsername" type="text" minlength="3" autocomplete="username" required>
           </label>
           <label>
-            <span>Password</span>
+            <span data-i18n="auth.password">Password</span>
             <input id="authPassword" type="password" minlength="6" autocomplete="current-password" required>
           </label>
           <div class="register-only is-hidden" id="registerFields">
             <label>
-              <span>Initials</span>
+              <span data-i18n="auth.initials">Initials</span>
               <input id="authInitials" type="text" placeholder="jason.h" autocomplete="off">
             </label>
             <label>
-              <span>Class of</span>
+              <span data-i18n="auth.classOf">Class of</span>
               <input id="authClassOf" type="number" min="2025" max="2035" placeholder="2030">
             </label>
           </div>
           <button class="primary-button" id="authSubmitButton" type="submit">
-            <span class="button-text" id="authSubmitLabel">Login</span>
+            <span class="button-text" id="authSubmitLabel" data-i18n="auth.login">Login</span>
             <span class="spinner" aria-hidden="true"></span>
           </button>
           <p class="status-message" id="authMessage"></p>
@@ -59,9 +59,9 @@
     <div class="app-shell is-hidden" id="appShell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">Local campus desk</p>
-          <h2>Lost and Found</h2>
-          <p class="hero-copy">Reports stay local, admin actions stay guarded, and item questions live in their own chat page.</p>
+          <p class="eyebrow" data-i18n="topbar.eyebrow">Local campus desk</p>
+          <h2 data-i18n="app.name">Lost and Found</h2>
+          <p class="hero-copy" data-i18n="topbar.hero">Reports stay local, admin actions stay guarded, and item questions live in their own chat page.</p>
         </div>
         <div class="topbar-actions">
           <div class="account-chip surface-card">
@@ -69,19 +69,26 @@
             <p class="account-meta" id="accountMeta"></p>
           </div>
           <label class="theme-select-wrap">
-            <span>Theme</span>
+            <span data-i18n="topbar.theme">Theme</span>
             <select id="themeSelect" aria-label="Theme selector">
-              <option value="dark">Dark</option>
-              <option value="light">Light</option>
-              <option value="aurora">Aurora</option>
+              <option value="dark" data-i18n="theme.dark">Dark</option>
+              <option value="light" data-i18n="theme.light">Light</option>
+              <option value="aurora" data-i18n="theme.aurora">Aurora</option>
             </select>
           </label>
-          <button class="ghost-button" id="showReportsButton" type="button">Reports</button>
-          <button class="ghost-button" id="showQueryButton" type="button">Query</button>
-          <button class="ghost-button" id="showClaimsButton" type="button">My Claims</button>
-          <button class="ghost-button" id="showAccountButton" type="button">Account</button>
-          <button class="ghost-button is-hidden" id="showAdminButton" type="button">Admin Panel</button>
-          <button class="ghost-button danger-button" id="logoutButton" type="button">Logout</button>
+          <label class="theme-select-wrap">
+            <span data-i18n="topbar.language">Language</span>
+            <select id="languageSelect" aria-label="Language selector">
+              <option value="en">English</option>
+              <option value="zh-CN">简体中文</option>
+            </select>
+          </label>
+          <button class="ghost-button" id="showReportsButton" type="button" data-i18n="nav.reports">Reports</button>
+          <button class="ghost-button" id="showQueryButton" type="button" data-i18n="nav.query">Query</button>
+          <button class="ghost-button" id="showClaimsButton" type="button" data-i18n="nav.claims">My Claims</button>
+          <button class="ghost-button" id="showAccountButton" type="button" data-i18n="nav.account">Account</button>
+          <button class="ghost-button is-hidden" id="showAdminButton" type="button" data-i18n="nav.admin">Admin Panel</button>
+          <button class="ghost-button danger-button" id="logoutButton" type="button" data-i18n="nav.logout">Logout</button>
         </div>
       </header>
 
@@ -92,59 +99,59 @@
               <section class="panel upload-panel surface-card" aria-labelledby="uploadTitle">
                 <div class="section-heading">
                   <div>
-                    <p class="eyebrow">New report</p>
-                    <h3 id="uploadTitle">Upload a lost item</h3>
+                    <p class="eyebrow" data-i18n="report.eyebrow">New report</p>
+                    <h3 id="uploadTitle" data-i18n="report.title">Upload a lost item</h3>
                   </div>
-                  <span class="static-pill">Lost only</span>
+                  <span class="static-pill" data-i18n="report.lostOnly">Lost only</span>
                 </div>
 
                 <form id="itemForm" class="item-form">
                   <label class="drop-zone" id="dropZone">
                     <input id="imageInput" type="file" accept="image/png,image/jpeg,image/jpg">
                     <span class="drop-icon">+</span>
-                    <strong id="dropTitle">Drop image here</strong>
-                    <small id="dropHint">or choose a JPG/PNG file</small>
+                    <strong id="dropTitle" data-i18n="report.dropTitle">Drop image here</strong>
+                    <small id="dropHint" data-i18n="report.dropHint">or choose a JPG/PNG file</small>
                   </label>
 
                   <div class="form-grid">
                     <label>
-                      <span>Item title</span>
-                      <input id="titleInput" name="title" type="text" maxlength="80" placeholder="Blue water bottle" required>
+                      <span data-i18n="report.itemTitle">Item title</span>
+                      <input id="titleInput" name="title" type="text" maxlength="80" placeholder="Blue water bottle" data-i18n-placeholder="report.itemTitlePlaceholder" required>
                     </label>
                     <label>
-                      <span>Category</span>
+                      <span data-i18n="common.category">Category</span>
                       <select id="categoryInput" name="category" required></select>
                     </label>
                     <label>
-                      <span>Date</span>
+                      <span data-i18n="common.date">Date</span>
                       <input id="dateInput" name="event_date" type="date" required>
                     </label>
                     <label>
-                      <span>Display name</span>
-                      <input id="reporterInput" name="reporter_name" type="text" maxlength="80" placeholder="How this report should display" required>
+                      <span data-i18n="report.displayName">Display name</span>
+                      <input id="reporterInput" name="reporter_name" type="text" maxlength="80" placeholder="How this report should display" data-i18n-placeholder="report.displayNamePlaceholder" required>
                     </label>
                   </div>
 
                   <fieldset class="location-box">
-                    <legend>Location</legend>
+                    <legend data-i18n="common.location">Location</legend>
                     <div class="location-choice">
                       <label>
                         <input type="radio" name="locationMode" value="predefined" checked>
-                        <span>Predefined location</span>
+                        <span data-i18n="report.predefinedLocation">Predefined location</span>
                       </label>
                       <label>
                         <input type="radio" name="locationMode" value="room">
-                        <span>Room code</span>
+                        <span data-i18n="report.roomCode">Room code</span>
                       </label>
                     </div>
 
                     <div class="location-inputs">
                       <label id="predefinedWrap">
-                        <span>Choose location</span>
+                        <span data-i18n="report.chooseLocation">Choose location</span>
                         <select id="predefinedLocation"></select>
                       </label>
                       <label id="roomWrap" class="is-hidden">
-                        <span>Room code</span>
+                        <span data-i18n="report.roomCode">Room code</span>
                         <input id="roomCodeInput" type="text" maxlength="4" placeholder="S302" autocomplete="off">
                       </label>
                     </div>
@@ -153,18 +160,18 @@
                   </fieldset>
 
                   <label>
-                    <span>Description</span>
-                    <textarea id="descriptionInput" name="description" rows="4" maxlength="450" placeholder="Add color, brand, markings, or details that would help someone confirm it." required></textarea>
+                    <span data-i18n="common.description">Description</span>
+                    <textarea id="descriptionInput" name="description" rows="4" maxlength="450" placeholder="Add color, brand, markings, or details that would help someone confirm it." data-i18n-placeholder="report.descriptionPlaceholder" required></textarea>
                   </label>
 
                   <label>
-                    <span>Supporting evidence</span>
-                    <textarea id="evidenceDetailsInput" name="evidence_details" rows="3" maxlength="320" placeholder="Optional: ownership clues, identifying marks, timeline, or extra evidence."></textarea>
+                    <span data-i18n="report.supportingEvidence">Supporting evidence</span>
+                    <textarea id="evidenceDetailsInput" name="evidence_details" rows="3" maxlength="320" placeholder="Optional: ownership clues, identifying marks, timeline, or extra evidence." data-i18n-placeholder="report.evidencePlaceholder"></textarea>
                   </label>
 
                   <div class="form-actions">
                     <button class="primary-button" id="submitButton" type="submit">
-                      <span class="button-text">Save report</span>
+                      <span class="button-text" data-i18n="report.save">Save report</span>
                       <span class="spinner" aria-hidden="true"></span>
                     </button>
                     <p class="status-message" id="uploadMessage"></p>
@@ -178,27 +185,27 @@
               <section class="panel browse-panel surface-card" aria-labelledby="galleryTitle">
                 <div class="section-heading">
                   <div>
-                    <p class="eyebrow">Reports</p>
-                    <h3 id="galleryTitle">Live search</h3>
+                    <p class="eyebrow" data-i18n="reports.eyebrow">Reports</p>
+                    <h3 id="galleryTitle" data-i18n="reports.title">Live search</h3>
                   </div>
-                  <button class="ghost-button" id="refreshButton" type="button">Refresh</button>
+                  <button class="ghost-button" id="refreshButton" type="button" data-i18n="common.refresh">Refresh</button>
                 </div>
 
                 <div class="filters" role="search">
                   <label class="search-field">
-                    <span>Search</span>
-                    <input id="searchInput" type="search" placeholder="Search description, tags, or location">
+                    <span data-i18n="common.search">Search</span>
+                    <input id="searchInput" type="search" placeholder="Search description, tags, or location" data-i18n-placeholder="reports.searchPlaceholder">
                   </label>
                   <label>
-                    <span>Category</span>
+                    <span data-i18n="common.category">Category</span>
                     <select id="categoryFilter"></select>
                   </label>
                   <label>
-                    <span>Location</span>
+                    <span data-i18n="common.location">Location</span>
                     <select id="locationFilter"></select>
                   </label>
                   <label>
-                    <span>Status</span>
+                    <span data-i18n="common.status">Status</span>
                     <select id="statusFilter"></select>
                   </label>
                 </div>
@@ -221,7 +228,7 @@
               <p class="eyebrow">Claim history</p>
               <h3 id="claimsTitle">My Claims</h3>
             </div>
-            <button class="ghost-button" id="refreshClaimsButton" type="button">Refresh claims</button>
+            <button class="ghost-button" id="refreshClaimsButton" type="button" data-i18n="claims.refresh">Refresh claims</button>
           </div>
           <div class="list-meta">
             <span id="claimsCount">0 claims</span>
@@ -266,18 +273,18 @@
         <section class="panel page-panel surface-card is-hidden" id="adminSection" aria-labelledby="adminTitle">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Admin tools</p>
-              <h3 id="adminTitle">Admin Panel</h3>
+              <p class="eyebrow" data-i18n="admin.eyebrow">Admin tools</p>
+              <h3 id="adminTitle" data-i18n="admin.title">Admin Panel</h3>
             </div>
-            <button class="ghost-button" id="refreshAdminButton" type="button">Refresh admin data</button>
+            <button class="ghost-button" id="refreshAdminButton" type="button" data-i18n="admin.refresh">Refresh admin data</button>
           </div>
 
           <div class="admin-toolbar">
             <div class="tab-switch admin-tab-switch" role="tablist" aria-label="Admin tabs">
-              <button class="tab-button is-active" id="adminUsersTab" type="button">Users</button>
-              <button class="tab-button" id="adminItemsTab" type="button">Items</button>
-              <button class="tab-button" id="adminClaimsTab" type="button">Claims</button>
-              <button class="tab-button" id="adminInspectionTab" type="button">AI Inspection</button>
+              <button class="tab-button is-active" id="adminUsersTab" type="button" data-i18n="admin.users">Users</button>
+              <button class="tab-button" id="adminItemsTab" type="button" data-i18n="admin.items">Items</button>
+              <button class="tab-button" id="adminClaimsTab" type="button" data-i18n="admin.claims">Claims</button>
+              <button class="tab-button" id="adminInspectionTab" type="button" data-i18n="admin.aiInspection">AI Inspection</button>
             </div>
             <div class="list-meta admin-meta">
               <span id="adminSummary">0 users</span>
@@ -293,11 +300,11 @@
                 <thead>
                   <tr>
                     <th>ID</th>
-                    <th>Username</th>
-                    <th>Identity</th>
-                    <th>Role</th>
-                    <th>Created</th>
-                    <th>Actions</th>
+                    <th data-i18n="auth.username">Username</th>
+                    <th data-i18n="admin.identity">Identity</th>
+                    <th data-i18n="admin.role">Role</th>
+                    <th data-i18n="admin.created">Created</th>
+                    <th data-i18n="admin.actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="adminUsersBody"></tbody>
@@ -321,29 +328,38 @@
         <section class="panel page-panel surface-card is-hidden" id="querySection" aria-labelledby="queryPageTitle">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Item chat</p>
-              <h3 id="queryPageTitle">Query page</h3>
+              <p class="eyebrow" data-i18n="query.eyebrow">Item chat</p>
+              <h3 id="queryPageTitle" data-i18n="query.title">Query page</h3>
             </div>
-            <button class="ghost-button" id="queryBackButton" type="button">Back to reports</button>
+            <button class="ghost-button" id="queryBackButton" type="button" data-i18n="query.back">Back to reports</button>
           </div>
 
           <article class="query-context-card surface-card" id="queryContextCard">
             <div class="form-grid query-selector-grid">
               <label>
-                <span>Select item</span>
+                <span data-i18n="query.selectItem">Select item</span>
                 <select id="queryItemSelect">
-                  <option value="">General inquiry</option>
+                  <option value="" data-i18n="query.generalInquiry">General inquiry</option>
                 </select>
               </label>
               <div class="query-selector-actions">
-                <span class="field-note">Use general inquiry for questions without a selected item.</span>
-                <button class="ghost-button" id="refreshQueryItemsButton" type="button">Refresh item list</button>
+                <span class="field-note" id="queryModeNote" data-i18n="query.generalNote">Use general inquiry for questions without a selected item.</span>
+                <button class="ghost-button" id="refreshQueryItemsButton" type="button" data-i18n="query.refreshItems">Refresh item list</button>
               </div>
+            </div>
+            <div class="form-grid query-selector-grid">
+              <label>
+                <span data-i18n="query.chatMode">Chat mode</span>
+                <select id="chatModeSelect">
+                  <option value="ai" data-i18n="query.aiChat">AI Chat</option>
+                  <option value="free" data-i18n="query.freeChat">Free Chat (No AI)</option>
+                </select>
+              </label>
             </div>
             <div class="query-context-head">
               <div>
-                <h4 id="queryItemTitle">Select an item</h4>
-                <p class="item-summary" id="queryItemMeta">Select a report or use general inquiry mode.</p>
+                <h4 id="queryItemTitle" data-i18n="query.selectAnItem">Select an item</h4>
+                <p class="item-summary" id="queryItemMeta" data-i18n="query.selectOrGeneral">Select a report or use general inquiry mode.</p>
               </div>
               <span class="status-badge is-lost" id="queryItemStatus">Open</span>
             </div>
@@ -358,13 +374,13 @@
             </div>
             <div class="warning-card is-hidden" id="queryWarningCard"></div>
             <div class="query-page-messages" id="queryMessages"></div>
-            <p class="status-message is-hidden" id="queryEmptyState">No messages yet.</p>
+            <p class="status-message is-hidden" id="queryEmptyState" data-i18n="query.noMessages">No messages yet.</p>
             <form class="query-page-form" id="queryForm">
               <div class="tag-row is-hidden" id="querySuggestions" aria-label="Suggested questions"></div>
-              <textarea id="queryInput" rows="3" maxlength="220" placeholder="Ask about this item"></textarea>
+              <textarea id="queryInput" rows="3" maxlength="220" placeholder="Ask about this item" data-i18n-placeholder="query.askAboutItem"></textarea>
               <div class="form-actions">
                 <button class="primary-button" id="querySubmitButton" type="submit">
-                  <span class="button-text">Send message</span>
+                  <span class="button-text" data-i18n="query.send">Send message</span>
                   <span class="spinner" aria-hidden="true"></span>
                 </button>
                 <p class="status-message" id="queryMessage"></p>

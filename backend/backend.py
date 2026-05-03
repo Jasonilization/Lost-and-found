@@ -5,6 +5,7 @@ import binascii
 import hashlib
 import hmac
 import logging
+import re
 import secrets
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -19,7 +20,7 @@ from pydantic import BaseModel
 from sqlalchemy import case, or_
 from sqlalchemy.orm import Session
 
-from backend.ai_assistant import AI_MODEL, analyze_evidence, generate_query_package, model_size_label
+from backend.ai_assistant import AI_MODEL, analyze_claim_match, analyze_evidence, analyze_report_abuse, generate_query_package, model_size_label, normalize_language
 from backend.ai_moderation import classify_user_input
 from backend.database import AIInspectionLog, Claim, ItemQuery, LostFoundItem, QueryMessage, SessionLocal, User, UserSession, init_db
 from backend.moderation import validate_class_of, validate_initials, validate_text_input
@@ -58,12 +59,19 @@ claims_logger.propagate = False
 
 report_logger = logging.getLogger("report_submission")
 admin_logger = logging.getLogger("admin_actions")
+block_logger = logging.getLogger("blocked_actions")
 if not admin_logger.handlers:
     admin_handler = logging.FileHandler(ADMIN_LOG_PATH)
     admin_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
     admin_logger.addHandler(admin_handler)
 admin_logger.setLevel(logging.INFO)
 admin_logger.propagate = False
+if not block_logger.handlers:
+    block_handler = logging.FileHandler(ADMIN_LOG_PATH)
+    block_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+    block_logger.addHandler(block_handler)
+block_logger.setLevel(logging.INFO)
+block_logger.propagate = False
 
 SCHOOL_LOCATIONS = [
     "New Sports Hall",
@@ -95,6 +103,8 @@ REPORT_TYPES = ["lost", "found"]
 DEFAULT_REPORT_TYPE = "lost"
 CLAIM_STATUSES = ["pending", "approved", "rejected"]
 REVIEW_STATUSES = ["approved", "rejected", "incomplete", "needs-review"]
+CHAT_MODES = ["ai", "free"]
+ABUSE_OVERRIDE_STATUSES = ["", "allow", "flag"]
 REPORT_SUBMISSION_COOLDOWN = timedelta(hours=1)
 
 
@@ -119,6 +129,8 @@ class ClaimPayload(BaseModel):
 
 class QueryPayload(BaseModel):
     message: str
+    language: str = "en"
+    chat_mode: str = "ai"
 
 
 class ReportImagePayload(BaseModel):
@@ -150,6 +162,11 @@ class ProfileImagePayload(BaseModel):
 
 
 class AdminItemReviewPayload(BaseModel):
+    status: str
+    notes: str = ""
+
+
+class AdminAbuseOverridePayload(BaseModel):
     status: str
     notes: str = ""
 
@@ -328,7 +345,112 @@ def ensure_submission_allowed(db: Session, current_user: User) -> None:
     )
 
 
+def normalize_chat_mode(chat_mode: Optional[str]) -> str:
+    value = str(chat_mode or "").strip().lower()
+    return value if value in CHAT_MODES else "ai"
+
+
+def query_saved_message(language: str) -> str:
+    return "消息已保存。" if normalize_language(language) == "zh-CN" else "Message saved."
+
+
+def resolve_query_preferences(current_user: User, *, language: Optional[str], chat_mode: Optional[str]) -> tuple[str, str]:
+    normalized_language = normalize_language(language or current_user.preferred_language)
+    normalized_chat_mode = normalize_chat_mode(chat_mode)
+    if current_user.preferred_language != normalized_language:
+        current_user.preferred_language = normalized_language
+    return normalized_language, normalized_chat_mode
+
+
+def build_reporter_summary(db: Session, current_user: User, *, title: str) -> dict:
+    now = datetime.utcnow()
+    recent_items = (
+        db.query(LostFoundItem)
+        .filter(
+            LostFoundItem.submitted_by_user_id == current_user.id,
+            LostFoundItem.created_at >= now - timedelta(hours=24),
+        )
+        .count()
+    )
+    similar_titles = (
+        db.query(LostFoundItem)
+        .filter(
+            LostFoundItem.submitted_by_user_id == current_user.id,
+            LostFoundItem.created_at >= now - timedelta(days=7),
+            LostFoundItem.title.ilike(title.strip()),
+        )
+        .count()
+    )
+    return {
+        "recent_reports_24h": recent_items,
+        "similar_title_reports_7d": similar_titles,
+        "is_admin": bool(current_user.is_admin),
+    }
+
+
+def build_claim_summary(db: Session, *, item: LostFoundItem) -> dict:
+    duplicate_claims = db.query(Claim).filter(Claim.item_id == item.id).count()
+    recent_claims_for_user = (
+        db.query(Claim)
+        .filter(
+            Claim.user_id == item.submitted_by_user_id,
+            Claim.created_at >= datetime.utcnow() - timedelta(days=7),
+        )
+        .count()
+        if item.submitted_by_user_id
+        else 0
+    )
+    return {
+        "duplicate_claims_for_item": duplicate_claims,
+        "recent_claims_for_user_7d": recent_claims_for_user,
+    }
+
+
+def apply_abuse_analysis(db: Session, *, current_user: User, item: LostFoundItem) -> dict:
+    subject_user = (
+        db.query(User).filter(User.id == item.submitted_by_user_id).first()
+        if item.submitted_by_user_id
+        else current_user
+    )
+    reporter_summary = build_reporter_summary(db, subject_user or current_user, title=item.title)
+    claim_summary = build_claim_summary(db, item=item)
+    package = analyze_report_abuse(
+        report={
+            "title": item.title,
+            "description": item.description,
+            "category": item.category,
+            "location": item.location,
+            "evidence_details": item.evidence_details,
+            "evidence_summary": item.evidence_summary,
+            "evidence_inconsistencies": item.evidence_inconsistencies,
+            "evidence_missing_info": item.evidence_missing_info,
+        },
+        reporter_summary=reporter_summary,
+        claim_summary=claim_summary,
+    )
+    item.abuse_genuine_score = int(package.get("genuine_score", 50) or 50)
+    item.abuse_risk_level = str(package.get("risk_level", "medium")).strip().lower() or "medium"
+    item.abuse_reasoning = str(package.get("reasoning", "")).strip()
+    item.abuse_flagged = item.abuse_risk_level == "high"
+    if item.abuse_override_status not in ABUSE_OVERRIDE_STATUSES:
+        item.abuse_override_status = ""
+    log_ai_package(
+        db,
+        current_user=current_user,
+        route=f"/items/{item.id}/abuse-analysis",
+        input_text=build_input_text(item.title, item.description, item.evidence_details, item.location),
+        package=package,
+        feature="abuse-detection",
+    )
+    db.commit()
+    db.refresh(item)
+    return package
+
+
 def serialize_item(item: LostFoundItem, reporter: Optional[User]) -> dict:
+    override_status = (item.abuse_override_status or "").strip().lower()
+    effective_risk = "high" if override_status == "flag" else "low" if override_status == "allow" else (item.abuse_risk_level or "medium")
+    flagged = override_status == "flag" or (override_status != "allow" and bool(item.abuse_flagged))
     return {
         "id": item.id,
         "report_type": item.report_type,
@@ -360,6 +482,14 @@ def serialize_item(item: LostFoundItem, reporter: Optional[User]) -> dict:
         "evidence_validity": item.evidence_validity,
         "review_status": item.review_status,
         "review_notes": item.review_notes,
+        "abuse_genuine_score": int(item.abuse_genuine_score or 0),
+        "abuse_risk_level": item.abuse_risk_level or "medium",
+        "abuse_reasoning": item.abuse_reasoning or "",
+        "abuse_flagged": bool(item.abuse_flagged),
+        "abuse_override_status": override_status,
+        "abuse_override_notes": item.abuse_override_notes or "",
+        "effective_abuse_risk_level": effective_risk,
+        "effective_abuse_flagged": flagged,
         "created_at": item.created_at.isoformat() if item.created_at else None,
     }
 
@@ -373,6 +503,7 @@ def serialize_user(user: User) -> dict:
         "identity": user_identity(user),
         "is_admin": bool(user.is_admin),
         "avatar_url": user.avatar_path or "",
+        "preferred_language": normalize_language(user.preferred_language),
         "created_at": user.created_at.isoformat() if user.created_at else None,
     }
 
@@ -409,6 +540,8 @@ def serialize_admin_user(user: User) -> dict:
 
 def serialize_admin_claim(claim: Claim, item: LostFoundItem, claimant: Optional[User], reporter: Optional[User]) -> dict:
     claim_data = serialize_claim(claim, item, claimant, reporter)
+    claim_data["match_score"] = int(claim.match_score or 0)
+    claim_data["match_reasoning"] = claim.match_reasoning or ""
     claim_data["user"] = serialize_admin_user(claimant) if claimant else {
         "id": claim.user_id,
         "initials": "",
@@ -428,6 +561,8 @@ def serialize_query(query: QueryMessage, author: Optional[User]) -> dict:
         "user_identity": "System" if role == "system" else user_identity(author),
         "avatar_url": "" if role == "system" else (author.avatar_path if author and author.avatar_path else ""),
         "message": query.message,
+        "chat_mode": query.chat_mode or "ai",
+        "language": normalize_language(query.language),
         "created_at": query.created_at.isoformat() if query.created_at else None,
     }
 
@@ -576,18 +711,19 @@ def moderate_request(
     input_text: str,
 ) -> dict:
     decision = classify_user_input(input_text)
-    log_ai_inspection(
-        db,
-        current_user=current_user,
-        route=route,
-        input_text=input_text,
-        decision=decision,
-        feature="moderation",
-        model_name=AI_MODEL,
-        model_size=model_size_label(AI_MODEL),
-        fallback_triggered=bool(decision.get("fallback_triggered")),
-        request_metadata={"route": route},
-    )
+    if decision.get("allowed", False):
+        log_ai_inspection(
+            db,
+            current_user=current_user,
+            route=route,
+            input_text=input_text,
+            decision=decision,
+            feature="moderation",
+            model_name=AI_MODEL,
+            model_size=model_size_label(AI_MODEL),
+            fallback_triggered=bool(decision.get("fallback_triggered")),
+            request_metadata={"route": route},
+        )
     return decision
 
 
@@ -596,6 +732,47 @@ def blocked_response(reason: str) -> JSONResponse:
         status_code=400,
         content={"error": "Request blocked", "reason": reason},
     )
+
+
+def log_blocked_attempt(*, route: str, current_user: Optional[User], reason: str, content: str) -> None:
+    block_logger.info(
+        "route=%s user_id=%s username=%s reason=%s content=%s",
+        route,
+        current_user.id if current_user else "",
+        current_user.username if current_user else "",
+        reason,
+        content,
+    )
+
+
+def reject_blocked_request(*, route: str, current_user: Optional[User], reason: str, content: str) -> JSONResponse:
+    log_blocked_attempt(route=route, current_user=current_user, reason=reason, content=content)
+    return blocked_response(reason)
+
+
+def enforce_moderation(
+    db: Session,
+    *,
+    current_user: Optional[User],
+    route: str,
+    input_text: str,
+    blocked_reason: str = "Message rejected due to content policy.",
+) -> dict:
+    decision = moderate_request(
+        db,
+        current_user=current_user,
+        route=route,
+        input_text=input_text,
+    )
+    if not decision.get("allowed", False):
+        log_blocked_attempt(
+            route=route,
+            current_user=current_user,
+            reason=str(decision.get("reason", blocked_reason)).strip() or blocked_reason,
+            content=input_text,
+        )
+        raise HTTPException(status_code=400, detail=blocked_reason)
+    return decision
 
 
 def log_admin_action(admin_user: User, action: str, *, claim: Optional[Claim] = None, item: Optional[LostFoundItem] = None, note: str = "") -> None:
@@ -754,7 +931,12 @@ async def report_item(
         input_text=build_input_text(title, description, location, category),
     )
     if not moderation.get("allowed", False):
-        return blocked_response(str(moderation.get("reason", "Request is not relevant to the lost-and-found system.")))
+        return reject_blocked_request(
+            route="/items/report",
+            current_user=current_user,
+            reason=str(moderation.get("reason", "Request is not relevant to the lost-and-found system.")),
+            content=build_input_text(title, description, location, category),
+        )
 
     image_path = decode_image_payload(payload.image)
     try:
@@ -833,6 +1015,7 @@ async def report_item(
     db.add(item)
     db.commit()
     db.refresh(item)
+    apply_abuse_analysis(db, current_user=current_user, item=item)
     return {
         "message": "Report saved successfully",
         "reason": str(moderation.get("reason", "")).strip() or "Accepted: relevant lost-and-found request.",
@@ -882,7 +1065,12 @@ def list_items(
                 input_text=lowered,
             )
             if not moderation.get("allowed", False):
-                return blocked_response(str(moderation.get("reason", "Search was blocked.")))
+                return reject_blocked_request(
+                    route="/items",
+                    current_user=current_user,
+                    reason=str(moderation.get("reason", "Search was blocked.")),
+                    content=lowered,
+                )
             contains = f"%{lowered}%"
             starts = f"{lowered}%"
             score = (
@@ -944,6 +1132,13 @@ def claim_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    route = f"/items/{item_id}/claim"
+    claim_input_text = build_input_text(
+        payload.claim_reason,
+        payload.item_description,
+        payload.lost_location,
+        payload.identifying_info,
+    )
     item = fetch_item_or_404(db, item_id)
     if item.claimed:
         raise HTTPException(status_code=400, detail="This item is already marked as claimed.")
@@ -952,32 +1147,61 @@ def claim_item(
     if existing_claim:
         raise HTTPException(status_code=409, detail="You already submitted a claim for this item.")
 
-    moderation = moderate_request(
+    enforce_moderation(
         db,
         current_user=current_user,
-        route=f"/items/{item_id}/claim",
-        input_text=build_input_text(
-            payload.claim_reason,
-            payload.item_description,
-            payload.lost_location,
-            payload.identifying_info,
-        ),
+        route=route,
+        input_text=claim_input_text,
+        blocked_reason="Message rejected due to content policy.",
     )
-    if not moderation.get("allowed", False):
-        return blocked_response(str(moderation.get("reason", "Claim was blocked.")))
+
+    claim_reason = moderate_field(payload.claim_reason, "Claim reason", min_meaningful_chars=6, max_chars=240)
+    item_description = moderate_field(payload.item_description, "Item description", min_meaningful_chars=6, max_chars=240)
+    lost_location = moderate_field(payload.lost_location, "Lost location", min_meaningful_chars=4, max_chars=120)
+    identifying_info = moderate_field(payload.identifying_info, "Identifying info", min_meaningful_chars=4, max_chars=240)
+
+    if len(re.findall(r"[a-z0-9']+", identifying_info.lower())) < 2:
+        raise HTTPException(status_code=400, detail="Add identifying details like color, brand, markings, or unique features.")
+
+    claim_match = analyze_claim_match(
+        claim_reason=claim_reason,
+        claim_description=item_description,
+        lost_location=lost_location,
+        identifying_info=identifying_info,
+        item=serialize_item(item, get_item_reporter(db, item)),
+    )
+    if int(claim_match.get("match_score", 0) or 0) < 25:
+        return reject_blocked_request(
+            route=route,
+            current_user=current_user,
+            reason="Claim rejected because the provided details do not match the reported item closely enough.",
+            content=claim_input_text,
+        )
+    log_ai_package(
+        db,
+        current_user=current_user,
+        route=f"/items/{item_id}/claim-match",
+        input_text=build_input_text(claim_reason, item_description, lost_location, identifying_info),
+        package=claim_match,
+        feature="claim-match",
+    )
 
     claim = Claim(
         item_id=item.id,
         user_id=current_user.id,
-        claim_reason=moderate_field(payload.claim_reason, "Claim reason", min_meaningful_chars=6, max_chars=240),
-        item_description=moderate_field(payload.item_description, "Item description", min_meaningful_chars=6, max_chars=240),
-        lost_location=moderate_field(payload.lost_location, "Lost location", min_meaningful_chars=4, max_chars=120),
-        identifying_info=moderate_field(payload.identifying_info, "Identifying info", min_meaningful_chars=4, max_chars=240),
+        claim_reason=claim_reason,
+        item_description=item_description,
+        lost_location=lost_location,
+        identifying_info=identifying_info,
+        match_score=int(claim_match.get("match_score", 0) or 0),
+        match_reasoning=str(claim_match.get("reasoning", "")).strip(),
         status="pending",
     )
     db.add(claim)
     db.commit()
     db.refresh(claim)
+
+    apply_abuse_analysis(db, current_user=current_user, item=item)
 
     claims_logger.info(
         "claim_id=%s item_id=%s user_id=%s username=%s identity=%s status=%s",
@@ -1317,31 +1541,66 @@ def admin_review_item(
     return {"message": "Item review updated.", "item": serialize_item(item, reporter)}
 
 
+@app.post("/admin/items/{item_id}/abuse-override")
+def admin_override_abuse(
+    item_id: int,
+    payload: AdminAbuseOverridePayload,
+    current_user: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    normalized_status = str(payload.status or "").strip().lower()
+    if normalized_status not in ABUSE_OVERRIDE_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid abuse override status.")
+
+    item = fetch_item_or_404(db, item_id)
+    item.abuse_override_status = normalized_status
+    item.abuse_override_notes = payload.notes.strip()
+    db.commit()
+    db.refresh(item)
+    log_admin_action(current_user, "override-abuse", item=item, note=f"abuse_override_status={normalized_status}")
+    reporter = db.query(User).filter(User.id == item.submitted_by_user_id).first() if item.submitted_by_user_id else None
+    return {"message": "Abuse override updated.", "item": serialize_item(item, reporter)}
+
+
 @app.get("/query")
 def list_general_queries(
+    language: Optional[str] = None,
+    chat_mode: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    normalized_language, normalized_chat_mode = resolve_query_preferences(
+        current_user,
+        language=language,
+        chat_mode=chat_mode,
+    )
+    db.commit()
     queries = get_query_messages_for_scope(db, user_id=current_user.id, item_id=None)
     serialized_queries = serialize_query_list(db, queries)
-    package = generate_query_package(
-        user_message=serialized_queries[-1]["message"] if serialized_queries else "Show starter suggestions.",
-        item=None,
-        history=serialized_queries,
-        catalog_items=list_catalog_items(db),
-    )
-    log_ai_package(
-        db,
-        current_user=current_user,
-        route="/query/suggestions",
-        input_text=serialized_queries[-1]["message"] if serialized_queries else "Show starter suggestions.",
-        package=package,
-        feature="query-suggestions",
-    )
+    suggestions: list[str] = []
+    if normalized_chat_mode == "ai":
+        package = generate_query_package(
+            user_message=serialized_queries[-1]["message"] if serialized_queries else "Show starter suggestions.",
+            item=None,
+            history=serialized_queries,
+            catalog_items=list_catalog_items(db),
+            language=normalized_language,
+        )
+        log_ai_package(
+            db,
+            current_user=current_user,
+            route="/query/suggestions",
+            input_text=serialized_queries[-1]["message"] if serialized_queries else "Show starter suggestions.",
+            package=package,
+            feature="query-suggestions",
+        )
+        suggestions = package.get("suggestions", [])
     return {
         "queries": serialized_queries,
         "response": {"message": ""},
-        "suggestions": package.get("suggestions", []),
+        "suggestions": suggestions,
+        "chat_mode": normalized_chat_mode,
+        "language": normalized_language,
     }
 
 
@@ -1351,78 +1610,114 @@ def create_general_query(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    moderation = moderate_request(
+    route = "/query"
+    normalized_language, normalized_chat_mode = resolve_query_preferences(
+        current_user,
+        language=payload.language,
+        chat_mode=payload.chat_mode,
+    )
+    enforce_moderation(
         db,
         current_user=current_user,
-        route="/query",
+        route=route,
         input_text=payload.message,
+        blocked_reason="Message rejected due to content policy.",
     )
-    if not moderation.get("allowed", False):
-        return blocked_response(str(moderation.get("reason", "Query was blocked.")))
-
     message = moderate_field(payload.message, "Query message", min_meaningful_chars=6, max_chars=220)
     existing_queries = get_query_messages_for_scope(db, user_id=current_user.id, item_id=None)
     serialized_history = serialize_query_list(db, existing_queries)
-    package = generate_query_package(
-        user_message=message,
-        item=None,
-        history=serialized_history,
-        catalog_items=list_catalog_items(db),
-    )
-    log_ai_package(
-        db,
-        current_user=current_user,
-        route="/query",
-        input_text=message,
-        package=package,
-        feature="general-query",
-    )
+    package = None
+    if normalized_chat_mode == "ai":
+        package = generate_query_package(
+            user_message=message,
+            item=None,
+            history=serialized_history,
+            catalog_items=list_catalog_items(db),
+            language=normalized_language,
+        )
+        log_ai_package(
+            db,
+            current_user=current_user,
+            route="/query",
+            input_text=message,
+            package=package,
+            feature="general-query",
+        )
 
-    user_query = QueryMessage(item_id=None, user_id=current_user.id, role="user", message=message)
-    system_query = QueryMessage(item_id=None, user_id=current_user.id, role="system", message=package["reply"])
+    user_query = QueryMessage(
+        item_id=None,
+        user_id=current_user.id,
+        role="user",
+        message=message,
+        chat_mode=normalized_chat_mode,
+        language=normalized_language,
+    )
     db.add(user_query)
-    db.add(system_query)
+    if package:
+        db.add(QueryMessage(
+            item_id=None,
+            user_id=current_user.id,
+            role="system",
+            message=package["reply"],
+            chat_mode=normalized_chat_mode,
+            language=normalized_language,
+        ))
     db.commit()
     db.refresh(user_query)
-    db.refresh(system_query)
 
     queries = get_query_messages_for_scope(db, user_id=current_user.id, item_id=None)
     return {
         "queries": serialize_query_list(db, queries),
-        "response": {"message": package["reply"]},
-        "suggestions": package.get("suggestions", []),
+        "response": {"message": package["reply"] if package else query_saved_message(normalized_language)},
+        "suggestions": package.get("suggestions", []) if package else [],
+        "chat_mode": normalized_chat_mode,
+        "language": normalized_language,
     }
 
 
 @app.get("/items/{item_id}/queries")
 def list_queries(
     item_id: int,
+    language: Optional[str] = None,
+    chat_mode: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    normalized_language, normalized_chat_mode = resolve_query_preferences(
+        current_user,
+        language=language,
+        chat_mode=chat_mode,
+    )
+    db.commit()
     item = fetch_item_or_404(db, item_id)
     reporter = get_item_reporter(db, item)
     item_context = item_to_query_context(item, reporter)
     queries = get_query_messages_for_scope(db, user_id=current_user.id, item_id=item_id)
     serialized_queries = serialize_query_list(db, queries)
-    package = generate_query_package(
-        user_message=serialized_queries[-1]["message"] if serialized_queries else "Show starter suggestions.",
-        item=item_context,
-        history=serialized_queries,
-        catalog_items=list_catalog_items(db),
-    )
-    log_ai_package(
-        db,
-        current_user=current_user,
-        route=f"/items/{item_id}/queries/suggestions",
-        input_text=serialized_queries[-1]["message"] if serialized_queries else "Show starter suggestions.",
-        package=package,
-        feature="query-suggestions",
-    )
+    suggestions: list[str] = []
+    if normalized_chat_mode == "ai":
+        package = generate_query_package(
+            user_message=serialized_queries[-1]["message"] if serialized_queries else "Show starter suggestions.",
+            item=item_context,
+            history=serialized_queries,
+            catalog_items=list_catalog_items(db),
+            language=normalized_language,
+        )
+        log_ai_package(
+            db,
+            current_user=current_user,
+            route=f"/items/{item_id}/queries/suggestions",
+            input_text=serialized_queries[-1]["message"] if serialized_queries else "Show starter suggestions.",
+            package=package,
+            feature="query-suggestions",
+        )
+        suggestions = package.get("suggestions", [])
     return {
         "queries": serialized_queries,
         "response": {"message": ""},
-        "suggestions": package.get("suggestions", []),
+        "suggestions": suggestions,
+        "chat_mode": normalized_chat_mode,
+        "language": normalized_language,
     }
 
 
@@ -1433,48 +1728,70 @@ def create_query(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    item = fetch_item_or_404(db, item_id)
-    reporter = get_item_reporter(db, item)
-    moderation = moderate_request(
+    route = f"/items/{item_id}/query"
+    normalized_language, normalized_chat_mode = resolve_query_preferences(
+        current_user,
+        language=payload.language,
+        chat_mode=payload.chat_mode,
+    )
+    enforce_moderation(
         db,
         current_user=current_user,
-        route=f"/items/{item_id}/query",
+        route=route,
         input_text=payload.message,
+        blocked_reason="Message rejected due to content policy.",
     )
-    if not moderation.get("allowed", False):
-        return blocked_response(str(moderation.get("reason", "Query was blocked.")))
-
+    item = fetch_item_or_404(db, item_id)
+    reporter = get_item_reporter(db, item)
     message = moderate_field(payload.message, "Query message", min_meaningful_chars=6, max_chars=220)
     existing_queries = get_query_messages_for_scope(db, user_id=current_user.id, item_id=item_id)
     serialized_history = serialize_query_list(db, existing_queries)
-    package = generate_query_package(
-        user_message=message,
-        item=item_to_query_context(item, reporter),
-        history=serialized_history,
-        catalog_items=list_catalog_items(db),
-    )
-    log_ai_package(
-        db,
-        current_user=current_user,
-        route=f"/items/{item_id}/query",
-        input_text=message,
-        package=package,
-        feature="item-query",
-    )
+    package = None
+    if normalized_chat_mode == "ai":
+        package = generate_query_package(
+            user_message=message,
+            item=item_to_query_context(item, reporter),
+            history=serialized_history,
+            catalog_items=list_catalog_items(db),
+            language=normalized_language,
+        )
+        log_ai_package(
+            db,
+            current_user=current_user,
+            route=f"/items/{item_id}/query",
+            input_text=message,
+            package=package,
+            feature="item-query",
+        )
 
-    user_query = QueryMessage(item_id=item_id, user_id=current_user.id, role="user", message=message)
-    system_query = QueryMessage(item_id=item_id, user_id=current_user.id, role="system", message=package["reply"])
+    user_query = QueryMessage(
+        item_id=item_id,
+        user_id=current_user.id,
+        role="user",
+        message=message,
+        chat_mode=normalized_chat_mode,
+        language=normalized_language,
+    )
     db.add(user_query)
-    db.add(system_query)
+    if package:
+        db.add(QueryMessage(
+            item_id=item_id,
+            user_id=current_user.id,
+            role="system",
+            message=package["reply"],
+            chat_mode=normalized_chat_mode,
+            language=normalized_language,
+        ))
     db.commit()
     db.refresh(user_query)
-    db.refresh(system_query)
 
     queries = get_query_messages_for_scope(db, user_id=current_user.id, item_id=item_id)
     return {
         "queries": serialize_query_list(db, queries),
-        "response": {"message": package["reply"]},
-        "suggestions": package.get("suggestions", []),
+        "response": {"message": package["reply"] if package else query_saved_message(normalized_language)},
+        "suggestions": package.get("suggestions", []) if package else [],
+        "chat_mode": normalized_chat_mode,
+        "language": normalized_language,
     }
 
 

@@ -39,3 +39,39 @@
 2026-05-02 16:31:25,306 admin_id=1 admin_username=Jason action=demote-user claim_id= item_id= note=target_user_id=2
 2026-05-02 16:35:04,532 admin_id=1 admin_username=Jason action=promote-user claim_id= item_id= note=target_user_id=5
 2026-05-02 16:35:20,687 admin_id=1 admin_username=Jason action=review-item claim_id= item_id=8 note=review_status=incomplete
+2026-05-02 17:58:03,163 admin_id=1 admin_username=Jason action=delete-user claim_id= item_id= note=deleted_user_id=5
+2026-05-02 17:58:23,253 admin_id=1 admin_username=Jason action=approve-claim claim_id=1 item_id=2 note=claim_status=approved item_claimed=True
+2026-05-02 17:58:29,759 admin_id=1 admin_username=Jason action=delete-claim claim_id=2 item_id= note=claim_status=rejected
+2026-05-02 17:58:44,561 admin_id=1 admin_username=Jason action=delete-item claim_id= item_id=8 note=title=white water bottle
+2026-05-02 17:58:46,677 admin_id=1 admin_username=Jason action=delete-item claim_id= item_id=6 note=title=WATER BOTTLE BLUE
+2026-05-02 17:58:49,526 admin_id=1 admin_username=Jason action=delete-item claim_id= item_id=7 note=title=blue water bottle
+2026-05-02 17:58:52,429 admin_id=1 admin_username=Jason action=delete-item claim_id= item_id=5 note=title=FSDFDSFDSFDSF
+2026-05-02 17:58:55,043 admin_id=1 admin_username=Jason action=delete-item claim_id= item_id=4 note=title=fdfdsfdsfsdf
+2026-05-02 17:58:57,794 admin_id=1 admin_username=Jason action=delete-item claim_id= item_id=3 note=title=dsfdsfsd
+2026-05-02 17:58:59,545 admin_id=1 admin_username=Jason action=delete-item claim_id= item_id=2 note=title=THIS IS GOOD
+2026-05-02 17:59:01,529 admin_id=1 admin_username=Jason action=delete-item claim_id= item_id=1 note=title=hello
+2026-05-02 21:38:43,248 route=/items/1/claim user_id=1 username=Jason reason=Claim rejected because the provided details do not match the reported item closely enough. content=water bottle lost at scratch brick in sports hall red and in sports hall
+2026-05-03 07:37:35,108 route=/query user_id=1 username=Jason reason=gibberish content=ifkjdsfadsfsdfads
+2026-05-03 07:37:57,908 route=/items/3/query user_id=1 username=Jason reason=spam/gibberish content=yo chat
+2026-05-03 07:39:29,953 route=/items/5/query user_id=1 username=Jason reason=repeated characters or obvious keyboard mash content=fsdafasdfadsfsdafads
+2026-05-03 07:40:22,368 route=/items/5/query user_id=1 username=Jason reason=repeated characters content=iyjtftyf
+2026-05-03 07:43:44,380 route=/items/report user_id=1 username=Jason reason=contains non-sensical phrase and repeated slang content=DA BRICK TIS IS THE BRICKENTISER New Sports Hall Electronics
+2026-05-03 07:44:23,216 route=/items/report user_id=1 username=Jason reason=Repetitive characters and lack of semantic content content=DA BRICK TIS IS THE BRICKENTISER bRO SUBMIT THIS New Sports Hall Electronics
+2026-05-03 08:33:01,203 route=/items/8/claim user_id=2 username=joshua reason=Claim rejected because the provided details do not match the reported item closely enough. content=this is my apple pencil scratched, new white Apple Pencil library has a little sticker on the apple pencil
+2026-05-03 08:35:02,288 admin_id=1 admin_username=Jason action=mark-item-claimed claim_id= item_id=8 note=item_status=Claimed
+2026-05-03 08:35:16,715 admin_id=1 admin_username=Jason action=override-abuse claim_id= item_id=8 note=abuse_override_status=
+2026-05-03 08:35:19,119 admin_id=1 admin_username=Jason action=override-abuse claim_id= item_id=8 note=abuse_override_status=flag
+2026-05-03 08:35:21,403 admin_id=1 admin_username=Jason action=override-abuse claim_id= item_id=8 note=abuse_override_status=allow
+2026-05-03 08:35:24,214 admin_id=1 admin_username=Jason action=override-abuse claim_id= item_id=8 note=abuse_override_status=allow
+2026-05-03 08:35:26,384 admin_id=1 admin_username=Jason action=override-abuse claim_id= item_id=8 note=abuse_override_status=flag
+2026-05-03 08:35:33,775 admin_id=1 admin_username=Jason action=override-abuse claim_id= item_id=8 note=abuse_override_status=
+2026-05-03 08:35:36,881 admin_id=1 admin_username=Jason action=override-abuse claim_id= item_id=8 note=abuse_override_status=
+2026-05-03 08:35:39,802 admin_id=1 admin_username=Jason action=review-item claim_id= item_id=8 note=review_status=rejected
+2026-05-03 08:35:42,502 admin_id=1 admin_username=Jason action=review-item claim_id= item_id=8 note=review_status=approved
+2026-05-03 08:35:49,522 admin_id=1 admin_username=Jason action=review-item claim_id= item_id=8 note=review_status=approved
+2026-05-03 08:35:52,089 admin_id=1 admin_username=Jason action=delete-item claim_id= item_id=8 note=title=Apple Pencil
+2026-05-03 08:35:58,500 admin_id=1 admin_username=Jason action=override-abuse claim_id= item_id=7 note=abuse_override_status=
+2026-05-03 08:36:22,312 route=/query user_id=1 username=Jason reason=Spam/Non-sense language, Not relevant to lost-and-found content=what are your fav movies guys
+2026-05-03 08:36:41,233 route=/query user_id=1 username=Jason reason=no semantic content content=uh guys hi
+2026-05-03 08:36:58,943 route=/query user_id=1 username=Jason reason=gibberish, nonsense content=yoooooo wassup chat
+2026-05-03 08:39:46,393 route=/query user_id=1 username=Jason reason=abusive, threatening, or inappropriate language content=bruh this chat is unhinged

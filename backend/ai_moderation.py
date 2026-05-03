@@ -10,7 +10,7 @@ import requests
 from backend.moderation import BLOCKED_WORDS, clean_text
 from backend.ollama_tagger import OLLAMA_TEXT_MODEL, OLLAMA_TIMEOUT, OLLAMA_URL
 
-PROMPT_TEMPLATE = """You are a simple classifier.
+PROMPT_TEMPLATE = """You are a strict safety classifier for a school lost-and-found chat.
 
 Is this about a lost or found item?
 
@@ -22,12 +22,19 @@ Answer ONLY JSON:
   "confidence": 0-1
 }
 
-Be lenient:
-- allow short phrases
-- allow incomplete sentences
-- allow simple object mentions
+Allow only if the message is both relevant and usable.
 
-Block ONLY if clearly unrelated."""
+Block if any of these are true:
+- spam, gibberish, nonsense, meme phrases, trolling, repeated slang
+- abusive, threatening, or inappropriate language
+- repeated characters or obvious keyboard mash
+- extremely low-effort input with under 6 meaningful characters
+- no semantic content, even if it mentions an object
+- clearly unrelated to lost-and-found
+
+Be careful:
+- short but meaningful item reports like "lost phone library" can be allowed
+- generic junk like "skibidi", "aaaaaaa", "mine", or "help pls" should be blocked"""
 
 logger = logging.getLogger("lostfound.ai_moderation")
 
@@ -90,6 +97,13 @@ CLEARLY_UNRELATED_PATTERNS = [
 SPAM_PATTERNS = [
     re.compile(r"(.)\1{6,}"),
     re.compile(r"https?://|www\.", re.IGNORECASE),
+    re.compile(r"\b(?:skibidi|sigma|gyatt|rizz|fanum|ohio|brainrot|sus|sussy)\b", re.IGNORECASE),
+    re.compile(r"\b(?:lol|lmao|rofl)\b.{0,12}\b(?:lol|lmao|rofl)\b", re.IGNORECASE),
+    re.compile(r"\b[a-z]{1,3}\b(?:\s+\b[a-z]{1,3}\b){4,}", re.IGNORECASE),
+]
+LOW_EFFORT_PATTERNS = [
+    re.compile(r"^\s*(mine|help|pls|please|idk|ok|okay)\s*$", re.IGNORECASE),
+    re.compile(r"^[^a-zA-Z0-9]*$"),
 ]
 
 
@@ -125,12 +139,28 @@ def _extract_keywords(text: str) -> list[str]:
 def _clear_invalid_reason(text: str) -> str:
     lowered = text.lower()
     words = set(re.findall(r"[a-z']+", lowered))
+    tokens = re.findall(r"[a-z0-9']+", lowered)
+    meaningful_tokens = [token for token in tokens if len(token) >= 2]
+    meaningful_chars = sum(len(token) for token in meaningful_tokens)
+    unique_tokens = set(meaningful_tokens)
 
     if words & BLOCKED_WORDS:
         return "Blocked: offensive content."
 
     if any(pattern.search(text) for pattern in SPAM_PATTERNS):
         return "Blocked: obvious spam."
+
+    if any(pattern.search(text) for pattern in LOW_EFFORT_PATTERNS):
+        return "Blocked: message needs more specific detail."
+
+    if meaningful_chars < 6:
+        return "Blocked: message is too short to review."
+
+    if meaningful_tokens and len(unique_tokens) <= 1 and len(meaningful_tokens) >= 3:
+        return "Blocked: repeated or low-effort wording."
+
+    if len(meaningful_tokens) >= 4 and len(unique_tokens) <= max(1, len(meaningful_tokens) // 4):
+        return "Blocked: message looks repetitive or nonsensical."
 
     if any(pattern.search(text) for pattern in CLEARLY_UNRELATED_PATTERNS):
         return "Blocked: clearly unrelated to a lost or found item."
@@ -164,6 +194,16 @@ def _extract_json_block(raw_output: str) -> dict:
 
 
 def _fallback_decision(text: str, fallback_reason: str, raw_output: str = "") -> dict:
+    clear_invalid_reason = _clear_invalid_reason(text)
+    if clear_invalid_reason:
+        return {
+            "allowed": False,
+            "reason": clear_invalid_reason,
+            "confidence": 0.92,
+            "tags": _extract_keywords(text),
+            "raw_output": _format_raw_log(raw_output, None, fallback_reason),
+            "fallback_triggered": True,
+        }
     return {
         "allowed": True,
         "reason": "Fallback: assumed relevant",
@@ -189,9 +229,10 @@ def _finalize_decision(text: str, parsed: dict, raw_output: str) -> dict:
         allowed = False
         confidence = max(confidence, 0.9)
         reason = clear_invalid_reason
-    elif explicit_allow is False and confidence >= 0.6:
-        allowed = True
-        reason = "Allowed: not clearly invalid."
+    elif explicit_allow is False:
+        allowed = False
+        if not reason:
+            reason = "Message rejected due to content policy."
     elif not reason:
         reason = "Relevant lost-and-found request."
 

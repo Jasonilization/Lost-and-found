@@ -28,7 +28,7 @@ class AIModerationTests(unittest.TestCase):
     @patch("backend.ai_moderation.requests.post")
     def test_required_allow_queries_are_allowed(self, mock_post) -> None:
         mock_post.return_value = FakeResponse(
-            'Model note\n{"allowed": false, "reason": "too short", "confidence": 0.95}\nDone'
+            'Model note\n{"allowed": true, "reason": "relevant item query", "confidence": 0.95}\nDone'
         )
 
         for text in [
@@ -42,6 +42,17 @@ class AIModerationTests(unittest.TestCase):
                 decision = ai_moderation.classify_user_input(text)
                 self.assertTrue(decision["allowed"])
                 self.assertGreaterEqual(decision["confidence"], 0.5)
+
+    @patch("backend.ai_moderation.requests.post")
+    def test_explicit_model_block_is_not_silently_overridden(self, mock_post) -> None:
+        mock_post.return_value = FakeResponse(
+            'Model note\n{"allowed": false, "reason": "too short", "confidence": 0.95}\nDone'
+        )
+
+        decision = ai_moderation.classify_user_input("blue water bottle in classroom")
+
+        self.assertFalse(decision["allowed"])
+        self.assertEqual(decision["reason"], "too short")
 
     @patch("backend.ai_moderation.requests.post")
     def test_required_block_queries_are_blocked(self, mock_post) -> None:
@@ -59,8 +70,25 @@ class AIModerationTests(unittest.TestCase):
                 self.assertFalse(decision["allowed"])
                 self.assertGreaterEqual(decision["confidence"], 0.6)
 
+    @patch("backend.ai_moderation.requests.post")
+    def test_meme_and_low_effort_queries_are_blocked(self, mock_post) -> None:
+        mock_post.return_value = FakeResponse(
+            json.dumps({"allowed": True, "reason": "looks fine", "confidence": 0.8})
+        )
+
+        for text in [
+            "skibidi",
+            "aaaaaaa",
+            "mine",
+            "lol lol lol lol",
+        ]:
+            with self.subTest(text=text):
+                decision = ai_moderation.classify_user_input(text)
+                self.assertFalse(decision["allowed"])
+                self.assertGreaterEqual(decision["confidence"], 0.8)
+
     @patch("backend.ai_moderation.requests.post", side_effect=requests.Timeout("timed out"))
-    def test_timeout_fallback_defaults_to_allowed(self, _mock_post) -> None:
+    def test_timeout_fallback_defaults_to_allowed_for_clear_item_query(self, _mock_post) -> None:
         decision = ai_moderation.classify_user_input("water bottle")
 
         self.assertTrue(decision["allowed"])
@@ -68,6 +96,14 @@ class AIModerationTests(unittest.TestCase):
         self.assertEqual(decision["confidence"], 0.5)
         self.assertEqual(decision["tags"], ["bottle"])
         self.assertIn("timeout", decision["raw_output"])
+
+    @patch("backend.ai_moderation.requests.post", side_effect=requests.Timeout("timed out"))
+    def test_timeout_fallback_blocks_obvious_spam(self, _mock_post) -> None:
+        decision = ai_moderation.classify_user_input("skibidi aaaaaaa")
+
+        self.assertFalse(decision["allowed"])
+        self.assertIn("Blocked", decision["reason"])
+        self.assertGreaterEqual(decision["confidence"], 0.9)
 
     @patch("backend.ai_moderation.requests.post")
     def test_json_parse_failure_defaults_to_allowed(self, mock_post) -> None:
