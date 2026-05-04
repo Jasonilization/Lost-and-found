@@ -57,6 +57,9 @@ class LostFoundItem(Base):
     abuse_flagged = Column(Boolean, default=False, nullable=False)
     abuse_override_status = Column(String, default="", index=True)
     abuse_override_notes = Column(Text, default="")
+    deleted_at = Column(DateTime, nullable=True, index=True)
+    deleted_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     @property
@@ -74,7 +77,7 @@ class LostFoundItem(Base):
             text_value = str(tag).strip().lower()
             if text_value and text_value not in cleaned:
                 cleaned.append(text_value)
-        self.tags_json = json.dumps(cleaned[:6])
+        self.tags_json = json.dumps(cleaned[:8])
 
     @property
     def evidence_images(self) -> list[str]:
@@ -203,12 +206,74 @@ class QueryMessage(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     role = Column(String, default="user", nullable=False)
     message = Column(Text, nullable=False)
-    chat_mode = Column(String, default="ai", nullable=False)
+    chat_mode = Column(String, default="message", nullable=False)
     language = Column(String, default="en", nullable=False)
     attachment_name = Column(String, default="")
     attachment_path = Column(String, default="")
     attachment_size = Column(Integer, nullable=True)
     attachment_mime_type = Column(String, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    action_type = Column(String, nullable=False, index=True)
+    entity_type = Column(String, default="", index=True)
+    entity_id = Column(Integer, nullable=True, index=True)
+    before_state_json = Column(Text, default="null")
+    after_state_json = Column(Text, default="null")
+    metadata_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    @property
+    def before_state(self) -> object:
+        try:
+            return json.loads(self.before_state_json or "null")
+        except json.JSONDecodeError:
+            return None
+
+    @before_state.setter
+    def before_state(self, value: object) -> None:
+        self.before_state_json = json.dumps(value)
+
+    @property
+    def after_state(self) -> object:
+        try:
+            return json.loads(self.after_state_json or "null")
+        except json.JSONDecodeError:
+            return None
+
+    @after_state.setter
+    def after_state(self, value: object) -> None:
+        self.after_state_json = json.dumps(value)
+
+    @property
+    def audit_metadata(self) -> dict:
+        try:
+            value = json.loads(self.metadata_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+
+    @audit_metadata.setter
+    def audit_metadata(self, value: dict) -> None:
+        self.metadata_json = json.dumps(value or {})
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    event_type = Column(String, nullable=False, index=True)
+    title = Column(String, nullable=False)
+    message = Column(Text, default="")
+    related_item_id = Column(Integer, ForeignKey("lost_found_items.id"), nullable=True, index=True)
+    related_claim_id = Column(Integer, ForeignKey("claims.id"), nullable=True, index=True)
+    read_at = Column(DateTime, nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -261,6 +326,9 @@ def init_db() -> None:
     _add_column_if_missing("lost_found_items", "abuse_flagged", "BOOLEAN NOT NULL DEFAULT 0")
     _add_column_if_missing("lost_found_items", "abuse_override_status", "VARCHAR DEFAULT ''")
     _add_column_if_missing("lost_found_items", "abuse_override_notes", "TEXT DEFAULT ''")
+    _add_column_if_missing("lost_found_items", "deleted_at", "DATETIME")
+    _add_column_if_missing("lost_found_items", "deleted_by_user_id", "INTEGER")
+    _add_column_if_missing("lost_found_items", "updated_at", "DATETIME")
     _add_column_if_missing("users", "initials", "VARCHAR DEFAULT ''")
     _add_column_if_missing("users", "class_of", "INTEGER")
     _add_column_if_missing("users", "avatar_path", "VARCHAR")
@@ -268,7 +336,7 @@ def init_db() -> None:
     _add_column_if_missing("claims", "match_score", "INTEGER NOT NULL DEFAULT 0")
     _add_column_if_missing("claims", "match_reasoning", "TEXT DEFAULT ''")
     _add_column_if_missing("item_queries", "role", "VARCHAR NOT NULL DEFAULT 'user'")
-    _add_column_if_missing("query_messages", "chat_mode", "VARCHAR NOT NULL DEFAULT 'ai'")
+    _add_column_if_missing("query_messages", "chat_mode", "VARCHAR NOT NULL DEFAULT 'message'")
     _add_column_if_missing("query_messages", "language", "VARCHAR NOT NULL DEFAULT 'en'")
     _add_column_if_missing("query_messages", "attachment_name", "VARCHAR DEFAULT ''")
     _add_column_if_missing("query_messages", "attachment_path", "VARCHAR DEFAULT ''")
@@ -285,5 +353,7 @@ def init_db() -> None:
     _create_index_if_missing("ix_lost_found_items_review_status", "lost_found_items", "review_status")
     _create_index_if_missing("ix_lost_found_items_abuse_risk_level", "lost_found_items", "abuse_risk_level")
     _create_index_if_missing("ix_lost_found_items_abuse_override_status", "lost_found_items", "abuse_override_status")
+    _create_index_if_missing("ix_lost_found_items_deleted_at", "lost_found_items", "deleted_at")
+    _create_index_if_missing("ix_lost_found_items_deleted_by_user_id", "lost_found_items", "deleted_by_user_id")
     _create_index_if_missing("ix_ai_inspection_logs_user_id", "ai_inspection_logs", "user_id")
     _create_index_if_missing("ix_ai_inspection_logs_feature", "ai_inspection_logs", "feature")

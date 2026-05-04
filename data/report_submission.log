@@ -1,0 +1,293 @@
+2026-05-04 16:42:31,541 INFO [LLaVA] request payload: {'model': 'llava', 'prompt': 'prompt', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [12], 'stream': False}
+2026-05-04 16:42:31,544 WARNING [LLaVA] tagging failed: Required image model 'llava' is unavailable.
+2026-05-04 16:42:31,545 INFO [LLaVA] tagging started for item upload
+2026-05-04 16:42:31,545 INFO [LLaVA] image bytes: 16
+2026-05-04 16:42:31,545 INFO [LLaVA] response: {"moderation":"SAFE","tags":["water bottle","blue","metal"]}
+2026-05-04 16:42:31,547 INFO [LLaVA] moderation result: SAFE
+2026-05-04 16:42:31,547 INFO [LLaVA] tags generated: ['water bottle', 'blue', 'metal']
+2026-05-04 16:42:31,549 INFO [LLaVA] tagging started for item upload
+2026-05-04 16:42:31,549 INFO [LLaVA] image bytes: 16
+2026-05-04 16:42:31,549 INFO [LLaVA] response: {"moderation":"SAFE","tags":["campus","item","school item"]}
+2026-05-04 16:42:31,549 WARNING [LLaVA] invalid image tags: Image tags were generic and did not reflect visible attributes.
+2026-05-04 16:42:31,549 INFO [LLaVA] moderation result: SAFE
+2026-05-04 16:42:31,550 INFO [LLaVA] tags generated: []
+2026-05-04 16:42:31,551 INFO [LLaVA] tagging started for item upload
+2026-05-04 16:42:31,551 INFO [LLaVA] image bytes: 16
+2026-05-04 16:42:31,551 INFO [LLaVA] response: I cannot see the image.
+2026-05-04 16:42:31,620 INFO [Debug] running llava test filename=debug-test.jpg prompt_mode=inspect
+2026-05-04 16:42:31,701 INFO Received report payload: {'reporter_name': 'Student One', 'title': 'Red Hoodie', 'location': 'Sports Hall', 'category': 'Uniform', 'evidence_details': 'Has a name tag inside the collar.', 'event_date': None, 'has_image': False, 'image_filename': ''}
+2026-05-04 16:42:31,703 ERROR Text tagging failed unexpectedly; using fallback tags.
+Traceback (most recent call last):
+  File "/Users/jasonilization/AI-Powered-Lost-Found-Automation-System/backend/backend.py", line 1616, in report_item
+    ai_result = generate_text_tag_result(
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py", line 1093, in __call__
+    return self._mock_call(*args, **kwargs)
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py", line 1097, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py", line 1152, in _execute_mock_call
+    raise effect
+RuntimeError: ollama failed
+2026-05-04 16:42:31,720 INFO Received report payload: {'reporter_name': 'Student One', 'title': 'Blue Bottle', 'location': 'Long Court', 'category': 'Bottle', 'evidence_details': '', 'event_date': None, 'has_image': True, 'image_filename': 'bottle.jpg'}
+2026-05-04 16:42:31,738 INFO Received report payload: {'reporter_name': 'Student One', 'title': 'Red Hoodie', 'location': 'Sports Hall', 'category': 'Uniform', 'evidence_details': '', 'event_date': None, 'has_image': True, 'image_filename': 'hoodie.jpg'}
+2026-05-04 16:42:31,740 WARNING [LLaVA] tagging failed for item Red Hoodie: SAFE response did not include usable tags.
+2026-05-04 16:42:31,754 INFO Received report payload: {'reporter_name': 'Student One', 'title': 'Blue Bottle', 'location': 'Long Court', 'category': 'Bottle', 'evidence_details': '', 'event_date': None, 'has_image': True, 'image_filename': 'bottle.jpg'}
+2026-05-04 17:02:06,456 INFO [LLaVA] request payload: {'model': 'llava', 'prompt': 'prompt', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [12], 'stream': False}
+2026-05-04 17:02:06,459 WARNING [LLaVA] tagging failed: Required image model 'llava' is unavailable.
+2026-05-04 17:02:06,461 INFO [LLaVA] tagging started for item upload
+2026-05-04 17:02:06,461 INFO [LLaVA] image bytes: 16
+2026-05-04 17:02:06,461 INFO [LLaVA] response: {"moderation":"SAFE","tags":["water bottle","blue","metal"]}
+2026-05-04 17:02:06,462 INFO [LLaVA] moderation result: SAFE
+2026-05-04 17:02:06,462 INFO [LLaVA] tags generated: ['water bottle', 'blue', 'metal']
+2026-05-04 17:02:06,463 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 17:02:06,464 INFO [LLaVA] tagging started for item upload
+2026-05-04 17:02:06,464 INFO [LLaVA] image bytes: 16
+2026-05-04 17:02:06,465 INFO [LLaVA] response: {"moderation":"SAFE","tags":["campus","item","school item"]}
+2026-05-04 17:02:06,465 WARNING [LLaVA] invalid image tags: Image tags were generic and did not reflect visible attributes.
+2026-05-04 17:02:06,465 INFO [LLaVA] moderation result: SAFE
+2026-05-04 17:02:06,465 INFO [LLaVA] tags generated: []
+2026-05-04 17:02:06,466 INFO [LLaVA] tagging started for item upload
+2026-05-04 17:02:06,467 INFO [LLaVA] image bytes: 16
+2026-05-04 17:02:06,467 INFO [LLaVA] response: I cannot see the image.
+2026-05-04 17:02:06,535 INFO [Debug] running llava test filename=debug-test.jpg prompt_mode=inspect
+2026-05-04 17:02:06,612 INFO Received report payload: {'reporter_name': 'Student One', 'title': 'Red Hoodie', 'location': 'Sports Hall', 'category': 'Uniform', 'evidence_details': 'Has a name tag inside the collar.', 'event_date': None, 'has_image': False, 'image_filename': ''}
+2026-05-04 17:02:06,614 ERROR Text tagging failed unexpectedly; using fallback tags.
+Traceback (most recent call last):
+  File "/Users/jasonilization/AI-Powered-Lost-Found-Automation-System/backend/backend.py", line 1616, in report_item
+    ai_result = generate_text_tag_result(
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py", line 1093, in __call__
+    return self._mock_call(*args, **kwargs)
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py", line 1097, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py", line 1152, in _execute_mock_call
+    raise effect
+RuntimeError: ollama failed
+2026-05-04 17:02:06,633 INFO Received report payload: {'reporter_name': 'Student One', 'title': 'Blue Bottle', 'location': 'Long Court', 'category': 'Bottle', 'evidence_details': '', 'event_date': None, 'has_image': True, 'image_filename': 'bottle.jpg'}
+2026-05-04 17:02:06,650 INFO Received report payload: {'reporter_name': 'Student One', 'title': 'Red Hoodie', 'location': 'Sports Hall', 'category': 'Uniform', 'evidence_details': '', 'event_date': None, 'has_image': True, 'image_filename': 'hoodie.jpg'}
+2026-05-04 17:02:06,652 WARNING [LLaVA] tagging failed for item Red Hoodie: SAFE response did not include usable tags.
+2026-05-04 17:02:06,667 INFO Received report payload: {'reporter_name': 'Student One', 'title': 'Blue Bottle', 'location': 'Long Court', 'category': 'Bottle', 'evidence_details': '', 'event_date': None, 'has_image': True, 'image_filename': 'bottle.jpg'}
+2026-05-04 17:24:41,145 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 17:26:11,577 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 17:27:47,745 INFO Received report payload: {'reporter_name': 'Jasonilization', 'title': '2 water bottles', 'location': 'Long Court', 'category': 'Bottle', 'evidence_details': '', 'event_date': '2026-05-04', 'has_image': True, 'image_filename': 'Francisco_de_Goya-_Saturno_devorando_a_su_hijo_-1819-1823.jpg'}
+2026-05-04 17:27:54,708 INFO [Upload] received image payload filename=Francisco_de_Goya-_Saturno_devorando_a_su_hijo_-1819-1823.jpg content_type=image/jpeg base64_length=327464
+2026-05-04 17:27:54,709 INFO [Upload] decoded image bytes filename=Francisco_de_Goya-_Saturno_devorando_a_su_hijo_-1819-1823.jpg bytes=245597
+2026-05-04 17:27:54,710 INFO [Upload] saved image filename=Francisco_de_Goya-_Saturno_devorando_a_su_hijo_-1819-1823.jpg stored_name=9d189765a68147ddaf2392a73138adba.jpg bytes=245597 mime_type=image/jpeg path=/uploads/9d189765a68147ddaf2392a73138adba.jpg
+2026-05-04 17:27:54,718 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 17:27:54,718 INFO [LLaVA] tagging started for item 2 water bottles
+2026-05-04 17:27:54,718 INFO [LLaVA] image bytes: 327464
+2026-05-04 17:27:54,718 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'Perform both checks below on the same image in one pass.\nSafety prompt:\nIs this image appropriate for a school lost and found system?\nAnswer ONLY: SAFE or UNSAFE.\nTagging prompt:\nAnalyze this image of a lost item.\nReturn ONLY a list of 5-8 short tags (1-3 words each).\nNo sentences. No explanation. No punctuation except commas.\nFocus on object type, color, brand, and distinctive features.\nReturn ONLY valid JSON in this exact shape: {"moderation":"SAFE","tags":["tag 1","tag 2"]}\nIf the image is inappropriate, return ONLY: {"moderation":"UNSAFE","tags":[]}\nIf the image is safe, include 5 to 8 short tags using 1 to 3 words each.\nNo extra keys. No explanation. Focus tags on object type, color, brand, and distinctive features.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [327464], 'stream': False}
+2026-05-04 17:28:11,200 INFO [LLaVA] response: {"moderation":"SAFE","tags":["artwork","oil painting","painting","classical art","religion","figurine","antique"]}
+2026-05-04 17:28:11,204 WARNING [LLaVA] invalid image tags: Image tags did not include a visible color.
+2026-05-04 17:28:11,210 INFO [LLaVA] moderation result: SAFE
+2026-05-04 17:28:11,210 INFO [LLaVA] tags generated: []
+2026-05-04 17:28:11,210 WARNING [LLaVA] tagging rejected for item 2 water bottles: Image tags did not include a visible color.
+2026-05-04 17:28:11,235 INFO [LLaVA] request payload: {'model': 'llama3:8b', 'prompt': 'Generate 3 short tags for this item: Colored water bottle, 2 water bottles one small one big, outside in the long court', 'has_images': False, 'images_count': 0, 'image_base64_lengths': [], 'stream': False}
+2026-05-04 17:29:45,441 INFO Received report payload: {'reporter_name': 'Jasonilization', 'title': 'Macbook', 'location': 'New Sports Hall', 'category': 'Electronics', 'evidence_details': '', 'event_date': '2026-05-04', 'has_image': True, 'image_filename': 'Photo.jpg'}
+2026-05-04 17:29:50,458 INFO [Upload] received image payload filename=Photo.jpg content_type=image/jpeg base64_length=116600
+2026-05-04 17:29:50,460 INFO [Upload] decoded image bytes filename=Photo.jpg bytes=87449
+2026-05-04 17:29:50,462 INFO [Upload] saved image filename=Photo.jpg stored_name=7ac69262d5974205a3becc8af12ac6d9.jpg bytes=87449 mime_type=image/jpeg path=/uploads/7ac69262d5974205a3becc8af12ac6d9.jpg
+2026-05-04 17:29:50,510 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 17:29:50,510 INFO [LLaVA] tagging started for item Macbook
+2026-05-04 17:29:50,510 INFO [LLaVA] image bytes: 116600
+2026-05-04 17:29:50,510 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'Perform both checks below on the same image in one pass.\nSafety prompt:\nIs this image appropriate for a school lost and found system?\nAnswer ONLY: SAFE or UNSAFE.\nTagging prompt:\nAnalyze this image of a lost item.\nReturn ONLY a list of 5-8 short tags (1-3 words each).\nNo sentences. No explanation. No punctuation except commas.\nFocus on object type, color, brand, and distinctive features.\nReturn ONLY valid JSON in this exact shape: {"moderation":"SAFE","tags":["tag 1","tag 2"]}\nIf the image is inappropriate, return ONLY: {"moderation":"UNSAFE","tags":[]}\nIf the image is safe, include 5 to 8 short tags using 1 to 3 words each.\nNo extra keys. No explanation. Focus tags on object type, color, brand, and distinctive features.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [116600], 'stream': False}
+2026-05-04 17:30:01,310 INFO [LLaVA] response: ```json
+{
+  "moderation":"SAFE",
+  "tags":["pixel art","retro","monkey","pokemon"]
+}
+```
+2026-05-04 17:30:01,314 WARNING [LLaVA] invalid image tags: Image tags did not include a visible color.
+2026-05-04 17:30:01,314 INFO [LLaVA] moderation result: SAFE
+2026-05-04 17:30:01,314 INFO [LLaVA] tags generated: []
+2026-05-04 17:30:01,314 WARNING [LLaVA] tagging rejected for item Macbook: Image tags did not include a visible color.
+2026-05-04 17:30:01,336 INFO [LLaVA] request payload: {'model': 'llama3:8b', 'prompt': 'Generate 3 short tags for this item: Macbook, silver 13inch in the sports hall. has stickers', 'has_images': False, 'images_count': 0, 'image_base64_lengths': [], 'stream': False}
+2026-05-04 17:31:21,578 INFO Received report payload: {'reporter_name': 'Jasonilization', 'title': 'Backrooms', 'location': 'Senior Building - Room S302', 'category': 'Electronics', 'evidence_details': '', 'event_date': '2026-05-04', 'has_image': True, 'image_filename': '0018.jpg'}
+2026-05-04 17:31:25,979 INFO [Upload] received image payload filename=0018.jpg content_type=image/jpeg base64_length=59772
+2026-05-04 17:31:25,982 INFO [Upload] decoded image bytes filename=0018.jpg bytes=44827
+2026-05-04 17:31:25,983 INFO [Upload] saved image filename=0018.jpg stored_name=d56125d2100b40528700af30a4890158.jpg bytes=44827 mime_type=image/jpeg path=/uploads/d56125d2100b40528700af30a4890158.jpg
+2026-05-04 17:31:25,995 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 17:31:25,995 INFO [LLaVA] tagging started for item Backrooms
+2026-05-04 17:31:25,995 INFO [LLaVA] image bytes: 59772
+2026-05-04 17:31:25,995 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'Perform both checks below on the same image in one pass.\nSafety prompt:\nIs this image appropriate for a school lost and found system?\nAnswer ONLY: SAFE or UNSAFE.\nTagging prompt:\nAnalyze this image of a lost item.\nReturn ONLY a list of 5-8 short tags (1-3 words each).\nNo sentences. No explanation. No punctuation except commas.\nFocus on object type, color, brand, and distinctive features.\nReturn ONLY valid JSON in this exact shape: {"moderation":"SAFE","tags":["tag 1","tag 2"]}\nIf the image is inappropriate, return ONLY: {"moderation":"UNSAFE","tags":[]}\nIf the image is safe, include 5 to 8 short tags using 1 to 3 words each.\nNo extra keys. No explanation. Focus tags on object type, color, brand, and distinctive features.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [59772], 'stream': False}
+2026-05-04 17:31:36,246 INFO [LLaVA] response: {"moderation":"SAFE","tags":["office","yellow wall","cubicle","empty","unremarkable"]}
+2026-05-04 17:31:36,248 WARNING [LLaVA] invalid image tags: Image tags did not include a visible object type.
+2026-05-04 17:31:36,248 INFO [LLaVA] moderation result: SAFE
+2026-05-04 17:31:36,248 INFO [LLaVA] tags generated: []
+2026-05-04 17:31:36,248 WARNING [LLaVA] tagging rejected for item Backrooms: Image tags did not include a visible object type.
+2026-05-04 17:31:36,264 INFO [LLaVA] request payload: {'model': 'llama3:8b', 'prompt': 'Generate 3 short tags for this item: Found this place while going into the English classroom. anyone help', 'has_images': False, 'images_count': 0, 'image_base64_lengths': [], 'stream': False}
+2026-05-04 17:37:07,499 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 17:37:37,362 INFO Received report payload: {'reporter_name': 'Jasonilization', 'title': 'BACKROOMS', 'location': 'Sports Hall', 'category': 'Electronics', 'evidence_details': '', 'event_date': '2026-05-04', 'has_image': True, 'image_filename': '0020.jpg'}
+2026-05-04 17:38:00,243 INFO Received report payload: {'reporter_name': 'Jasonilization', 'title': 'BACKROOMS', 'location': 'Sports Hall', 'category': 'Electronics', 'evidence_details': '', 'event_date': '2026-05-04', 'has_image': True, 'image_filename': '0020.jpg'}
+2026-05-04 17:38:02,699 INFO [Upload] received image payload filename=0020.jpg content_type=image/jpeg base64_length=64524
+2026-05-04 17:38:02,699 INFO [Upload] decoded image bytes filename=0020.jpg bytes=48393
+2026-05-04 17:38:02,700 INFO [Upload] saved image filename=0020.jpg stored_name=60dc04db34bc42ae960511b6e0279d5d.jpg bytes=48393 mime_type=image/jpeg path=/uploads/60dc04db34bc42ae960511b6e0279d5d.jpg
+2026-05-04 17:38:02,709 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 17:38:02,709 INFO [LLaVA] tagging started for item BACKROOMS
+2026-05-04 17:38:02,709 INFO [LLaVA] image bytes: 64524
+2026-05-04 17:38:02,709 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'Perform both checks below on the same image in one pass.\nSafety prompt:\nIs this image appropriate for a school lost and found system?\nAnswer ONLY: SAFE or UNSAFE.\nTagging prompt:\nAnalyze this image of a lost item.\nReturn ONLY a list of 5-8 short tags (1-3 words each).\nNo sentences. No explanation. No punctuation except commas.\nFocus on object type, color, brand, and distinctive features.\nReturn ONLY valid JSON in this exact shape: {"moderation":"SAFE","tags":["tag 1","tag 2"]}\nIf the image is inappropriate, return ONLY: {"moderation":"UNSAFE","tags":[]}\nIf the image is safe, include 5 to 8 short tags using 1 to 3 words each.\nNo extra keys. No explanation. Focus tags on object type, color, brand, and distinctive features.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [64524], 'stream': False}
+2026-05-04 17:38:19,898 INFO [LLaVA] response: {"moderation":"SAFE","tags":["office space","empty","beige walls","no people","recessed lighting"]}
+2026-05-04 17:38:19,900 WARNING [LLaVA] invalid image tags: Image tags did not include a visible color.
+2026-05-04 17:38:19,900 INFO [LLaVA] moderation result: SAFE
+2026-05-04 17:38:19,900 INFO [LLaVA] tags generated: []
+2026-05-04 17:38:19,901 WARNING [LLaVA] tagging rejected for item BACKROOMS: Image tags did not include a visible color.
+2026-05-04 17:38:19,909 INFO [LLaVA] request payload: {'model': 'llama3:8b', 'prompt': "Generate 3 short tags for this item: stumbed into wall, now I see this room, I'm lost guys help. I have a lost water bottle, it's scratched, has my name on it", 'has_images': False, 'images_count': 0, 'image_base64_lengths': [], 'stream': False}
+2026-05-04 17:46:39,703 INFO Received report payload: {'reporter_name': 'Jasonilization', 'title': 'BACKROOMS', 'location': 'Library', 'category': 'Electronics', 'evidence_details': '', 'event_date': '2026-05-04', 'has_image': True, 'image_filename': '0003.jpg'}
+2026-05-04 17:47:09,412 INFO Received report payload: {'reporter_name': 'Jasonilization', 'title': 'BACKROOMS', 'location': 'Library', 'category': 'Electronics', 'evidence_details': '', 'event_date': '2026-05-04', 'has_image': True, 'image_filename': '0003.jpg'}
+2026-05-04 17:47:20,363 INFO Received report payload: {'reporter_name': 'Jasonilization', 'title': 'BACKROOMS', 'location': 'Library', 'category': 'Electronics', 'evidence_details': '', 'event_date': '2026-05-04', 'has_image': True, 'image_filename': '0003.jpg'}
+2026-05-04 17:47:23,189 INFO [Upload] received image payload filename=0003.jpg content_type=image/jpeg base64_length=40492
+2026-05-04 17:47:23,191 INFO [Upload] decoded image bytes filename=0003.jpg bytes=30368
+2026-05-04 17:47:23,191 INFO [Upload] saved image filename=0003.jpg stored_name=0d1aa65db47740cb8711e6628a7571ce.jpg bytes=30368 mime_type=image/jpeg path=/uploads/0d1aa65db47740cb8711e6628a7571ce.jpg
+2026-05-04 17:47:23,200 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 17:47:23,200 INFO [LLaVA] tagging started for item BACKROOMS
+2026-05-04 17:47:23,200 INFO [LLaVA] image bytes: 40492
+2026-05-04 17:47:23,200 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'Perform both checks below on the same image in one pass.\nSafety prompt:\nIs this image appropriate for a school lost and found system?\nAnswer ONLY: SAFE or UNSAFE.\nTagging prompt:\nAnalyze this image of a lost item.\nReturn ONLY a list of 5-8 short tags (1-3 words each).\nNo sentences. No explanation. No punctuation except commas.\nFocus on object type, color, brand, and distinctive features.\nReturn ONLY valid JSON in this exact shape: {"moderation":"SAFE","tags":["tag 1","tag 2"]}\nIf the image is inappropriate, return ONLY: {"moderation":"UNSAFE","tags":[]}\nIf the image is safe, include 5 to 8 short tags using 1 to 3 words each.\nNo extra keys. No explanation. Focus tags on object type, color, brand, and distinctive features.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [40492], 'stream': False}
+2026-05-04 17:47:40,904 INFO [LLaVA] response: {"moderation":"UNSAFE","tags":["blank wall","no lost item"]}
+2026-05-04 17:47:40,913 INFO [LLaVA] moderation result: UNSAFE
+2026-05-04 17:47:40,913 INFO [LLaVA] tags generated: ['blank wall', 'no lost item']
+2026-05-04 17:48:06,671 INFO Received report payload: {'reporter_name': 'Jasonilization', 'title': 'BACKROOMS', 'location': 'Library', 'category': 'Electronics', 'evidence_details': '', 'event_date': '2026-05-04', 'has_image': True, 'image_filename': 'flipper-iOS-Dark-1024x1024-2x.jpg'}
+2026-05-04 17:48:06,708 INFO [Upload] received image payload filename=flipper-iOS-Dark-1024x1024-2x.jpg content_type=image/jpeg base64_length=126700
+2026-05-04 17:48:06,715 INFO [Upload] decoded image bytes filename=flipper-iOS-Dark-1024x1024-2x.jpg bytes=95024
+2026-05-04 17:48:06,723 INFO [Upload] saved image filename=flipper-iOS-Dark-1024x1024-2x.jpg stored_name=9eea654f0aaa4624b5c729296dd2c4e7.jpg bytes=95024 mime_type=image/jpeg path=/uploads/9eea654f0aaa4624b5c729296dd2c4e7.jpg
+2026-05-04 17:48:06,896 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 17:48:06,899 INFO [LLaVA] tagging started for item BACKROOMS
+2026-05-04 17:48:06,899 INFO [LLaVA] image bytes: 126700
+2026-05-04 17:48:06,899 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'Perform both checks below on the same image in one pass.\nSafety prompt:\nIs this image appropriate for a school lost and found system?\nAnswer ONLY: SAFE or UNSAFE.\nTagging prompt:\nAnalyze this image of a lost item.\nReturn ONLY a list of 5-8 short tags (1-3 words each).\nNo sentences. No explanation. No punctuation except commas.\nFocus on object type, color, brand, and distinctive features.\nReturn ONLY valid JSON in this exact shape: {"moderation":"SAFE","tags":["tag 1","tag 2"]}\nIf the image is inappropriate, return ONLY: {"moderation":"UNSAFE","tags":[]}\nIf the image is safe, include 5 to 8 short tags using 1 to 3 words each.\nNo extra keys. No explanation. Focus tags on object type, color, brand, and distinctive features.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [126700], 'stream': False}
+2026-05-04 17:48:20,913 INFO [LLaVA] response: ```json
+{"moderation":"SAFE","tags":["retro", "pixelated", "old game", "small animal", "simple art"]}
+```
+2026-05-04 17:48:20,916 WARNING [LLaVA] invalid image tags: Image tags did not include a visible color.
+2026-05-04 17:48:20,916 INFO [LLaVA] moderation result: SAFE
+2026-05-04 17:48:20,916 INFO [LLaVA] tags generated: []
+2026-05-04 17:48:20,916 WARNING [LLaVA] tagging rejected for item BACKROOMS: Image tags did not include a visible color.
+2026-05-04 17:48:20,936 INFO [LLaVA] request payload: {'model': 'llama3:8b', 'prompt': 'Generate 3 short tags for this item: I LOSTA A APPLE PENCIL WATER BOTTLE HAS SCRATCHES ON IT, A FEW KEYCHAINS TOO', 'has_images': False, 'images_count': 0, 'image_base64_lengths': [], 'stream': False}
+2026-05-04 18:02:02,355 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 18:02:05,985 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 18:02:06,511 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 18:02:06,669 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 18:02:06,999 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 18:02:07,138 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 18:02:19,161 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 18:02:28,047 INFO Received report payload: {'reporter_name': 'Jasonilization', 'title': 'B ACKROOMS', 'location': 'New Sports Hall', 'category': 'Electronics', 'evidence_details': '', 'event_date': '2026-05-04', 'has_image': True, 'image_filename': '0005.jpg'}
+2026-05-04 18:02:37,050 INFO [Upload] received image payload filename=0005.jpg content_type=image/jpeg base64_length=69456
+2026-05-04 18:02:37,051 INFO [Upload] decoded image bytes filename=0005.jpg bytes=52091
+2026-05-04 18:02:37,052 INFO [Upload] saved image filename=0005.jpg stored_name=78c814e8def944b191c3a3b1db7a981f.jpg bytes=52091 mime_type=image/jpeg path=/uploads/78c814e8def944b191c3a3b1db7a981f.jpg
+2026-05-04 18:02:37,060 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 18:02:37,061 INFO [LLaVA] tagging started for item B ACKROOMS
+2026-05-04 18:02:37,061 INFO [LLaVA] image bytes: 69456
+2026-05-04 18:02:37,061 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'Perform both checks below on the same image in one pass.\nSafety prompt:\nIs this image appropriate for a school lost and found system?\nAnswer ONLY: SAFE or UNSAFE.\nTagging prompt:\nAnalyze this image of a lost item.\nReturn ONLY a list of 5-8 short tags (1-3 words each).\nNo sentences. No explanation. No punctuation except commas.\nFocus on object type, color, brand, and distinctive features.\nReturn ONLY valid JSON in this exact shape: {"moderation":"SAFE","tags":["tag 1","tag 2"]}\nIf the image is inappropriate, return ONLY: {"moderation":"UNSAFE","tags":[]}\nIf the image is safe, include 5 to 8 short tags using 1 to 3 words each.\nNo extra keys. No explanation. Focus tags on object type, color, brand, and distinctive features.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [69456], 'stream': False}
+2026-05-04 18:02:56,349 INFO [LLaVA] response: {"moderation":"SAFE","tags":["yellow wall","white patterned","ceiling tiles","empty hallway","nothing found"]}
+2026-05-04 18:02:56,356 WARNING [LLaVA] invalid image tags: Image tags did not include a visible object type.
+2026-05-04 18:02:56,356 INFO [LLaVA] moderation result: SAFE
+2026-05-04 18:02:56,356 INFO [LLaVA] tags generated: []
+2026-05-04 18:02:56,357 WARNING [LLaVA] tagging rejected for item B ACKROOMS: Image tags did not include a visible object type.
+2026-05-04 18:02:56,406 INFO [LLaVA] request payload: {'model': 'llama3:8b', 'prompt': 'Generate 3 short tags for this item: I LOSTA A APPLE PENCIL WATER BOTTLE HAS SCRATCHES ON IT, A FEW KEYCHAINS TOO', 'has_images': False, 'images_count': 0, 'image_base64_lengths': [], 'stream': False}
+2026-05-04 18:03:17,522 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 18:03:17,523 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 18:03:17,523 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 18:03:17,523 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 18:03:21,015 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 18:03:31,411 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 18:03:43,407 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 18:03:55,307 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 18:04:07,323 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 18:04:19,368 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 18:04:31,402 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 18:04:43,496 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 18:04:59,641 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 19:05:56,040 INFO Received report payload: {'reporter_name': 'Jasonilization', 'title': 'Blue water bottle', 'location': 'New Sports Hall', 'category': 'Electronics', 'evidence_details': '', 'event_date': '2026-05-04', 'has_image': True, 'image_filename': '0012.jpg'}
+2026-05-04 19:06:04,457 INFO [Upload] received image payload filename=0012.jpg content_type=image/jpeg base64_length=43532
+2026-05-04 19:06:04,457 INFO [Upload] decoded image bytes filename=0012.jpg bytes=32647
+2026-05-04 19:06:04,458 INFO [Upload] saved image filename=0012.jpg stored_name=ae5f28cc389c4321ad35c9bc873d0c29.jpg bytes=32647 mime_type=image/jpeg path=/uploads/ae5f28cc389c4321ad35c9bc873d0c29.jpg
+2026-05-04 19:06:04,466 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 19:06:04,466 INFO [LLaVA] tagging started for item Blue water bottle
+2026-05-04 19:06:04,466 INFO [LLaVA] image file bytes: 32647
+2026-05-04 19:06:04,466 INFO [LLaVA] image base64 length: 43532
+2026-05-04 19:06:04,466 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'Perform both checks below on the same image in one pass.\nSafety prompt:\nIs this image appropriate for a school lost and found system?\nAnswer ONLY: SAFE or UNSAFE.\nTagging prompt:\nAnalyze this image of a lost item.\nReturn ONLY a list of 5-8 short tags.\nUse commas if possible.\nFocus on object type, color, brand, and distinctive features.\nIf possible, return JSON like {"moderation":"SAFE","tags":["tag1","tag2"]}.\nIf the image is inappropriate, reply with UNSAFE.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [43532], 'stream': False}
+2026-05-04 19:06:23,651 INFO [LLaVA RAW] ```json
+{
+  "moderation":"UNSAFE",
+  "tags":[
+    "office environment",
+    "abstract art",
+    "empty space",
+    "yellow walls",
+    "no lost item"
+  ]
+}
+```
+2026-05-04 19:06:23,652 INFO [LLaVA] moderation result: UNSAFE
+2026-05-04 19:06:23,653 INFO [LLaVA TAGS] ['office', 'environment', 'abstract', 'art', 'empty', 'space', 'yellow', 'walls']
+2026-05-04 19:08:08,657 INFO Received report payload: {'reporter_name': 'Jasonilization', 'title': 'Blue water bottle', 'location': 'New Sports Hall', 'category': 'Electronics', 'evidence_details': '', 'event_date': '2026-05-04', 'has_image': True, 'image_filename': '0037.jpg'}
+2026-05-04 19:08:08,686 INFO [Upload] received image payload filename=0037.jpg content_type=image/jpeg base64_length=43100
+2026-05-04 19:08:08,688 INFO [Upload] decoded image bytes filename=0037.jpg bytes=32325
+2026-05-04 19:08:08,690 INFO [Upload] saved image filename=0037.jpg stored_name=2947b6d3e756416ba57abf68f0001d8c.jpg bytes=32325 mime_type=image/jpeg path=/uploads/2947b6d3e756416ba57abf68f0001d8c.jpg
+2026-05-04 19:08:08,764 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 19:08:08,765 INFO [LLaVA] tagging started for item Blue water bottle
+2026-05-04 19:08:08,765 INFO [LLaVA] image file bytes: 32325
+2026-05-04 19:08:08,765 INFO [LLaVA] image base64 length: 43100
+2026-05-04 19:08:08,765 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'Perform both checks below on the same image in one pass.\nSafety prompt:\nIs this image appropriate for a school lost and found system?\nAnswer ONLY: SAFE or UNSAFE.\nTagging prompt:\nAnalyze this image of a lost item.\nReturn ONLY a list of 5-8 short tags.\nUse commas if possible.\nFocus on object type, color, brand, and distinctive features.\nIf possible, return JSON like {"moderation":"SAFE","tags":["tag1","tag2"]}.\nIf the image is inappropriate, reply with UNSAFE.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [43100], 'stream': False}
+2026-05-04 19:08:25,303 INFO [LLaVA RAW] ```json
+{
+  "moderation": "SAFE",
+  "tags": ["interior space", "tiled ceiling", "lighting fixture"]
+}
+```
+2026-05-04 19:08:25,316 INFO [LLaVA] moderation result: SAFE
+2026-05-04 19:08:25,317 INFO [LLaVA TAGS] ['interior', 'space', 'tiled', 'ceiling', 'lighting', 'fixture']
+2026-05-04 19:08:25,324 INFO [LLaVA] using raw output
+2026-05-04 19:42:38,082 INFO Received report payload: {'reporter_name': 'Jasonilization', 'title': 'BLUE WATER BOTTLE', 'location': 'New Sports Hall', 'category': 'Electronics', 'evidence_details': '', 'event_date': '2026-05-04', 'has_image': True, 'image_filename': 'cv9ygor00t9l7lncbiiap8swvuvmgzhg.jpg'}
+2026-05-04 19:42:42,509 INFO [Upload] received image payload filename=cv9ygor00t9l7lncbiiap8swvuvmgzhg.jpg content_type=image/jpeg base64_length=78852
+2026-05-04 19:42:42,510 INFO [Upload] decoded image bytes filename=cv9ygor00t9l7lncbiiap8swvuvmgzhg.jpg bytes=59137
+2026-05-04 19:42:42,511 INFO [Upload] saved image filename=cv9ygor00t9l7lncbiiap8swvuvmgzhg.jpg stored_name=d6a0fee1fcfb4fb7a4d4f69c32b82b04.jpg bytes=59137 mime_type=image/jpeg path=/uploads/d6a0fee1fcfb4fb7a4d4f69c32b82b04.jpg
+2026-05-04 19:42:42,519 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-04 19:42:42,519 INFO [LLaVA] tagging started for item BLUE WATER BOTTLE
+2026-05-04 19:42:42,519 INFO [LLaVA] image file bytes: 59137
+2026-05-04 19:42:42,519 INFO [LLaVA] image base64 length: 78852
+2026-05-04 19:42:42,519 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'Perform both checks below on the same image in one pass.\nSafety prompt:\nIs this image appropriate for a school lost and found system?\nAnswer ONLY: SAFE or UNSAFE.\nTagging prompt:\nAnalyze this image of a lost item.\nReturn ONLY a list of 5-8 short tags.\nUse commas if possible.\nFocus on object type, color, brand, and distinctive features.\nIf possible, return JSON like {"moderation":"SAFE","tags":["tag1","tag2"]}.\nIf the image is inappropriate, reply with UNSAFE.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [78852], 'stream': False}
+2026-05-04 19:42:59,017 INFO [LLaVA RAW] ```json
+{
+  "moderation": "SAFE",
+  "tags": ["brick wall", "red bricks", "solid background", "no items", "simple composition"]
+}
+```
+2026-05-04 19:42:59,018 INFO [LLaVA] moderation result: SAFE
+2026-05-04 19:42:59,018 INFO [LLaVA TAGS] ['brick', 'wall', 'red', 'bricks', 'solid', 'background', 'no', 'items']
+2026-05-04 19:42:59,018 INFO [LLaVA] using raw output
+2026-05-04 21:39:45,375 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x108d00cd0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-04 21:39:46,263 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x108dc8be0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-04 21:39:47,878 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x108dd7e20>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-04 21:39:50,038 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x108e6d6d0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-04 21:39:50,387 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x108dabb20>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-04 21:39:50,811 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x108e68220>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:29:59,299 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x108dcfbb0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:30:03,155 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x108e868e0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:30:06,097 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x108e68250>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:30:06,583 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x108e9e5b0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:30:06,767 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x108e72e80>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:30:07,098 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x108dcfa00>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:30:07,281 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x108dcc850>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:30:08,169 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x108e6da30>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:30:50,789 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cc0f1c0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:35:21,095 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cdfd1f0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:35:26,539 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf46ca0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:35:31,565 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cc20d90>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:35:36,573 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf7b640>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:35:41,068 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf363d0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:35:41,561 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf082e0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:35:42,045 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf2adf0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:35:44,216 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cefeac0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:35:44,930 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf3ee20>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:35:45,476 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf53340>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:35:45,915 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf7e6d0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:35:46,261 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf7eca0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:35:46,512 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf57910>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:35:46,560 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf7b430>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:35:46,732 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf3eee0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:35:51,566 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cd9ee50>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:35:56,563 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cc08430>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:36:01,564 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf463d0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:36:06,563 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf0e7c0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:36:11,564 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf36130>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:36:16,566 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf13e80>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:36:21,595 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf463d0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:38:30,936 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf7b730>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 06:38:35,936 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf2abb0>: Failed to establish a new connection: [Errno 61] Connection refused'))

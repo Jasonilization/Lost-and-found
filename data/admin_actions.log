@@ -91,3 +91,69 @@
 2026-05-03 17:48:10,033 route=/items/1/query user_id=1 username=student1 reason=Blocked content=bad ai chat
 2026-05-03 17:48:10,072 route=/query user_id=1 username=student1 reason=Blocked content=bad free chat
 2026-05-03 17:48:10,111 route=/items/1/claim user_id=1 username=student1 reason=Claim rejected because the provided details do not match the reported item closely enough. content=This is definitely mine because I used it in class. A blue metal bottle with a dent on the side. Sports Hall Blue metal dented bottle
+2026-05-03 19:19:58,072 admin_id=3 admin_username=Jasonilization action=delete-user claim_id= item_id= note=deleted_user_id=2
+2026-05-03 19:20:01,230 admin_id=3 admin_username=Jasonilization action=delete-user claim_id= item_id= note=deleted_user_id=1
+2026-05-03 19:20:13,690 admin_id=3 admin_username=Jasonilization action=delete-claim claim_id=1 item_id= note=claim_status=pending
+2026-05-03 19:20:24,775 admin_id=3 admin_username=Jasonilization action=mark-item-claimed claim_id= item_id=1 note=item_status=Claimed
+2026-05-03 19:20:31,659 admin_id=3 admin_username=Jasonilization action=delete-item claim_id= item_id=1 note=title=blue water bottle
+2026-05-03 21:07:57,888 route=/query user_id=3 username=Jasonilization reason=Blocked: obvious spam. content=helllllllo
+2026-05-03 21:08:17,659 route=/query user_id=3 username=Jasonilization reason=Blocked: clearly unrelated to a lost or found item. content=WHAT IS YOUR FAV MOVIE
+2026-05-04 12:20:59,806 admin_id=2 admin_username=plakides action=override-abuse claim_id= item_id=1 note=abuse_override_status=flag
+2026-05-04 12:23:37,830 route=/items/1/query user_id=2 username=plakides reason=no semantic content, even if it mentions an object content=has it been claimed yet?
+2026-05-04 12:23:43,335 route=/items/1/query user_id=2 username=plakides reason=no semantic content, even if it mentions an object content=has it been claimed yet?
+2026-05-04 12:26:45,447 route=/items/report user_id=3 username=2030tt.j@shrewsbury.in.th reason=clearly unrelated to lost-and-found content=test testingtesting Innovation Building - Room A204 Other
+2026-05-04 12:27:23,441 route=/items/report user_id=3 username=2030tt.j@shrewsbury.in.th reason=clearly unrelated to lost-and-found content=test testingtesting Innovation Building - Room A204 Other
+2026-05-04 13:14:39,221 route=/items/report user_id=1 username=Jasonilization reason=Relevant but not usable input. Please provide a specific lost or found item description. content=TESTING TESTING TESTING New Sports Hall Electronics
+2026-05-04 13:15:19,623 route=/items/report user_id=1 username=Jasonilization reason=New Sports Hall Electronics does not appear to be related to lost-and-found content=TESTING this is a water bottle, scratched and found on the sports hall New Sports Hall Electronics
+2026-05-04 13:30:08,252 admin_id=1 admin_username=Jasonilization action=override-abuse claim_id= item_id=1 note=abuse_override_status=allow
+2026-05-04 13:32:54,163 route=/query user_id=1 username=Jasonilization reason=Blocked: message needs more specific detail. content=今天有哪些新上报的物品？
+2026-05-04 13:33:45,515 route=/query user_id=1 username=Jasonilization reason=Blocked: message needs more specific detail. content=哪些地点最近报告最多？
+2026-05-04 13:37:44,770 admin_id=1 admin_username=Jasonilization action=override-abuse claim_id= item_id=1 note=abuse_override_status=
+2026-05-04 13:37:50,303 admin_id=1 admin_username=Jasonilization action=override-abuse claim_id= item_id=1 note=abuse_override_status=flag
+2026-05-04 13:37:53,844 admin_id=1 admin_username=Jasonilization action=review-item claim_id= item_id=1 note=review_status=incomplete
+2026-05-04 13:37:57,467 admin_id=1 admin_username=Jasonilization action=review-item claim_id= item_id=1 note=review_status=rejected
+2026-05-04 13:38:03,230 admin_id=1 admin_username=Jasonilization action=review-item claim_id= item_id=1 note=review_status=approved
+2026-05-04 16:04:28,794 route=/items/report user_id=1 username=Jasonilization reason=Lacks semantic content related to lost-and-found, includes ambiguous phrase 'New Sports Hall Electronics' content=water bottle blue and scratched New Sports Hall Electronics
+2026-05-04 16:07:12,394 route=/items/report user_id=1 username=Jasonilization reason=Lacks semantic content related to lost-and-found, includes ambiguous phrase 'New Sports Hall Electronics' content=water bottle blue and scratched New Sports Hall Electronics
+2026-05-04 16:07:13,186 route=/items/report user_id=1 username=Jasonilization reason=Lacks semantic content related to lost-and-found, includes ambiguous phrase 'New Sports Hall Electronics' content=water bottle blue and scratched New Sports Hall Electronics
+2026-05-04 16:07:13,868 route=/items/report user_id=1 username=Jasonilization reason=Lacks semantic content related to lost-and-found, includes ambiguous phrase 'New Sports Hall Electronics' content=water bottle blue and scratched New Sports Hall Electronics
+2026-05-04 16:07:14,044 route=/items/report user_id=1 username=Jasonilization reason=Lacks semantic content related to lost-and-found, includes ambiguous phrase 'New Sports Hall Electronics' content=water bottle blue and scratched New Sports Hall Electronics
+2026-05-04 16:07:14,199 route=/items/report user_id=1 username=Jasonilization reason=Lacks semantic content related to lost-and-found, includes ambiguous phrase 'New Sports Hall Electronics' content=water bottle blue and scratched New Sports Hall Electronics
+2026-05-04 16:07:14,346 route=/items/report user_id=1 username=Jasonilization reason=Lacks semantic content related to lost-and-found, includes ambiguous phrase 'New Sports Hall Electronics' content=water bottle blue and scratched New Sports Hall Electronics
+2026-05-04 16:11:14,227 route=/items/report user_id=1 username=Jasonilization reason=Repeated characters content=water bottle blue water bottle New Sports Hall Electronics
+2026-05-04 16:25:04,291 route=/items/1/query user_id=1 username=student1 reason=Blocked content=bad ai chat
+2026-05-04 16:25:04,331 route=/query user_id=1 username=student1 reason=Blocked content=bad free chat
+2026-05-04 16:25:04,391 route=/items/1/claim user_id=1 username=student1 reason=Claim rejected because the provided details do not match the reported item closely enough. content=This is definitely mine because I used it in class. A blue metal bottle with a dent on the side. Sports Hall Blue metal dented bottle
+2026-05-04 16:31:11,549 route=/items/report user_id=1 username=Jasonilization reason=Blocked: obvious spam. content=blue water bottle BLUE WATER BOTTLE WITH NAME TAG SAYING SKIBIDI SCRATCHED New Sports Hall Electronics
+2026-05-04 16:35:29,219 route=/items/report user_id=1 username=Jasonilization reason=Clearly unrelated to lost-and-found. The phrase 'New Sports Hall Electronics' is not relevant to the description of a lost item. content=multicolored water bottle multicoloured water bottle, with a bit of scratches on it New Sports Hall Electronics
+2026-05-04 16:42:31,578 route=/items/1/query user_id=1 username=student1 reason=Blocked content=bad ai chat
+2026-05-04 16:42:31,632 route=/query user_id=1 username=student1 reason=Blocked content=bad free chat
+2026-05-04 16:42:31,674 route=/items/1/claim user_id=1 username=student1 reason=Claim rejected because the provided details do not match the reported item closely enough. content=This is definitely mine because I used it in class. A blue metal bottle with a dent on the side. Sports Hall Blue metal dented bottle
+2026-05-04 17:02:06,492 route=/items/1/query user_id=1 username=student1 reason=Blocked content=bad ai chat
+2026-05-04 17:02:06,563 route=/query user_id=1 username=student1 reason=Blocked content=bad free chat
+2026-05-04 17:02:06,584 route=/items/1/claim user_id=1 username=student1 reason=Claim rejected because the provided details do not match the reported item closely enough. content=This is definitely mine because I used it in class. A blue metal bottle with a dent on the side. Sports Hall Blue metal dented bottle
+2026-05-04 17:24:49,743 admin_id=1 admin_username=Jasonilization action=delete-item claim_id= item_id=6 note=title=multicolored water bottle
+2026-05-04 17:24:51,817 admin_id=1 admin_username=Jasonilization action=delete-item claim_id= item_id=5 note=title=blue water bottle
+2026-05-04 17:24:53,193 admin_id=1 admin_username=Jasonilization action=delete-item claim_id= item_id=4 note=title=water bottle
+2026-05-04 17:24:54,870 admin_id=1 admin_username=Jasonilization action=delete-item claim_id= item_id=3 note=title=blue water bottle
+2026-05-04 17:24:56,259 admin_id=1 admin_username=Jasonilization action=delete-item claim_id= item_id=2 note=title=Water bottle
+2026-05-04 17:24:58,610 admin_id=1 admin_username=Jasonilization action=delete-item claim_id= item_id=1 note=title=water bottle
+2026-05-04 17:37:44,849 route=/items/report user_id=1 username=Jasonilization reason=clearly unrelated to lost-and-found content=BACKROOMS stumbed into wall, now I see this room, I'm lost guys help Sports Hall Electronics
+2026-05-04 17:46:47,862 route=/items/report user_id=1 username=Jasonilization reason=Blocked: obvious spam. content=BACKROOMS I LOSTA A APPLE PENCIL AND I GONE TO GET IT IN THE LIBARY BUT THEN I TRIPPED AND ENDED UP HERE Library Electronics
+2026-05-04 17:47:11,981 route=/items/report user_id=1 username=Jasonilization reason=Blocked: obvious spam. content=BACKROOMS I LOSTA A APPLE PENCIL AND I GONE TO GET IT IN THE LIBARY BUT THEN I TRIPPED AND ENDED UP HERE. MY WATER BOTTLE HAS SCRATCHES ON IT, A FEW KEYCHAINS TOO Library Electronics
+2026-05-04 19:10:15,029 admin_id=1 admin_username=Jasonilization action=delete-item claim_id= item_id=7 note=title=Blue water bottle
+2026-05-04 19:10:18,055 admin_id=1 admin_username=Jasonilization action=delete-item claim_id= item_id=6 note=title=B ACKROOMS
+2026-05-04 19:10:26,748 admin_id=1 admin_username=Jasonilization action=delete-item claim_id= item_id=5 note=title=BACKROOMS
+2026-05-04 19:10:29,639 admin_id=1 admin_username=Jasonilization action=delete-item claim_id= item_id=4 note=title=BACKROOMS
+2026-05-04 19:10:33,559 admin_id=1 admin_username=Jasonilization action=delete-item claim_id= item_id=3 note=title=Backrooms
+2026-05-04 19:10:36,689 admin_id=1 admin_username=Jasonilization action=delete-item claim_id= item_id=2 note=title=Macbook
+2026-05-04 19:10:40,593 admin_id=1 admin_username=Jasonilization action=delete-item claim_id= item_id=1 note=title=2 water bottles
+2026-05-04 19:11:44,814 admin_id=1 admin_username=Jasonilization action=delete-user claim_id= item_id= note=deleted_user_id=3
+2026-05-05 06:33:11,166 route=/items user_id=5 username=jasdkfljsd;fsdff reason=Blocked: message is too short to review. content=bl
+2026-05-05 06:33:13,579 route=/items user_id=5 username=jasdkfljsd;fsdff reason=Blocked: message is too short to review. content=blu
+2026-05-05 06:33:14,930 route=/items user_id=5 username=jasdkfljsd;fsdff reason=Blocked: message is too short to review. content=blu
+2026-05-05 06:33:15,735 route=/items user_id=5 username=jasdkfljsd;fsdff reason=Blocked: message is too short to review. content=blue
+2026-05-05 06:35:33,112 admin_id=1 admin_username=Jasonilization action=delete-user claim_id= item_id= note=deleted_user_id=5
+2026-05-05 06:35:35,514 admin_id=1 admin_username=Jasonilization action=delete-user claim_id= item_id= note=deleted_user_id=4
+2026-05-05 06:35:37,568 admin_id=1 admin_username=Jasonilization action=delete-user claim_id= item_id= note=deleted_user_id=3
+2026-05-05 06:36:02,626 admin_id=1 admin_username=Jasonilization action=override-abuse claim_id= item_id=1 note=abuse_override_status=

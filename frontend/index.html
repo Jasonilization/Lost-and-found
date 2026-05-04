@@ -12,11 +12,6 @@
     <div class="page-glow page-glow-left" aria-hidden="true"></div>
     <div class="page-glow page-glow-right" aria-hidden="true"></div>
 
-    <div class="status-strip">
-      <div class="server-pill" id="serverStatus" data-i18n="status.checkingBackend">Checking backend...</div>
-      <div class="server-pill" id="ollamaStatus" data-i18n="status.checkingOllama">Checking Ollama...</div>
-    </div>
-
     <section class="auth-screen" id="authScreen">
       <div class="auth-card surface-card">
         <p class="eyebrow" data-i18n="auth.eyebrow">School account</p>
@@ -68,6 +63,18 @@
             <p class="account-name" id="accountName"></p>
             <p class="account-meta" id="accountMeta"></p>
           </div>
+          <div class="notification-wrap">
+            <button class="ghost-button notification-button" id="notificationButton" type="button" aria-haspopup="true" aria-expanded="false">
+              <span class="notification-button-label" data-i18n="notifications.button">Notifications</span>
+              <span class="notification-badge is-hidden" id="notificationBadge">0</span>
+            </button>
+            <div class="notification-dropdown surface-card is-hidden" id="notificationDropdown" role="menu">
+              <div class="notification-head">
+                <strong data-i18n="notifications.title">Notifications</strong>
+              </div>
+              <div class="notification-list" id="notificationList"></div>
+            </div>
+          </div>
           <label class="theme-select-wrap">
             <span data-i18n="topbar.theme">Theme</span>
             <select id="themeSelect" aria-label="Theme selector">
@@ -81,6 +88,7 @@
             <select id="languageSelect" aria-label="Language selector">
               <option value="en">English</option>
               <option value="zh-CN">简体中文</option>
+              <option value="th">ไทย</option>
             </select>
           </label>
           <button class="ghost-button" id="showReportsButton" type="button" data-i18n="nav.reports">Reports</button>
@@ -107,10 +115,10 @@
 
                 <form id="itemForm" class="item-form">
                   <label class="drop-zone" id="dropZone">
-                    <input id="imageInput" type="file" accept="image/png,image/jpeg,image/jpg">
+                    <input id="imageInput" type="file" accept=".png,.jpg,.jpeg,.webp,.heic,.heif,image/png,image/jpeg,image/webp,image/heic,image/heif">
                     <span class="drop-icon">+</span>
                     <strong id="dropTitle" data-i18n="report.dropTitle">Drop image here</strong>
-                    <small id="dropHint" data-i18n="report.dropHint">or choose a JPG/PNG file</small>
+                    <small id="dropHint" data-i18n="report.dropHint">or choose a JPG, PNG, WEBP, HEIC, or HEIF file</small>
                   </label>
 
                   <div class="form-grid">
@@ -162,19 +170,27 @@
                   <label>
                     <span data-i18n="common.description">Description</span>
                     <textarea id="descriptionInput" name="description" rows="4" maxlength="450" placeholder="Add color, brand, markings, or details that would help someone confirm it." data-i18n-placeholder="report.descriptionPlaceholder" required></textarea>
+                    <small class="field-note" id="descriptionHelperText" data-i18n="report.descriptionHelper">Include color, brand, or unique marks</small>
                   </label>
 
                   <label>
                     <span data-i18n="report.supportingEvidence">Supporting evidence</span>
                     <textarea id="evidenceDetailsInput" name="evidence_details" rows="3" maxlength="320" placeholder="Optional: ownership clues, identifying marks, timeline, or extra evidence." data-i18n-placeholder="report.evidencePlaceholder"></textarea>
+                    <small class="field-note" id="evidenceHelperText" data-i18n="report.evidenceHelper">Optional but improves claim accuracy</small>
                   </label>
 
                   <div class="form-actions">
                     <button class="primary-button" id="submitButton" type="submit">
-                      <span class="button-text" data-i18n="report.save">Save report</span>
-                      <span class="spinner" aria-hidden="true"></span>
+                      <span class="button-text" data-i18n="report.save">Submit Report</span>
                     </button>
                     <p class="status-message" id="uploadMessage"></p>
+                  </div>
+                  <div class="progress-widget is-hidden" id="reportProgress" aria-live="polite">
+                    <div class="progress-track"><span class="progress-fill" id="reportProgressFill"></span></div>
+                    <div class="progress-meta">
+                      <span id="reportProgressLabel">Preparing upload...</span>
+                      <span id="reportProgressValue">0%</span>
+                    </div>
                   </div>
                   <div class="warning-card is-hidden" id="reportWarningCard"></div>
                 </form>
@@ -256,8 +272,15 @@
                 </p>
                 <div class="form-actions">
                   <label class="ghost-button" for="profileImageInput">Choose profile image</label>
-                  <input id="profileImageInput" type="file" accept="image/png,image/jpeg,image/jpg" class="is-hidden">
+                  <input id="profileImageInput" type="file" accept=".png,.jpg,.jpeg,.webp,.heic,.heif,image/png,image/jpeg,image/webp,image/heic,image/heif" class="is-hidden">
                   <button class="primary-button" id="profileImageButton" type="button">Upload photo</button>
+                </div>
+                <div class="progress-widget is-hidden" id="profileProgress" aria-live="polite">
+                  <div class="progress-track"><span class="progress-fill" id="profileProgressFill"></span></div>
+                  <div class="progress-meta">
+                    <span id="profileProgressLabel">Preparing upload...</span>
+                    <span id="profileProgressValue">0%</span>
+                  </div>
                 </div>
                 <p class="status-message" id="profileImageMessage"></p>
               </div>
@@ -284,7 +307,8 @@
               <button class="tab-button is-active" id="adminUsersTab" type="button" data-i18n="admin.users">Users</button>
               <button class="tab-button" id="adminItemsTab" type="button" data-i18n="admin.items">Items</button>
               <button class="tab-button" id="adminClaimsTab" type="button" data-i18n="admin.claims">Claims</button>
-              <button class="tab-button" id="adminInspectionTab" type="button" data-i18n="admin.aiInspection">AI Inspection</button>
+              <button class="tab-button" id="adminInspectionTab" type="button" data-i18n="admin.inspection">Inspection Log</button>
+              <button class="tab-button" id="adminMonitorTab" type="button" data-i18n="admin.monitor">System Monitor</button>
             </div>
             <div class="list-meta admin-meta">
               <span id="adminSummary">0 users</span>
@@ -321,7 +345,47 @@
           </div>
 
           <div class="is-hidden" id="adminInspectionPanel">
+            <article class="admin-audit-section surface-card">
+              <div class="section-heading compact">
+                <div>
+                  <p class="eyebrow" data-i18n="admin.audit">Audit log</p>
+                  <h4 data-i18n="admin.auditTitle">Sensitive activity</h4>
+                </div>
+              </div>
+              <div class="admin-router-list" id="adminAuditList"></div>
+            </article>
             <div class="admin-router-list" id="adminInspectionList"></div>
+          </div>
+
+          <div class="is-hidden" id="adminMonitorPanel">
+            <div class="admin-monitor-grid">
+              <article class="admin-monitor-card surface-card">
+                <p class="eyebrow" data-i18n="admin.monitorCpu">CPU</p>
+                <p class="admin-monitor-value" id="adminMonitorCpu">--</p>
+              </article>
+              <article class="admin-monitor-card surface-card">
+                <p class="eyebrow" data-i18n="admin.monitorRam">RAM</p>
+                <p class="admin-monitor-value" id="adminMonitorRam">--</p>
+              </article>
+              <article class="admin-monitor-card surface-card">
+                <p class="eyebrow" data-i18n="admin.monitorGpu">GPU</p>
+                <p class="admin-monitor-value" id="adminMonitorGpu">--</p>
+              </article>
+              <article class="admin-monitor-card surface-card">
+                <p class="eyebrow" data-i18n="admin.monitorGpuTemp">GPU Temp</p>
+                <p class="admin-monitor-value" id="adminMonitorGpuTemp">--</p>
+              </article>
+              <article class="admin-monitor-card surface-card">
+                <p class="eyebrow" data-i18n="admin.monitorUptime">Uptime</p>
+                <p class="admin-monitor-value" id="adminMonitorUptime">--</p>
+              </article>
+              <article class="admin-monitor-card surface-card">
+                <p class="eyebrow" data-i18n="admin.monitorStatus">Processing status</p>
+                <p class="admin-monitor-value" id="adminMonitorStatus">--</p>
+              </article>
+            </div>
+            <p class="status-message" id="adminMonitorUpdated" data-i18n="admin.monitorWaiting">Waiting for live data...</p>
+            <div class="warning-card is-hidden" id="adminMonitorWarning"></div>
           </div>
         </section>
 
@@ -343,18 +407,9 @@
                 </select>
               </label>
               <div class="query-selector-actions">
-                <span class="field-note" id="queryModeNote" data-i18n="query.generalNote">Use general inquiry for questions without a selected item.</span>
+                <span class="field-note" id="queryModeNote" data-i18n="query.messagingNote">Messages stay in this conversation and never trigger automated replies.</span>
                 <button class="ghost-button" id="refreshQueryItemsButton" type="button" data-i18n="query.refreshItems">Refresh item list</button>
               </div>
-            </div>
-            <div class="form-grid query-selector-grid">
-              <label>
-                <span data-i18n="query.chatMode">Chat mode</span>
-                <select id="chatModeSelect">
-                  <option value="ai" data-i18n="query.aiChat">AI Chat</option>
-                  <option value="free" data-i18n="query.freeChat">Free Chat (No AI)</option>
-                </select>
-              </label>
             </div>
             <div class="query-context-head">
               <div>
@@ -389,10 +444,16 @@
               <textarea id="queryInput" rows="3" maxlength="220" placeholder="Ask about this item" data-i18n-placeholder="query.askAboutItem"></textarea>
               <div class="form-actions">
                 <button class="primary-button" id="querySubmitButton" type="submit">
-                  <span class="button-text" data-i18n="query.send">Send message</span>
-                  <span class="spinner" aria-hidden="true"></span>
+                  <span class="button-text" data-i18n="query.send">Ask Question</span>
                 </button>
                 <p class="status-message" id="queryMessage"></p>
+              </div>
+              <div class="progress-widget is-hidden" id="queryProgress" aria-live="polite">
+                <div class="progress-track"><span class="progress-fill" id="queryProgressFill"></span></div>
+                <div class="progress-meta">
+                  <span id="queryProgressLabel">Preparing request...</span>
+                  <span id="queryProgressValue">0%</span>
+                </div>
               </div>
             </form>
           </div>
@@ -404,38 +465,96 @@
       <form class="claim-form" id="claimForm" method="dialog">
         <div class="section-heading compact">
           <div>
-            <p class="eyebrow">Ownership check</p>
-            <h3 id="claimTitle">Claim item</h3>
+            <p class="eyebrow" data-i18n="claim.eyebrow">Ownership check</p>
+            <h3 id="claimTitle" data-i18n="claim.title">Claim item</h3>
           </div>
-          <button class="icon-button" id="closeClaimDialog" type="button" aria-label="Close claim form">×</button>
+          <button class="icon-button" id="closeClaimDialog" type="button" aria-label="Close claim form" data-i18n-aria-label="claim.close">×</button>
         </div>
         <p class="dialog-subtitle" id="claimItemLabel"></p>
         <label>
-          <span>Why are you claiming this item?</span>
+          <span data-i18n="claim.reason">Why are you claiming this item?</span>
           <textarea id="claimReasonInput" rows="3" maxlength="240" required></textarea>
         </label>
         <label>
-          <span>Description of item</span>
+          <span data-i18n="claim.description">Description of item</span>
           <textarea id="claimDescriptionInput" rows="3" maxlength="240" required></textarea>
         </label>
         <label>
-          <span>Where did you lose it?</span>
+          <span data-i18n="claim.location">Where did you lose it?</span>
           <input id="claimLocationInput" type="text" maxlength="120" required>
         </label>
         <label>
-          <span>Additional identifying info</span>
+          <span data-i18n="claim.identifying">Additional identifying info</span>
           <textarea id="claimIdentifyingInput" rows="3" maxlength="240" required></textarea>
         </label>
         <div class="form-actions">
           <button class="primary-button" id="claimSubmitButton" type="submit">
-            <span class="button-text">Submit claim</span>
+            <span class="button-text" data-i18n="claim.submit">Claim Item</span>
             <span class="spinner" aria-hidden="true"></span>
           </button>
-          <button class="ghost-button" id="cancelClaimButton" type="button">Cancel</button>
+          <button class="ghost-button" id="cancelClaimButton" type="button" data-i18n="common.cancel">Cancel</button>
         </div>
         <p class="status-message" id="claimMessage"></p>
       </form>
     </dialog>
+
+    <dialog class="claim-dialog" id="confirmDialog">
+      <form class="claim-form" id="confirmForm" method="dialog">
+        <div class="section-heading compact">
+          <div>
+            <p class="eyebrow" id="confirmEyebrow" data-i18n="confirm.eyebrow">Confirm action</p>
+            <h3 id="confirmTitle" data-i18n="confirm.title">Please confirm</h3>
+          </div>
+          <button class="icon-button" id="closeConfirmDialog" type="button" aria-label="Close confirmation" data-i18n-aria-label="confirm.close">×</button>
+        </div>
+        <p class="dialog-subtitle" id="confirmBody">This action affects report or claim state.</p>
+        <label class="is-hidden" id="confirmNotesWrap">
+          <span id="confirmNotesLabel" data-i18n="confirm.notes">Notes</span>
+          <textarea id="confirmNotesInput" rows="3" maxlength="240"></textarea>
+        </label>
+        <div class="form-actions">
+          <button class="primary-button" id="confirmActionButton" type="submit">
+            <span class="button-text" id="confirmActionLabel" data-i18n="common.confirm">Confirm</span>
+          </button>
+          <button class="ghost-button" id="cancelConfirmButton" type="button" data-i18n="common.cancel">Cancel</button>
+        </div>
+        <p class="status-message" id="confirmMessage"></p>
+      </form>
+    </dialog>
+
+    <div class="tutorial-overlay is-hidden" id="tutorialOverlay" aria-hidden="true">
+      <div class="tutorial-backdrop" id="tutorialBackdrop"></div>
+      <div class="tutorial-spotlight is-hidden" id="tutorialSpotlight" aria-hidden="true"></div>
+      <div class="tutorial-card surface-card" role="dialog" aria-modal="true" aria-labelledby="tutorialTitle" aria-describedby="tutorialBody">
+        <div class="section-heading compact">
+          <div>
+            <p class="eyebrow" id="tutorialStepLabel">Step 1 of 6</p>
+            <h3 id="tutorialTitle">Welcome to Lost and Found</h3>
+          </div>
+          <button class="icon-button" id="tutorialCloseButton" type="button" aria-label="Close tutorial">×</button>
+        </div>
+        <p class="dialog-subtitle" id="tutorialBody">Use this space to report lost items, ask questions, and submit claims for review.</p>
+        <label class="tutorial-checkbox">
+          <input id="tutorialDontShowAgain" type="checkbox">
+          <span id="tutorialDontShowAgainLabel">Don't show again</span>
+        </label>
+        <div class="form-actions tutorial-actions">
+          <button class="ghost-button" id="tutorialSkipButton" type="button">Skip</button>
+          <button class="ghost-button" id="tutorialBackButton" type="button">Back</button>
+          <button class="primary-button" id="tutorialNextButton" type="button">
+            <span class="button-text" id="tutorialNextLabel">Next</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="undo-toast surface-card is-hidden" id="undoToast" aria-live="polite">
+      <p class="undo-toast-text" id="undoToastText"></p>
+      <div class="form-actions">
+        <button class="ghost-button" id="undoToastButton" type="button" data-i18n="common.undo">Undo</button>
+        <button class="icon-button" id="undoToastClose" type="button" aria-label="Close undo message" data-i18n-aria-label="common.close">×</button>
+      </div>
+    </div>
 
     <template id="itemTemplate">
       <article class="item-card">
@@ -456,7 +575,7 @@
           <div class="tag-row"></div>
           <dl class="info-list"></dl>
           <div class="card-actions">
-            <button class="primary-button card-button" type="button" data-claim-button>Claim item</button>
+            <button class="primary-button card-button" type="button" data-claim-button>Claim Item</button>
             <button class="ghost-button card-button" type="button" data-open-query-button>Open chat</button>
             <button class="ghost-button card-button" type="button" data-mark-claimed-button>Mark as Claimed</button>
           </div>

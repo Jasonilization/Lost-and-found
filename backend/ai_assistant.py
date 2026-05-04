@@ -21,7 +21,7 @@ DEFAULT_SYSTEM_PROMPT = (
     "Never answer with placeholders like [not found]. "
     "Prefer concrete references to item title, description, category, location, evidence, and recent chat context."
 )
-SUPPORTED_LANGUAGES = {"en", "zh-CN"}
+SUPPORTED_LANGUAGES = {"en", "zh-CN", "th"}
 MEME_KEYWORDS = {
     "skibidi",
     "sigma",
@@ -193,10 +193,16 @@ def normalize_language(language: Optional[str]) -> str:
 
 
 def _language_instruction(language: str) -> str:
-    if normalize_language(language) == "zh-CN":
+    normalized_language = normalize_language(language)
+    if normalized_language == "zh-CN":
         return (
             "Respond in Simplified Chinese by default. "
             "Keep the reply and suggestions in Simplified Chinese unless the user explicitly asks for another language."
+        )
+    if normalized_language == "th":
+        return (
+            "Respond in Thai by default. "
+            "Use a formal, school-appropriate tone and keep the wording concise unless the user explicitly asks for another language."
         )
     return "Respond in English unless the user explicitly asks for another language."
 

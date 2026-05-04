@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
 from unittest.mock import patch
 
 import requests
 
 from backend import ai_moderation
-from backend.ollama_tagger import fallback_tags
+from backend.ollama_tagger import _call_ollama_generate, fallback_tags, generate_image_tags, get_available_image_model, inspect_image_upload, merge_tag_lists
 
 
 class FakeResponse:
     def __init__(self, response_text: str) -> None:
         self._response_text = response_text
+        self.status_code = 200
 
     def raise_for_status(self) -> None:
         return None
@@ -122,6 +124,113 @@ class AIModerationTests(unittest.TestCase):
 
         self.assertIn("bottle", result["tags"])
         self.assertEqual(result["tags"][0], "bottle")
+
+    def test_generate_image_tags_returns_tags_when_multimodal_model_is_available(self) -> None:
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as image_file, \
+             patch("backend.ollama_tagger._ollama_root_available", return_value=True), \
+             patch("backend.ollama_tagger.get_available_image_model", return_value="llava"), \
+             patch(
+                 "backend.ollama_tagger._call_ollama_generate",
+                 return_value='{"moderation":"SAFE","tags":["water bottle","blue","metal"]}',
+             ):
+            image_file.write(b"fake-image")
+            image_file.flush()
+            tags = generate_image_tags(image_file.name)
+
+        self.assertEqual(tags, ["water bottle", "blue", "metal"])
+
+    def test_generate_image_tags_returns_empty_list_when_no_image_model_exists(self) -> None:
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as image_file, \
+             patch("backend.ollama_tagger._ollama_root_available", return_value=True), \
+             patch("backend.ollama_tagger.get_available_image_model", return_value=""):
+            image_file.write(b"fake-image")
+            image_file.flush()
+            tags = generate_image_tags(image_file.name)
+
+        self.assertEqual(tags, [])
+
+    def test_get_available_image_model_accepts_latest_alias(self) -> None:
+        with patch("backend.ollama_tagger._ollama_root_available", return_value=True), \
+             patch("backend.ollama_tagger._list_ollama_models", return_value=["llava:latest", "llama3:8b"]):
+            model = get_available_image_model()
+
+        self.assertEqual(model, "llava:latest")
+
+    def test_call_ollama_generate_uses_images_field(self) -> None:
+        with patch("backend.ollama_tagger.requests.post", return_value=FakeResponse("ok")) as mock_post:
+            _call_ollama_generate("llava", "prompt", images=["base64-image"])
+
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload["images"], ["base64-image"])
+        self.assertNotIn("image", payload)
+
+    def test_inspect_image_upload_rejects_missing_image_response(self) -> None:
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as image_file, \
+             patch("backend.ollama_tagger._ollama_root_available", return_value=True), \
+             patch("backend.ollama_tagger.get_available_image_model", return_value="llava"), \
+             patch("backend.ollama_tagger._call_ollama_generate", return_value="I cannot see the image."):
+            image_file.write(b"fake-image")
+            image_file.flush()
+            with self.assertRaises(ValueError):
+                inspect_image_upload(image_file.name)
+
+    def test_inspect_image_upload_marks_generic_tags_invalid(self) -> None:
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as image_file, \
+             patch("backend.ollama_tagger._ollama_root_available", return_value=True), \
+             patch("backend.ollama_tagger.get_available_image_model", return_value="llava"), \
+             patch(
+                 "backend.ollama_tagger._call_ollama_generate",
+                 return_value='{"moderation":"SAFE","tags":["campus","item","school item"]}',
+             ):
+            image_file.write(b"fake-image")
+            image_file.flush()
+            inspection = inspect_image_upload(image_file.name)
+
+        self.assertEqual(inspection["moderation"], "SAFE")
+        self.assertEqual(inspection["tags"], [])
+        self.assertTrue(inspection["tag_validation_error"])
+
+    def test_inspect_image_upload_keeps_visual_tags_even_without_color_keyword(self) -> None:
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as image_file, \
+             patch("backend.ollama_tagger._ollama_root_available", return_value=True), \
+             patch("backend.ollama_tagger.get_available_image_model", return_value="llava"), \
+             patch(
+                 "backend.ollama_tagger._call_ollama_generate",
+                 return_value='{"moderation":"SAFE","tags":["artwork","oil painting","classical art","antique"]}',
+             ):
+            image_file.write(b"fake-image")
+            image_file.flush()
+            inspection = inspect_image_upload(image_file.name)
+
+        self.assertEqual(inspection["moderation"], "SAFE")
+        self.assertEqual(inspection["tags"], ["artwork", "oil painting", "classical art", "antique"])
+        self.assertEqual(inspection["tag_validation_error"], "")
+        self.assertEqual(inspection["validation_strength"], "normal")
+
+    def test_inspect_image_upload_extracts_tags_from_sentence_response(self) -> None:
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as image_file, \
+             patch("backend.ollama_tagger._ollama_root_available", return_value=True), \
+             patch("backend.ollama_tagger.get_available_image_model", return_value="llava"), \
+             patch(
+                 "backend.ollama_tagger._call_ollama_generate",
+                 return_value='{"moderation":"SAFE","tags":"It looks like a silver laptop with stickers and a scratched case."}',
+             ):
+            image_file.write(b"fake-image")
+            image_file.flush()
+            inspection = inspect_image_upload(image_file.name)
+
+        self.assertEqual(inspection["moderation"], "SAFE")
+        self.assertIn("silver laptop", inspection["tags"])
+        self.assertIn("stickers", inspection["tags"])
+
+    def test_merge_tag_lists_deduplicates_and_limits_output(self) -> None:
+        merged = merge_tag_lists(
+            ["blue", "bottle", "metal"],
+            ["bottle", "sports hall", "lost-item"],
+            ["campus", "school-item", "extra"],
+        )
+
+        self.assertEqual(merged, ["blue", "bottle", "metal", "sports hall", "lost-item", "campus", "school-item", "extra"])
 
 
 if __name__ == "__main__":
