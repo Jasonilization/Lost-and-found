@@ -15,8 +15,9 @@
     <section class="auth-screen" id="authScreen">
       <div class="auth-card surface-card">
         <p class="eyebrow" data-i18n="auth.eyebrow">School account</p>
-        <h1 data-i18n="app.name">Lost and Found</h1>
+        <h1 data-i18n="brand.title">SHR Lost &amp; Found System</h1>
         <p class="hero-copy" data-i18n="auth.hero">Sign in to report lost items, track claims, and move item questions into a dedicated chat page.</p>
+        <p class="brand-footer" data-i18n="brand.footer">For Shrewsbury international school riverside</p>
 
         <div class="tab-switch" role="tablist" aria-label="Authentication tabs" data-i18n-aria-label="auth.tabs">
           <button class="tab-button is-active" id="loginTab" type="button" data-i18n="auth.login">Login</button>
@@ -55,7 +56,7 @@
       <header class="topbar">
         <div>
           <p class="eyebrow" data-i18n="topbar.eyebrow">Local campus desk</p>
-          <h2 data-i18n="app.name">Lost and Found</h2>
+          <h2 data-i18n="brand.title">SHR Lost &amp; Found System</h2>
           <p class="hero-copy" data-i18n="topbar.hero">Reports stay local, admin actions stay guarded, and item questions live in their own chat page.</p>
         </div>
         <div class="topbar-actions">
@@ -460,6 +461,9 @@
           </div>
         </section>
       </main>
+      <footer class="app-footer">
+        <p class="brand-footer" data-i18n="brand.footer">For Shrewsbury international school riverside</p>
+      </footer>
     </div>
 
     <dialog class="claim-dialog" id="claimDialog">
@@ -529,7 +533,7 @@
       <div class="tutorial-backdrop tutorial-backdrop-right" data-tutorial-backdrop="right"></div>
       <div class="tutorial-backdrop tutorial-backdrop-bottom" data-tutorial-backdrop="bottom"></div>
       <div class="tutorial-spotlight is-hidden" id="tutorialSpotlight" aria-hidden="true"></div>
-      <div class="tutorial-card surface-card" role="dialog" aria-modal="true" aria-labelledby="tutorialTitle" aria-describedby="tutorialBody">
+      <div class="tutorial-card surface-card" id="tutorialCard" role="dialog" aria-modal="true" aria-labelledby="tutorialTitle" aria-describedby="tutorialBody">
         <div class="section-heading compact">
           <div>
             <p class="eyebrow" id="tutorialStepLabel">Step 1 of 6</p>

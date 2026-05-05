@@ -37,11 +37,16 @@ const REPORT_IMAGE_JPEG_QUALITY = 0.65;
 const ADMIN_MONITOR_POLL_INTERVAL_MS = 5000;
 const SEARCH_DEBOUNCE_MS = 400;
 const QUERY_SUGGESTION_LIMIT = 6;
+const GLOBAL_BACKGROUND_URL = "/uploads/background.png";
+const TUTORIAL_CARD_MARGIN = 16;
+const TUTORIAL_VIEWPORT_PADDING = 12;
 
 const translations = {
   en: {
     "page.title": "School Lost and Found",
     "app.name": "Lost and Found",
+    "brand.title": "SHR Lost & Found System",
+    "brand.footer": "For Shrewsbury international school riverside",
     "status.checkingBackend": "Checking backend...",
     "status.checkingOllama": "Checking Ollama...",
     "status.checkingSystem": "Checking system...",
@@ -166,6 +171,8 @@ const translations = {
   "zh-CN": {
     "page.title": "校园失物招领",
     "app.name": "失物招领",
+    "brand.title": "SHR Lost & Found System",
+    "brand.footer": "For Shrewsbury international school riverside",
     "status.checkingBackend": "正在检查后端...",
     "status.checkingOllama": "正在检查 Ollama...",
     "status.checkingSystem": "正在检查系统...",
@@ -353,6 +360,8 @@ const translationEnhancements = {
   th: {
     "page.title": "ระบบของหายและของพบในโรงเรียน",
     "app.name": "ของหายและของพบ",
+    "brand.title": "SHR Lost & Found System",
+    "brand.footer": "For Shrewsbury international school riverside",
     "status.checkingBackend": "กำลังตรวจสอบระบบหลังบ้าน...",
     "status.checkingOllama": "กำลังตรวจสอบ Ollama...",
     "status.checkingSystem": "กำลังตรวจสอบระบบ...",
@@ -816,6 +825,7 @@ const cancelConfirmButton = document.querySelector("#cancelConfirmButton");
 const tutorialOverlay = document.querySelector("#tutorialOverlay");
 const tutorialBackdropPanes = Array.from(document.querySelectorAll("[data-tutorial-backdrop]"));
 const tutorialSpotlight = document.querySelector("#tutorialSpotlight");
+const tutorialCard = document.querySelector("#tutorialCard");
 const tutorialStepLabel = document.querySelector("#tutorialStepLabel");
 const tutorialTitle = document.querySelector("#tutorialTitle");
 const tutorialBody = document.querySelector("#tutorialBody");
@@ -922,6 +932,17 @@ function setLoadingLine(element, isLoading) {
 function setWarningCard(element, message = "") {
   element.textContent = message;
   element.classList.toggle("is-hidden", !message);
+}
+
+function ensureGlobalBackground() {
+  const probe = new Image();
+  probe.onload = () => {
+    document.body.classList.remove("background-missing");
+  };
+  probe.onerror = () => {
+    document.body.classList.add("background-missing");
+  };
+  probe.src = GLOBAL_BACKGROUND_URL;
 }
 
 function fillSelect(select, values, includeAll = false) {
@@ -1573,6 +1594,12 @@ function clearTutorialHighlight() {
   tutorialSpotlight.style.removeProperty("left");
   tutorialSpotlight.style.removeProperty("width");
   tutorialSpotlight.style.removeProperty("height");
+  if (tutorialCard) {
+    tutorialCard.style.removeProperty("top");
+    tutorialCard.style.removeProperty("left");
+    tutorialCard.style.removeProperty("transform");
+    tutorialCard.style.removeProperty("max-height");
+  }
   tutorialBackdropPanes.forEach((pane) => {
     pane.style.removeProperty("top");
     pane.style.removeProperty("left");
@@ -1598,7 +1625,150 @@ function tutorialViewportRect(target) {
     left,
     width: rect.width,
     height: rect.height,
+    right: left + rect.width,
+    bottom: top + rect.height,
   };
+}
+
+function clamp(value, min, max) {
+  if (max <= min) return min;
+  return Math.min(Math.max(value, min), max);
+}
+
+function rectsOverlap(a, b) {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+
+function tutorialPreferredPlacement(rect) {
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const verticalCenter = rect.top + (rect.height / 2);
+  const horizontalCenter = rect.left + (rect.width / 2);
+
+  if (verticalCenter <= viewportHeight * 0.33) return "below";
+  if (verticalCenter >= viewportHeight * 0.67) return "above";
+  if (horizontalCenter <= viewportWidth * 0.4) return "right";
+  if (horizontalCenter >= viewportWidth * 0.6) return "left";
+
+  const spaces = {
+    below: viewportHeight - rect.bottom,
+    above: rect.top,
+    right: viewportWidth - rect.right,
+    left: rect.left,
+  };
+
+  return Object.entries(spaces)
+    .sort(([, first], [, second]) => second - first)[0]?.[0] || "below";
+}
+
+function buildTutorialCardPlacement(side, targetRect, cardWidth, cardHeight, viewportWidth, viewportHeight, padding, margin) {
+  const minCardHeight = 180;
+  let left = padding;
+  let top = padding;
+  let availableHeight = viewportHeight - (padding * 2);
+
+  if (side === "below") {
+    availableHeight = viewportHeight - targetRect.bottom - margin - padding;
+    if (availableHeight < minCardHeight) return null;
+    top = targetRect.bottom + margin;
+    left = clamp(
+      targetRect.left + (targetRect.width / 2) - (cardWidth / 2),
+      padding,
+      viewportWidth - padding - cardWidth,
+    );
+  } else if (side === "above") {
+    availableHeight = targetRect.top - margin - padding;
+    if (availableHeight < minCardHeight) return null;
+    top = targetRect.top - margin - Math.min(cardHeight, availableHeight);
+    left = clamp(
+      targetRect.left + (targetRect.width / 2) - (cardWidth / 2),
+      padding,
+      viewportWidth - padding - cardWidth,
+    );
+  } else if (side === "right") {
+    if ((viewportWidth - targetRect.right - margin - padding) < cardWidth) return null;
+    left = targetRect.right + margin;
+    top = clamp(
+      targetRect.top + (targetRect.height / 2) - (cardHeight / 2),
+      padding,
+      viewportHeight - padding - Math.min(cardHeight, availableHeight),
+    );
+  } else {
+    if ((targetRect.left - margin - padding) < cardWidth) return null;
+    left = targetRect.left - margin - cardWidth;
+    top = clamp(
+      targetRect.top + (targetRect.height / 2) - (cardHeight / 2),
+      padding,
+      viewportHeight - padding - Math.min(cardHeight, availableHeight),
+    );
+  }
+
+  const height = Math.min(cardHeight, Math.max(minCardHeight, availableHeight));
+  const rect = {
+    top,
+    left,
+    right: left + cardWidth,
+    bottom: top + height,
+  };
+
+  if (rect.top < padding || rect.left < padding || rect.right > viewportWidth - padding || rect.bottom > viewportHeight - padding) {
+    return null;
+  }
+  if (rectsOverlap(rect, targetRect)) {
+    return null;
+  }
+  if (side === "below" && rect.top < targetRect.bottom + margin) return null;
+  if (side === "above" && rect.bottom > targetRect.top - margin) return null;
+  if (side === "right" && rect.left < targetRect.right + margin) return null;
+  if (side === "left" && rect.right > targetRect.left - margin) return null;
+
+  return {
+    top,
+    left,
+    maxHeight: height,
+  };
+}
+
+function positionTutorialCard(targetRect) {
+  if (!tutorialCard) return;
+
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const padding = Math.min(TUTORIAL_VIEWPORT_PADDING, Math.max(8, Math.floor(viewportWidth * 0.03)));
+  const margin = Math.min(TUTORIAL_CARD_MARGIN, Math.max(12, Math.floor(viewportWidth * 0.03)));
+
+  tutorialCard.style.maxHeight = `${Math.max(180, viewportHeight - (padding * 2))}px`;
+  const currentRect = tutorialCard.getBoundingClientRect();
+  const cardWidth = Math.min(currentRect.width, viewportWidth - (padding * 2));
+  const cardHeight = currentRect.height;
+  const preferredSide = tutorialPreferredPlacement(targetRect);
+  const sideOrder = [preferredSide, "below", "above", "right", "left"].filter(
+    (side, index, array) => array.indexOf(side) === index,
+  );
+
+  for (const side of sideOrder) {
+    const placement = buildTutorialCardPlacement(
+      side,
+      targetRect,
+      cardWidth,
+      cardHeight,
+      viewportWidth,
+      viewportHeight,
+      padding,
+      margin,
+    );
+    if (!placement) continue;
+    tutorialCard.style.top = `${placement.top}px`;
+    tutorialCard.style.left = `${placement.left}px`;
+    tutorialCard.style.transform = "none";
+    tutorialCard.style.maxHeight = `${placement.maxHeight}px`;
+    return;
+  }
+
+  tutorialCard.style.top = "50%";
+  tutorialCard.style.left = "50%";
+  tutorialCard.style.transform = "translate(-50%, -50%)";
+  tutorialCard.style.maxHeight = `${Math.max(180, viewportHeight - (padding * 2))}px`;
 }
 
 function positionTutorialBackdrop(rect) {
@@ -1647,6 +1817,7 @@ function updateTutorialSpotlight(target = tutorialActiveTarget) {
   tutorialSpotlight.style.height = `${rect.height}px`;
   tutorialSpotlight.classList.remove("is-hidden");
   positionTutorialBackdrop(rect);
+  positionTutorialCard(rect);
 }
 
 function scheduleTutorialSpotlightUpdate() {
@@ -4338,6 +4509,7 @@ function bindEvents() {
 }
 
 async function init() {
+  ensureGlobalBackground();
   applyTheme(localStorage.getItem(THEME_STORAGE_KEY) || "dark");
   setLanguage(state.language);
   setAuthView("login");
