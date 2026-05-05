@@ -75,12 +75,12 @@ app.add_middleware(
 )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-UPLOAD_DIR = BASE_DIR / "uploads"
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", BASE_DIR / "uploads")).expanduser().resolve()
 FRONTEND_DIR = BASE_DIR / "frontend"
-LOG_DIR = BASE_DIR / "data"
+LOG_DIR = Path(os.getenv("LOG_DIR", BASE_DIR / "data")).expanduser().resolve()
 
-UPLOAD_DIR.mkdir(exist_ok=True)
-LOG_DIR.mkdir(exist_ok=True)
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 CLAIMS_LOG_PATH = LOG_DIR / "claims.log"
 ADMIN_LOG_PATH = LOG_DIR / "admin_actions.log"

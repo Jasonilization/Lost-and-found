@@ -22,6 +22,7 @@
   --text-status-open: #bfd8ee;
   --text-status-claimed: #ffd083;
   --surface-page: #0d1210;
+  --surface-panel-fallback: #18201d;
   --surface-panel: rgba(18, 24, 21, 0.9);
   --surface-card: rgba(24, 31, 28, 0.92);
   --surface-card-strong: rgba(28, 36, 33, 0.96);
@@ -55,6 +56,8 @@
   --gradient-primary: #67c49c;
   --gradient-dropzone: rgba(29, 42, 36, 0.92);
   --gradient-image: rgba(41, 53, 47, 0.96);
+  --glass-blur-strong: 18px;
+  --glass-blur-soft: 12px;
 }
 
 :root[data-theme="light"] {
@@ -68,6 +71,7 @@
   --text-status-open: #244d72;
   --text-status-claimed: #83530a;
   --surface-page: #f4efe3;
+  --surface-panel-fallback: #fffaf2;
   --surface-panel: rgba(255, 251, 244, 0.9);
   --surface-card: rgba(255, 255, 255, 0.9);
   --surface-card-strong: rgba(255, 255, 255, 0.96);
@@ -101,6 +105,8 @@
   --gradient-primary: #1f7a5a;
   --gradient-dropzone: rgba(255, 252, 245, 0.96);
   --gradient-image: rgba(223, 232, 221, 0.96);
+  --glass-blur-strong: 18px;
+  --glass-blur-soft: 12px;
 }
 
 :root[data-theme="aurora"] {
@@ -114,6 +120,7 @@
   --text-status-open: #d2d8ff;
   --text-status-claimed: #ffddb2;
   --surface-page: #120f1c;
+  --surface-panel-fallback: #231b37;
   --surface-panel: rgba(25, 20, 40, 0.9);
   --surface-card: rgba(31, 25, 48, 0.92);
   --surface-card-strong: rgba(38, 31, 57, 0.96);
@@ -147,6 +154,57 @@
   --gradient-primary: #8fd4ff;
   --gradient-dropzone: rgba(40, 30, 58, 0.92);
   --gradient-image: rgba(49, 37, 68, 0.96);
+  --glass-blur-strong: 18px;
+  --glass-blur-soft: 12px;
+}
+
+:root[data-theme="transparent"] {
+  color-scheme: dark;
+  --text-primary: #f2f7f5;
+  --text-muted: #c8d3ce;
+  --text-strong: #ffffff;
+  --text-inverse: #08110d;
+  --text-danger: #ffc4ba;
+  --text-accent: #d6fff0;
+  --text-status-open: #d4e8f9;
+  --text-status-claimed: #ffe0b0;
+  --surface-page: #0b100f;
+  --surface-panel-fallback: rgba(22, 30, 28, 0.88);
+  --surface-panel: rgba(20, 29, 27, 0.56);
+  --surface-card: rgba(26, 35, 33, 0.5);
+  --surface-card-strong: rgba(29, 40, 37, 0.66);
+  --surface-field: rgba(22, 30, 28, 0.58);
+  --surface-field-focus: rgba(30, 40, 38, 0.72);
+  --surface-pill: rgba(20, 29, 27, 0.52);
+  --surface-soft: rgba(18, 26, 24, 0.48);
+  --surface-soft-strong: rgba(25, 34, 32, 0.62);
+  --surface-backdrop: rgba(9, 14, 11, 0.72);
+  --surface-danger: rgba(145, 57, 45, 0.24);
+  --surface-success: rgba(42, 111, 82, 0.2);
+  --surface-info: rgba(70, 110, 144, 0.2);
+  --surface-warm: rgba(154, 108, 41, 0.24);
+  --accent: #93e4c0;
+  --accent-strong: #d7fff0;
+  --accent-secondary: #9fcaf0;
+  --accent-warm: #f0c07b;
+  --accent-danger: #ff9d90;
+  --line-color: rgba(229, 241, 235, 0.18);
+  --line-strong: rgba(229, 241, 235, 0.28);
+  --line-accent: rgba(147, 228, 192, 0.36);
+  --line-danger: rgba(255, 157, 144, 0.32);
+  --line-soft: rgba(229, 241, 235, 0.12);
+  --shadow-page: 0 24px 54px rgba(1, 5, 4, 0.28);
+  --shadow-card: 0 16px 34px rgba(1, 5, 4, 0.24);
+  --shadow-focus: 0 0 0 4px rgba(147, 228, 192, 0.18);
+  --shadow-accent: 0 14px 26px rgba(48, 98, 77, 0.24);
+  --gradient-body: #0b100f;
+  --gradient-page-glow-left: transparent;
+  --gradient-page-glow-right: transparent;
+  --gradient-primary: #8ad8b5;
+  --gradient-dropzone: rgba(20, 29, 27, 0.58);
+  --gradient-image: rgba(27, 35, 33, 0.66);
+  --glass-blur-strong: 22px;
+  --glass-blur-soft: 14px;
 }
 
 * {
@@ -185,6 +243,10 @@ body::before {
 
 :root[data-theme="aurora"] body::before {
   background: rgba(13, 9, 22, 0.34);
+}
+
+:root[data-theme="transparent"] body::before {
+  background: rgba(8, 12, 11, 0.24);
 }
 
 button,
@@ -242,9 +304,11 @@ p {
 .query-context-card {
   border: var(--line-width) solid var(--line-color);
   border-radius: var(--radius-xl);
+  background: var(--surface-panel-fallback);
   background: var(--surface-panel);
   box-shadow: var(--shadow-page);
-  backdrop-filter: blur(18px);
+  backdrop-filter: blur(var(--glass-blur-strong));
+  -webkit-backdrop-filter: blur(var(--glass-blur-strong));
 }
 
 .status-strip {
@@ -262,10 +326,12 @@ p {
   gap: var(--space-1);
   border: var(--line-width) solid var(--line-color);
   border-radius: 999px;
+  background: var(--surface-panel-fallback);
   background: var(--surface-pill);
   color: var(--text-muted);
   padding: 10px 14px;
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(var(--glass-blur-soft));
+  -webkit-backdrop-filter: blur(var(--glass-blur-soft));
 }
 
 .query-upload-row {
@@ -515,7 +581,15 @@ textarea:focus {
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-5);
-  padding: 24px clamp(var(--space-3), 4vw, 44px) 18px;
+  margin: 24px clamp(var(--space-3), 4vw, 44px) 18px;
+  padding: 22px 24px;
+  border: var(--line-width) solid var(--line-color);
+  border-radius: var(--radius-xl);
+  background: var(--surface-panel-fallback);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-page);
+  backdrop-filter: blur(var(--glass-blur-strong));
+  -webkit-backdrop-filter: blur(var(--glass-blur-strong));
 }
 
 .topbar-actions {
@@ -1418,8 +1492,11 @@ textarea:focus {
   border: var(--line-width) solid var(--line-color);
   border-radius: 26px;
   padding: 0;
+  background: var(--surface-panel-fallback);
   background: var(--surface-card-strong);
   box-shadow: var(--shadow-page);
+  backdrop-filter: blur(var(--glass-blur-strong));
+  -webkit-backdrop-filter: blur(var(--glass-blur-strong));
 }
 
 .claim-dialog[open] {
@@ -1429,45 +1506,45 @@ textarea:focus {
 .claim-dialog::backdrop {
   background: var(--surface-backdrop);
   backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
   animation: backdropFade 220ms ease both;
 }
 
 body.tutorial-open {
-  overflow: hidden;
-}
-
-body.tutorial-open .status-strip,
-body.tutorial-open .auth-screen,
-body.tutorial-open .app-shell {
-  pointer-events: none;
+  overflow-x: hidden;
 }
 
 .tutorial-overlay {
   position: fixed;
   inset: 0;
-  z-index: 30;
-  display: grid;
-  place-items: center;
+  z-index: 60;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
   padding: 20px;
+  pointer-events: none;
 }
 
 .tutorial-backdrop {
-  position: absolute;
-  inset: 0;
+  position: fixed;
   background: rgba(9, 14, 11, 0.66);
-  backdrop-filter: blur(6px);
-  pointer-events: none;
-  z-index: 29;
+  pointer-events: auto;
+  z-index: 60;
+  transition:
+    top 180ms ease,
+    left 180ms ease,
+    width 180ms ease,
+    height 180ms ease,
+    opacity 180ms ease;
 }
 
 .tutorial-spotlight {
   position: fixed;
-  z-index: 30;
-  border: 2px solid var(--accent-strong);
+  z-index: 61;
   border-radius: 20px;
   box-shadow:
-    0 0 0 9999px rgba(9, 14, 11, 0.58),
-    0 0 0 10px rgba(103, 196, 156, 0.12);
+    0 0 0 2px rgba(215, 255, 240, 0.95),
+    0 0 0 8px rgba(103, 196, 156, 0.18);
   pointer-events: none;
   transition:
     top 180ms ease,
@@ -1478,11 +1555,15 @@ body.tutorial-open .app-shell {
 
 .tutorial-card {
   position: relative;
-  z-index: 32;
+  z-index: 70;
   width: min(560px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
   display: grid;
   gap: var(--space-3);
   padding: 24px;
+  pointer-events: auto;
+  background: var(--surface-panel-fallback);
   background: var(--surface-card-strong);
   box-shadow: var(--shadow-page);
   animation: modalPop 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
@@ -1507,7 +1588,7 @@ body.tutorial-open .app-shell {
 
 .tutorial-highlight {
   position: relative;
-  z-index: 31;
+  z-index: 62;
   box-shadow:
     0 0 0 3px rgba(103, 196, 156, 0.3),
     0 0 0 10px rgba(103, 196, 156, 0.08),
@@ -1522,6 +1603,33 @@ body.tutorial-open .app-shell {
   display: grid;
   gap: var(--space-3);
   padding: var(--space-5);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .surface-card,
+  .panel,
+  .auth-card,
+  .account-chip,
+  .account-hero,
+  .detail-card,
+  .query-context-card,
+  .server-pill,
+  .static-pill,
+  .topbar,
+  .claim-dialog,
+  .tutorial-card {
+    background: var(--surface-panel-fallback);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .claim-dialog {
+    background: var(--surface-card-strong);
+  }
+
+  .tutorial-card {
+    background: var(--surface-card-strong);
+  }
 }
 
 .claim-dialog[open] .claim-form {

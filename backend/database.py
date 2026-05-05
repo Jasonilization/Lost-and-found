@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -8,10 +9,11 @@ from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integ
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
-DATA_DIR.mkdir(exist_ok=True)
+DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data")).expanduser().resolve()
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-DB_PATH = DATA_DIR / "lost_found.db"
+DB_PATH = Path(os.getenv("DATABASE_PATH", DATA_DIR / "lost_found.db")).expanduser().resolve()
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})

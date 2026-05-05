@@ -1,4 +1,5 @@
 fastapi
+gunicorn
 Pillow
 pillow-heif
 pydantic

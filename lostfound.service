@@ -1,0 +1,16 @@
+[Unit]
+Description=Lost and Found FastAPI service
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/lost-found
+EnvironmentFile=/opt/lost-found/.env
+ExecStart=/opt/lost-found/.venv/bin/gunicorn backend.backend:app --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers 2
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

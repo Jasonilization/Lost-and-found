@@ -11,7 +11,7 @@ const CURRENT_ITEM_STORAGE_KEY = "lostfound_current_item";
 const LANGUAGE_STORAGE_KEY = "lostfound_language";
 const TUTORIAL_STORAGE_KEY = "lostfound_tutorial_seen";
 const INITIALS_PATTERN = /^[a-z]+(?:\.[a-z]+)+$/;
-const THEMES = ["dark", "light", "aurora"];
+const THEMES = ["dark", "light", "aurora", "transparent"];
 const SUPPORTED_LANGUAGES = ["en", "zh-CN", "th"];
 const CHAT_UPLOAD_LIMIT_BYTES = 5 * 1024 * 1024;
 const CHAT_ALLOWED_FILE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".pdf", ".txt"];
@@ -68,6 +68,7 @@ const translations = {
     "theme.dark": "Dark",
     "theme.light": "Light",
     "theme.aurora": "Aurora",
+    "theme.transparent": "Transparent",
     "nav.reports": "Reports",
     "nav.query": "Query",
     "nav.claims": "My Claims",
@@ -191,6 +192,7 @@ const translations = {
     "theme.dark": "深色",
     "theme.light": "浅色",
     "theme.aurora": "极光",
+    "theme.transparent": "透明",
     "nav.reports": "报告",
     "nav.query": "聊天",
     "nav.claims": "我的认领",
@@ -377,6 +379,7 @@ const translationEnhancements = {
     "theme.dark": "เข้ม",
     "theme.light": "สว่าง",
     "theme.aurora": "ออโรรา",
+    "theme.transparent": "โปร่งใส",
     "nav.reports": "รายงาน",
     "nav.query": "สนทนา",
     "nav.claims": "คำขอของฉัน",
@@ -811,7 +814,7 @@ const confirmActionLabel = document.querySelector("#confirmActionLabel");
 const closeConfirmDialog = document.querySelector("#closeConfirmDialog");
 const cancelConfirmButton = document.querySelector("#cancelConfirmButton");
 const tutorialOverlay = document.querySelector("#tutorialOverlay");
-const tutorialBackdrop = document.querySelector("#tutorialBackdrop");
+const tutorialBackdropPanes = Array.from(document.querySelectorAll("[data-tutorial-backdrop]"));
 const tutorialSpotlight = document.querySelector("#tutorialSpotlight");
 const tutorialStepLabel = document.querySelector("#tutorialStepLabel");
 const tutorialTitle = document.querySelector("#tutorialTitle");
@@ -827,6 +830,8 @@ const undoToast = document.querySelector("#undoToast");
 const undoToastText = document.querySelector("#undoToastText");
 const undoToastButton = document.querySelector("#undoToastButton");
 const undoToastClose = document.querySelector("#undoToastClose");
+let tutorialActiveTarget = null;
+let tutorialSpotlightFrame = 0;
 
 const progressHandles = {
   report: {
@@ -1554,6 +1559,11 @@ function clearTutorialHighlight() {
     state.tutorialCleanup();
   }
   state.tutorialCleanup = null;
+  tutorialActiveTarget = null;
+  if (tutorialSpotlightFrame) {
+    window.cancelAnimationFrame(tutorialSpotlightFrame);
+    tutorialSpotlightFrame = 0;
+  }
   document.querySelectorAll(".tutorial-highlight").forEach((element) => {
     element.classList.remove("tutorial-highlight");
     element.classList.remove("tutorial-target-active");
@@ -1563,6 +1573,12 @@ function clearTutorialHighlight() {
   tutorialSpotlight.style.removeProperty("left");
   tutorialSpotlight.style.removeProperty("width");
   tutorialSpotlight.style.removeProperty("height");
+  tutorialBackdropPanes.forEach((pane) => {
+    pane.style.removeProperty("top");
+    pane.style.removeProperty("left");
+    pane.style.removeProperty("width");
+    pane.style.removeProperty("height");
+  });
 }
 
 function resolveTutorialTarget(step) {
@@ -1571,19 +1587,86 @@ function resolveTutorialTarget(step) {
   return typeof selector === "string" ? document.querySelector(selector) : selector;
 }
 
-function updateTutorialSpotlight(target) {
-  if (!target) {
-    clearTutorialHighlight();
+function tutorialViewportRect(target) {
+  const rect = target.getBoundingClientRect();
+  const absoluteTop = rect.top + window.scrollY;
+  const absoluteLeft = rect.left + window.scrollX;
+  const top = absoluteTop - window.scrollY;
+  const left = absoluteLeft - window.scrollX;
+  return {
+    top,
+    left,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
+function positionTutorialBackdrop(rect) {
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const top = Math.max(0, Math.min(rect.top, viewportHeight));
+  const left = Math.max(0, Math.min(rect.left, viewportWidth));
+  const width = Math.max(0, Math.min(rect.width, viewportWidth - left));
+  const height = Math.max(0, Math.min(rect.height, viewportHeight - top));
+  const bottom = Math.max(0, viewportHeight - (top + height));
+  const right = Math.max(0, viewportWidth - (left + width));
+  const [topPane, leftPane, rightPane, bottomPane] = tutorialBackdropPanes;
+
+  if (!topPane || !leftPane || !rightPane || !bottomPane) return;
+
+  topPane.style.top = "0px";
+  topPane.style.left = "0px";
+  topPane.style.width = `${viewportWidth}px`;
+  topPane.style.height = `${top}px`;
+
+  leftPane.style.top = `${top}px`;
+  leftPane.style.left = "0px";
+  leftPane.style.width = `${left}px`;
+  leftPane.style.height = `${height}px`;
+
+  rightPane.style.top = `${top}px`;
+  rightPane.style.left = `${left + width}px`;
+  rightPane.style.width = `${right}px`;
+  rightPane.style.height = `${height}px`;
+
+  bottomPane.style.top = `${top + height}px`;
+  bottomPane.style.left = "0px";
+  bottomPane.style.width = `${viewportWidth}px`;
+  bottomPane.style.height = `${bottom}px`;
+}
+
+function updateTutorialSpotlight(target = tutorialActiveTarget) {
+  if (!target || !target.isConnected) {
     return;
   }
 
-  const rect = target.getBoundingClientRect();
-  const padding = 10;
-  tutorialSpotlight.style.top = `${Math.max(rect.top - padding, 8)}px`;
-  tutorialSpotlight.style.left = `${Math.max(rect.left - padding, 8)}px`;
-  tutorialSpotlight.style.width = `${Math.max(rect.width + padding * 2, 32)}px`;
-  tutorialSpotlight.style.height = `${Math.max(rect.height + padding * 2, 32)}px`;
+  const rect = tutorialViewportRect(target);
+  tutorialSpotlight.style.top = `${rect.top}px`;
+  tutorialSpotlight.style.left = `${rect.left}px`;
+  tutorialSpotlight.style.width = `${rect.width}px`;
+  tutorialSpotlight.style.height = `${rect.height}px`;
   tutorialSpotlight.classList.remove("is-hidden");
+  positionTutorialBackdrop(rect);
+}
+
+function scheduleTutorialSpotlightUpdate() {
+  if (!state.tutorialActive || !tutorialActiveTarget) return;
+  if (tutorialSpotlightFrame) return;
+  tutorialSpotlightFrame = window.requestAnimationFrame(() => {
+    tutorialSpotlightFrame = 0;
+    updateTutorialSpotlight();
+  });
+}
+
+async function waitForTutorialTarget(step, attempts = 12) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const target = resolveTutorialTarget(step);
+    if (target instanceof HTMLElement && target.isConnected) {
+      return target;
+    }
+    await sleep(80);
+  }
+  return null;
 }
 
 function shouldShowTutorial() {
@@ -1623,11 +1706,13 @@ async function syncTutorialStep() {
   }
 
   clearTutorialHighlight();
-  const target = resolveTutorialTarget(step);
+  const target = await waitForTutorialTarget(step);
   if (target) {
+    tutorialActiveTarget = target;
     target.classList.add("tutorial-highlight");
     target.classList.add("tutorial-target-active");
-    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    target.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+    await sleep(240);
     updateTutorialSpotlight(target);
     if (step.requiresInteraction) {
       const handleInteraction = () => {
@@ -1655,6 +1740,7 @@ async function openTutorial() {
 }
 
 function closeTutorial({ markSeen = false, rememberSession = true } = {}) {
+  const shouldSkipTutorial = tutorialDontShowAgain.checked;
   state.tutorialActive = false;
   state.tutorialStepIndex = 0;
   tutorialOverlay.classList.add("is-hidden");
@@ -1668,7 +1754,7 @@ function closeTutorial({ markSeen = false, rememberSession = true } = {}) {
   }
   if (markSeen) {
     saveTutorialState({ completed: true, skipped: false, savedAt: new Date().toISOString() });
-  } else if (tutorialDontShowAgain.checked) {
+  } else if (shouldSkipTutorial) {
     saveTutorialState({ completed: false, skipped: true, savedAt: new Date().toISOString() });
   }
 }
@@ -4197,8 +4283,15 @@ function bindEvents() {
   tutorialCloseButton.addEventListener("click", () => {
     closeTutorial({ markSeen: false });
   });
-  tutorialBackdrop.addEventListener("click", (event) => {
-    event.preventDefault();
+  tutorialBackdropPanes.forEach((pane) => {
+    pane.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    pane.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
   });
 
   window.addEventListener("hashchange", () => {
@@ -4208,9 +4301,12 @@ function bindEvents() {
   });
   window.addEventListener("resize", () => {
     if (state.tutorialActive) {
-      void syncTutorialStep();
+      scheduleTutorialSpotlightUpdate();
     }
   });
+  window.addEventListener("scroll", () => {
+    scheduleTutorialSpotlightUpdate();
+  }, { passive: true, capture: true });
   document.addEventListener("click", (event) => {
     if (!notificationDropdown || notificationDropdown.classList.contains("is-hidden")) return;
     if (notificationDropdown.contains(event.target) || notificationButton.contains(event.target)) return;

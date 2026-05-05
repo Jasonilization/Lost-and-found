@@ -8,6 +8,7 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 VENV_DIR="${ROOT_DIR}/.venv"
 VENV_PYTHON="${VENV_DIR}/bin/python3"
 VENV_ACTIVATE="${VENV_DIR}/bin/activate"
+ENV_FILE="${ROOT_DIR}/.env"
 
 echo "[start] Project root: $ROOT_DIR"
 
@@ -22,6 +23,16 @@ if [[ ! -x "$VENV_PYTHON" || ! -f "$VENV_ACTIVATE" ]]; then
   "$PYTHON_BIN" -m venv "$VENV_DIR"
 fi
 
+if [[ -f "$ENV_FILE" ]]; then
+  echo "[start] Loading environment from .env"
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+fi
+
+mkdir -p "${UPLOAD_DIR:-./uploads}" "${LOG_DIR:-./logs}" "${DATA_DIR:-./data}"
+
 echo "[start] Activating virtual environment"
 # shellcheck disable=SC1091
 source "$VENV_ACTIVATE"
@@ -34,6 +45,8 @@ PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install -r requirements.txt
 
 export OLLAMA_TEXT_MODEL="${OLLAMA_TEXT_MODEL:-llama3:8b}"
 export AI_CHAT_MODEL="${AI_CHAT_MODEL:-llama3:8b}"
+export HOST="${HOST:-0.0.0.0}"
+export PORT="${PORT:-8000}"
 echo "[start] AI model: $AI_CHAT_MODEL"
 
 if curl -sS -m 2 http://localhost:11434 >/dev/null 2>&1; then
@@ -44,8 +57,8 @@ else
   echo "[start]          To enable Ollama later, run: ollama serve"
 fi
 
-echo "[start] Backend URL: http://0.0.0.0:8000"
-echo "[start] Frontend URL: http://shr-lost-and-found.local:8000"
+echo "[start] Backend URL: http://${HOST}:${PORT}"
+echo "[start] Frontend URL: http://shr-lost-and-found.local:${PORT}"
 echo "[start] Starting FastAPI with python3 -m uvicorn"
 
-exec python3 -m uvicorn backend.backend:app --host 0.0.0.0 --port 8000
+exec python3 -m uvicorn backend.backend:app --host "$HOST" --port "$PORT"
