@@ -152,27 +152,59 @@ class BlockingFlowTests(unittest.TestCase):
         self.assertEqual(self.db.query(AIInspectionLog).count(), 0)
 
     def test_health_detailed_returns_admin_monitor_contract(self) -> None:
-        with patch("backend.backend._get_cpu_usage_percent", return_value=22.4), \
-             patch("backend.backend._get_memory_percent", return_value=63.9), \
-             patch("backend.backend._get_gpu_usage_percent", return_value=-1), \
-             patch("backend.backend._get_gpu_temperature_c", return_value=-1), \
-             patch("backend.backend._get_uptime_seconds", return_value=120), \
-             patch("backend.backend.get_ollama_status", return_value={"latency_ms": None}), \
-             patch("backend.backend.get_llava_runtime_state", return_value={"last_status": ""}):
+        with patch("backend.backend._get_uptime_seconds", return_value=120), \
+             patch("backend.backend.get_ollama_status", return_value={"available": True}):
             payload = backend_app.health_detailed(current_user=self.admin_user)
 
         self.assertEqual(
             payload,
             {
-                "cpu_usage_percent": 22.4,
-                "memory_usage_percent": 63.9,
-                "gpu_usage_percent": -1,
-                "gpu_temperature_c": -1,
+                "status": "running",
                 "uptime_seconds": 120,
-                "ollama_latency_ms": -1,
-                "last_ai_status": "unknown",
             },
         )
+
+    def test_admin_start_ollama_is_safe_when_already_running(self) -> None:
+        with patch("backend.backend._get_uptime_seconds", return_value=120), \
+             patch("backend.backend.get_ollama_status", return_value={"available": True}):
+            payload = backend_app.admin_start_ollama(current_user=self.admin_user)
+
+        self.assertEqual(payload["status"], "running")
+        self.assertFalse(payload["started"])
+        self.assertIn("already running", payload["message"].lower())
+
+    def test_admin_start_ollama_launches_service(self) -> None:
+        with patch("backend.backend._get_uptime_seconds", return_value=120), \
+             patch("backend.backend.get_ollama_status", side_effect=[{"available": False}, {"available": True}]), \
+             patch("backend.backend._ollama_service_pids", return_value=[]), \
+             patch("backend.backend.shutil.which", return_value="/usr/local/bin/ollama"), \
+             patch("backend.backend.subprocess.Popen") as mock_popen:
+            payload = backend_app.admin_start_ollama(current_user=self.admin_user)
+
+        mock_popen.assert_called_once()
+        self.assertEqual(payload["status"], "running")
+        self.assertTrue(payload["started"])
+
+    def test_admin_stop_ollama_is_safe_when_already_stopped(self) -> None:
+        with patch("backend.backend._get_uptime_seconds", return_value=120), \
+             patch("backend.backend.get_ollama_status", return_value={"available": False}), \
+             patch("backend.backend._ollama_service_pids", return_value=[]):
+            payload = backend_app.admin_stop_ollama(current_user=self.admin_user)
+
+        self.assertEqual(payload["status"], "stopped")
+        self.assertFalse(payload["stopped"])
+        self.assertIn("already stopped", payload["message"].lower())
+
+    def test_admin_stop_ollama_stops_running_service(self) -> None:
+        with patch("backend.backend._get_uptime_seconds", return_value=120), \
+             patch("backend.backend.get_ollama_status", side_effect=[{"available": True}, {"available": False}]), \
+             patch("backend.backend._ollama_service_pids", return_value=[1234]), \
+             patch("backend.backend.os.kill") as mock_kill:
+            payload = backend_app.admin_stop_ollama(current_user=self.admin_user)
+
+        mock_kill.assert_called_once()
+        self.assertEqual(payload["status"], "stopped")
+        self.assertTrue(payload["stopped"])
 
     def test_low_match_claim_is_rejected_before_insert(self) -> None:
         payload = backend_app.ClaimPayload(

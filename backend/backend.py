@@ -10,6 +10,9 @@ import logging
 import os
 import re
 import requests
+import shutil
+import signal
+import subprocess
 import sys
 import secrets
 import stat
@@ -27,9 +30,10 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 try:
-    from PIL import Image, UnidentifiedImageError
+    from PIL import Image, ImageDraw, UnidentifiedImageError
 except ImportError:  # pragma: no cover - optional dependency for image normalization
     Image = None
+    ImageDraw = None
     UnidentifiedImageError = OSError
 try:
     from pillow_heif import register_heif_opener
@@ -49,7 +53,7 @@ except ImportError:  # pragma: no cover - Unix-only runtime helper
 
 from backend.ai_assistant import AI_MODEL, analyze_claim_match, analyze_evidence, analyze_report_abuse, model_size_label, normalize_language
 from backend.ai_moderation import classify_user_input
-from backend.database import AIInspectionLog, AuditLog, Claim, ItemQuery, LostFoundItem, Notification, QueryMessage, SessionLocal, User, UserSession, init_db
+from backend.database import AIInspectionLog, AuditLog, Claim, ItemQuery, LostFoundItem, Notification, QueryMessage, ReturnedItemDispute, SessionLocal, User, UserSession, init_db
 from backend.moderation import validate_class_of, validate_initials, validate_text_input
 from backend.ollama_tagger import (
     build_search_text,
@@ -173,6 +177,14 @@ REVIEW_STATUSES = ["approved", "rejected", "incomplete", "needs-review"]
 ABUSE_OVERRIDE_STATUSES = ["", "allow", "flag"]
 REPORT_SUBMISSION_COOLDOWN = timedelta(hours=1)
 LOST_FOUND_ROOM_LABEL = "Lost & Found Room"
+RECENT_RETURN_WINDOW_DAYS = 7
+CLAIM_PREVIEW_PROMPT = (
+    "You are looking only at a selected circular region from a lost-and-found image.\n"
+    "Describe only what is visible inside this selected area.\n"
+    'Return strict JSON with keys "description" and "tags".\n'
+    'The "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\n'
+    "If the region is unclear, say that it is unclear instead of guessing."
+)
 MAX_UPLOAD_SIZE = 5 * 1024 * 1024
 MAX_REQUEST_SIZE = 5 * 1024 * 1024
 UPLOAD_CHUNK_SIZE = 1024 * 1024
@@ -228,6 +240,9 @@ class ClaimPayload(BaseModel):
     item_description: str
     lost_location: str
     identifying_info: str
+    visual_selection: Optional[dict[str, float]] = None
+    visual_summary: str = ""
+    visual_tags: list[str] = []
 
 
 class QueryPayload(BaseModel):
@@ -242,11 +257,11 @@ class ReportImagePayload(BaseModel):
 
 
 class ReportPayload(BaseModel):
-    reporter_name: str
+    reporter_name: str = ""
     title: str
     description: str
-    location: str
-    category: str
+    location: str = ""
+    category: str = "Other"
     evidence_details: str = ""
     student_id: str = ""
     contact_info: str = ""
@@ -279,6 +294,25 @@ class AdminAbuseOverridePayload(BaseModel):
 
 class AdminClaimDecisionPayload(BaseModel):
     status: str
+
+
+class RoomUploadPayload(BaseModel):
+    label: str = ""
+    images: list[ReportImagePayload]
+
+
+class CircleSelectionPayload(BaseModel):
+    x: float
+    y: float
+    radius: float
+
+
+class ClaimPreviewPayload(BaseModel):
+    selection: CircleSelectionPayload
+
+
+class ReturnedItemDisputePayload(BaseModel):
+    reason: str
 
 
 @app.on_event("startup")
@@ -437,6 +471,11 @@ def snapshot_item(item: LostFoundItem) -> dict[str, Any]:
         "category": item.category,
         "status": item.status,
         "claimed": bool(item.claimed),
+        "is_room_item": bool(item.is_room_item),
+        "room_label": item.room_label,
+        "room_recorded_at": item.room_recorded_at.isoformat() if item.room_recorded_at else None,
+        "returned_at": item.returned_at.isoformat() if item.returned_at else None,
+        "returned_by_claim_id": item.returned_by_claim_id,
         "review_status": item.review_status,
         "review_notes": item.review_notes,
         "abuse_flagged": bool(item.abuse_flagged),
@@ -462,6 +501,9 @@ def snapshot_claim(claim: Claim) -> dict[str, Any]:
         "identifying_info": claim.identifying_info,
         "match_score": int(claim.match_score or 0),
         "match_reasoning": claim.match_reasoning,
+        "visual_selection": parse_json_object(claim.visual_selection_json, default={}),
+        "visual_summary": claim.visual_summary or "",
+        "visual_tags": parse_json_list(claim.visual_tags_json),
         "status": claim.status,
         "created_at": claim.created_at.isoformat() if claim.created_at else None,
         "updated_at": claim.updated_at.isoformat() if claim.updated_at else None,
@@ -524,6 +566,29 @@ def create_notification(
     )
     db.add(notification)
     return notification
+
+
+def parse_json_object(raw_value: str, *, default: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    try:
+        value = json.loads(raw_value or "{}")
+        return value if isinstance(value, dict) else (default or {})
+    except json.JSONDecodeError:
+        return default or {}
+
+
+def parse_json_list(raw_value: str) -> list[str]:
+    try:
+        value = json.loads(raw_value or "[]")
+        if not isinstance(value, list):
+            return []
+        cleaned: list[str] = []
+        for entry in value:
+            normalized = str(entry).strip().lower()
+            if normalized and normalized not in cleaned:
+                cleaned.append(normalized)
+        return cleaned[:8]
+    except json.JSONDecodeError:
+        return []
 
 
 def admin_user_ids(db: Session, *, exclude_user_id: Optional[int] = None) -> list[int]:
@@ -1064,6 +1129,176 @@ def get_item_reporter(db: Session, item: LostFoundItem) -> Optional[User]:
     return db.query(User).filter(User.id == item.submitted_by_user_id).first()
 
 
+def mark_item_returned(item: LostFoundItem, *, claim_id: Optional[int] = None) -> None:
+    item.claimed = True
+    item.status = "Claimed"
+    item.returned_at = item.returned_at or datetime.utcnow()
+    item.returned_by_claim_id = claim_id
+
+
+def clear_item_returned(item: LostFoundItem) -> None:
+    item.returned_at = None
+    item.returned_by_claim_id = None
+
+
+def start_of_current_week_utc() -> datetime:
+    now = datetime.utcnow()
+    start = now - timedelta(days=now.weekday())
+    return start.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def items_returned_this_week(db: Session) -> int:
+    return (
+        db.query(LostFoundItem)
+        .filter(
+            LostFoundItem.deleted_at.is_(None),
+            LostFoundItem.returned_at.is_not(None),
+            LostFoundItem.returned_at >= start_of_current_week_utc(),
+        )
+        .count()
+    )
+
+
+def _coerce_json_text(value: str) -> str:
+    stripped = str(value or "").strip()
+    if stripped.startswith("```"):
+        stripped = re.sub(r"^```(?:json)?\s*", "", stripped)
+        stripped = re.sub(r"\s*```$", "", stripped)
+    return stripped.strip()
+
+
+def parse_region_analysis(raw_response: str) -> dict[str, Any]:
+    stripped = _coerce_json_text(raw_response)
+    if not stripped:
+        return {"description": "Selected area is unclear.", "tags": ["unclear"]}
+
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        normalized = stripped[:180]
+        tags = []
+        for token in re.findall(r"[a-z0-9-]+", normalized.lower()):
+            if len(token) < 3 or token in tags:
+                continue
+            tags.append(token)
+            if len(tags) >= 5:
+                break
+        return {
+            "description": normalized,
+            "tags": tags or ["unclear"],
+        }
+
+    description = str(payload.get("description", "")).strip() if isinstance(payload, dict) else ""
+    raw_tags = payload.get("tags", []) if isinstance(payload, dict) else []
+    tags: list[str] = []
+    if isinstance(raw_tags, list):
+        for value in raw_tags:
+            normalized = str(value).strip().lower()
+            if normalized and normalized not in tags:
+                tags.append(normalized)
+    elif isinstance(raw_tags, str):
+        for value in re.findall(r"[a-z0-9-]+", raw_tags.lower()):
+            if value not in tags:
+                tags.append(value)
+
+    return {
+        "description": description or "Selected area is unclear.",
+        "tags": tags[:5] or ["unclear"],
+    }
+
+
+def validate_circle_selection(selection: CircleSelectionPayload) -> dict[str, float]:
+    x = float(selection.x)
+    y = float(selection.y)
+    radius = float(selection.radius)
+    if not 0.0 <= x <= 1.0 or not 0.0 <= y <= 1.0:
+        raise HTTPException(status_code=400, detail="Selection coordinates must be normalized between 0 and 1.")
+    if not 0.04 <= radius <= 0.48:
+        raise HTTPException(status_code=400, detail="Selection radius must be between 0.04 and 0.48.")
+    return {
+        "x": round(x, 4),
+        "y": round(y, 4),
+        "radius": round(radius, 4),
+    }
+
+
+def analyze_item_region(item: LostFoundItem, selection: CircleSelectionPayload) -> dict[str, Any]:
+    if Image is None or ImageDraw is None:
+        raise HTTPException(status_code=415, detail="Image crop analysis requires Pillow image support.")
+    if not item.image_path:
+        raise HTTPException(status_code=400, detail="This item does not have an image to inspect.")
+
+    source_path = BASE_DIR / item.image_path.lstrip("/")
+    if not source_path.exists():
+        raise HTTPException(status_code=404, detail="The stored image for this item is missing.")
+
+    normalized = validate_circle_selection(selection)
+    output_path = safe_upload_path(".png")
+    try:
+        with Image.open(source_path) as image:
+            image.load()
+            prepared = image.convert("RGBA")
+            width, height = prepared.size
+            center_x = int(width * normalized["x"])
+            center_y = int(height * normalized["y"])
+            radius_px = max(18, int(min(width, height) * normalized["radius"]))
+            left = max(0, center_x - radius_px)
+            top = max(0, center_y - radius_px)
+            right = min(width, center_x + radius_px)
+            bottom = min(height, center_y + radius_px)
+            cropped = prepared.crop((left, top, right, bottom))
+
+            mask = Image.new("L", cropped.size, 0)
+            draw = ImageDraw.Draw(mask)
+            draw.ellipse((0, 0, cropped.size[0] - 1, cropped.size[1] - 1), fill=255)
+            output = Image.new("RGBA", cropped.size, (255, 255, 255, 255))
+            output.paste(cropped, (0, 0), mask)
+            output.save(output_path, format="PNG", optimize=True)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Could not analyze the selected image area.") from exc
+
+    try:
+        result = debug_image_request(
+            str(output_path),
+            item_label=f"claim-preview:{item.id}",
+            prompt=CLAIM_PREVIEW_PROMPT,
+            parse_inspection=False,
+        )
+        analysis = parse_region_analysis(result.get("raw_response", ""))
+        return {
+            "selection": normalized,
+            "description": analysis["description"],
+            "tags": analysis["tags"],
+            "bounding_box": {
+                "left": left,
+                "top": top,
+                "right": right,
+                "bottom": bottom,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        fallback_text = item.room_label or item.title or "selected area"
+        return {
+            "selection": normalized,
+            "description": f"Selected area from {fallback_text}.",
+            "tags": item.tags[:4] or ["unclear"],
+            "bounding_box": {
+                "left": left,
+                "top": top,
+                "right": right,
+                "bottom": bottom,
+            },
+            "inferred": True,
+        }
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
 def build_query_response(item: LostFoundItem) -> str:
     location = item.location or "the recorded location"
     status = item.status or ("Claimed" if item.claimed else "Open")
@@ -1261,6 +1496,11 @@ def serialize_item(item: LostFoundItem, reporter: Optional[User]) -> dict:
         "event_date": item.event_date.isoformat() if item.event_date else None,
         "status": item.status,
         "claimed": bool(item.claimed),
+        "is_room_item": bool(item.is_room_item),
+        "room_label": item.room_label or "",
+        "room_recorded_at": item.room_recorded_at.isoformat() if item.room_recorded_at else None,
+        "returned_at": item.returned_at.isoformat() if item.returned_at else None,
+        "returned_by_claim_id": item.returned_by_claim_id,
         "tags": item.tags,
         "ai_summary": item.ai_summary,
         "tag_source": item.tag_source,
@@ -1283,6 +1523,7 @@ def serialize_item(item: LostFoundItem, reporter: Optional[User]) -> dict:
         "effective_abuse_risk_level": effective_risk,
         "effective_abuse_flagged": flagged,
         "created_at": item.created_at.isoformat() if item.created_at else None,
+        "updated_at": item.updated_at.isoformat() if item.updated_at else None,
     }
 
 
@@ -1339,10 +1580,32 @@ def serialize_claim(claim: Claim, item: LostFoundItem, claimant: Optional[User],
         "item_description": claim.item_description,
         "lost_location": claim.lost_location,
         "identifying_info": claim.identifying_info,
+        "visual_selection": parse_json_object(claim.visual_selection_json, default={}),
+        "visual_summary": claim.visual_summary or "",
+        "visual_tags": parse_json_list(claim.visual_tags_json),
         "status": claim.status,
         "timestamp": claim.created_at.isoformat() if claim.created_at else None,
         "updated_at": claim.updated_at.isoformat() if claim.updated_at else None,
         "item": serialize_item(item, reporter),
+    }
+
+
+def serialize_returned_dispute(
+    dispute: ReturnedItemDispute,
+    item: LostFoundItem,
+    user: Optional[User],
+    reporter: Optional[User],
+) -> dict:
+    return {
+        "id": dispute.id,
+        "item_id": dispute.item_id,
+        "user_id": dispute.user_id,
+        "user_identity": user_identity(user),
+        "reason": dispute.reason,
+        "status": dispute.status,
+        "created_at": dispute.created_at.isoformat() if dispute.created_at else None,
+        "updated_at": dispute.updated_at.isoformat() if dispute.updated_at else None,
+        "item": serialize_item(item, reporter) if item else None,
     }
 
 
@@ -1708,6 +1971,22 @@ def notify_claim_decision(db: Session, *, item: LostFoundItem, claim: Claim, sta
         )
 
 
+def notify_claim_submitted(db: Session, *, item: LostFoundItem, claim: Claim, claimant: User) -> None:
+    recipients = set(admin_user_ids(db, exclude_user_id=claimant.id))
+    if item.submitted_by_user_id and item.submitted_by_user_id != claimant.id:
+        recipients.add(item.submitted_by_user_id)
+    for recipient_id in recipients:
+        create_notification(
+            db,
+            user_id=recipient_id,
+            event_type="claim_submitted",
+            title="New claim received",
+            message=f'{claimant.username} submitted a claim for "{item.title}".',
+            related_item_id=item.id,
+            related_claim_id=claim.id,
+        )
+
+
 def notify_report_room_move(db: Session, *, item: LostFoundItem) -> None:
     if not item.submitted_by_user_id:
         return
@@ -1735,6 +2014,107 @@ def notify_admin_override(db: Session, *, item: LostFoundItem, actor: User, stat
             message=f'An admin override set "{item.title}" to {status or "cleared"}.',
             related_item_id=item.id,
         )
+
+
+def notify_query_interaction(db: Session, *, item: LostFoundItem, actor: User) -> None:
+    recipients = set(admin_user_ids(db, exclude_user_id=actor.id))
+    if item.submitted_by_user_id and item.submitted_by_user_id != actor.id:
+        recipients.add(item.submitted_by_user_id)
+    for recipient_id in recipients:
+        create_notification(
+            db,
+            user_id=recipient_id,
+            event_type="query_interaction",
+            title="New report interaction",
+            message=f'{actor.username} sent a new question about "{item.title}".',
+            related_item_id=item.id,
+        )
+
+
+def notify_dispute_submitted(db: Session, *, item: LostFoundItem, dispute: ReturnedItemDispute, actor: User) -> None:
+    recipients = set(admin_user_ids(db, exclude_user_id=actor.id))
+    for recipient_id in recipients:
+        create_notification(
+            db,
+            user_id=recipient_id,
+            event_type="returned_dispute",
+            title="Returned item dispute",
+            message=f'{actor.username} disputed the return of "{item.title}".',
+            related_item_id=item.id,
+        )
+
+
+def notify_potential_match(
+    db: Session,
+    *,
+    recipient_user_id: int,
+    item: LostFoundItem,
+    matching_item: LostFoundItem,
+) -> None:
+    create_notification(
+        db,
+        user_id=recipient_user_id,
+        event_type="potential_match",
+        title="Potential match found",
+        message=f'"{matching_item.title}" may match your report "{item.title}".',
+        related_item_id=matching_item.id,
+    )
+
+
+def maybe_notify_potential_matches(db: Session, *, item: LostFoundItem) -> None:
+    if item.deleted_at:
+        return
+
+    if item.is_room_item:
+        candidates = (
+            db.query(LostFoundItem)
+            .filter(
+                LostFoundItem.id != item.id,
+                LostFoundItem.deleted_at.is_(None),
+                LostFoundItem.is_room_item.is_(False),
+                LostFoundItem.claimed.is_(False),
+                LostFoundItem.submitted_by_user_id.is_not(None),
+            )
+            .all()
+        )
+        notified_users: set[int] = set()
+        for candidate in candidates:
+            if not candidate.submitted_by_user_id or candidate.submitted_by_user_id in notified_users:
+                continue
+            score = score_item_for_query(item, build_input_text(candidate.title, candidate.description, candidate.category))
+            if score >= 80:
+                notify_potential_match(
+                    db,
+                    recipient_user_id=candidate.submitted_by_user_id,
+                    item=candidate,
+                    matching_item=item,
+                )
+                notified_users.add(candidate.submitted_by_user_id)
+        return
+
+    if not item.submitted_by_user_id:
+        return
+
+    room_candidates = (
+        db.query(LostFoundItem)
+        .filter(
+            LostFoundItem.id != item.id,
+            LostFoundItem.deleted_at.is_(None),
+            LostFoundItem.is_room_item.is_(True),
+            LostFoundItem.claimed.is_(False),
+        )
+        .all()
+    )
+    for candidate in room_candidates:
+        score = score_item_for_query(candidate, build_input_text(item.title, item.description, item.category, item.location))
+        if score >= 80:
+            notify_potential_match(
+                db,
+                recipient_user_id=item.submitted_by_user_id,
+                item=item,
+                matching_item=candidate,
+            )
+            break
 
 def _increment_active_requests() -> None:
     global ACTIVE_REQUESTS
@@ -1844,6 +2224,58 @@ def _get_uptime_seconds() -> int:
     return int(time.monotonic() - APP_STARTED_AT)
 
 
+def _ollama_service_pids() -> list[int]:
+    pids: list[int] = []
+    if psutil is not None:
+        try:
+            for process in psutil.process_iter(["pid", "cmdline"]):
+                cmdline = process.info.get("cmdline") or []
+                normalized = " ".join(str(part) for part in cmdline).lower()
+                if "ollama" in normalized and "serve" in normalized:
+                    pids.append(int(process.info["pid"]))
+        except Exception as exc:
+            report_logger.warning("[Health] psutil ollama process scan failed: %s", exc)
+    if pids:
+        return sorted(set(pids))
+
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "ollama serve"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        report_logger.warning("[Health] pgrep failed while scanning Ollama: %s", exc)
+        return []
+
+    for line in result.stdout.splitlines():
+        try:
+            pids.append(int(line.strip()))
+        except ValueError:
+            continue
+    return sorted(set(pids))
+
+
+def _wait_for_ollama_availability(target_available: bool, *, timeout_seconds: float = 4.0) -> dict[str, Any]:
+    deadline = time.monotonic() + max(0.5, timeout_seconds)
+    latest_status = get_ollama_status()
+    while time.monotonic() < deadline:
+        if bool(latest_status.get("available")) is target_available:
+            return latest_status
+        time.sleep(0.25)
+        latest_status = get_ollama_status()
+    return latest_status
+
+
+def _serialize_admin_health(ollama_status: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    current_status = ollama_status or get_ollama_status()
+    return {
+        "status": "running" if current_status.get("available") else "stopped",
+        "uptime_seconds": _get_uptime_seconds(),
+    }
+
+
 @app.get("/health")
 def health() -> dict:
     ollama_status = get_ollama_status()
@@ -1861,16 +2293,101 @@ def health() -> dict:
 @app.get("/health/detailed")
 def health_detailed(current_user: User = Depends(require_admin_user)) -> dict:
     del current_user
-    ollama_status = get_ollama_status()
-    gpu_temperature_c = _get_gpu_temperature_c()
+    return _serialize_admin_health()
+
+
+@app.post("/admin/ollama/start")
+def admin_start_ollama(current_user: User = Depends(require_admin_user)) -> dict[str, Any]:
+    current_status = get_ollama_status()
+    if current_status.get("available"):
+        log_admin_action(current_user, "ollama_start", note="already_running")
+        return {
+            **_serialize_admin_health(current_status),
+            "message": "Ollama is already running.",
+            "started": False,
+        }
+
+    existing_pids = _ollama_service_pids()
+    if existing_pids:
+        current_status = _wait_for_ollama_availability(True, timeout_seconds=2.0)
+        next_status = "running" if current_status.get("available") else "starting"
+        log_admin_action(current_user, "ollama_start", note=f"existing_processes={len(existing_pids)} status={next_status}")
+        return {
+            **_serialize_admin_health(current_status),
+            "status": next_status,
+            "message": "Ollama is already starting." if next_status == "starting" else "Ollama is running.",
+            "started": False,
+        }
+
+    ollama_cli = shutil.which("ollama")
+    if not ollama_cli:
+        log_admin_action(current_user, "ollama_start", note="cli_missing")
+        return {
+            **_serialize_admin_health(current_status),
+            "status": "unavailable",
+            "message": "Ollama CLI is not installed on this server.",
+            "started": False,
+        }
+
+    try:
+        subprocess.Popen(
+            [ollama_cli, "serve"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        report_logger.warning("[Admin] Ollama start failed: %s", exc)
+        log_admin_action(current_user, "ollama_start", note=f"error={exc}")
+        return {
+            **_serialize_admin_health(current_status),
+            "status": "error",
+            "message": f"Could not start Ollama: {exc}",
+            "started": False,
+        }
+
+    current_status = _wait_for_ollama_availability(True)
+    next_status = "running" if current_status.get("available") else "starting"
+    log_admin_action(current_user, "ollama_start", note=f"status={next_status}")
     return {
-        "cpu_usage_percent": _normalize_percent_metric(_get_cpu_usage_percent()),
-        "memory_usage_percent": _normalize_percent_metric(_get_memory_percent()),
-        "gpu_usage_percent": _normalize_percent_metric(_get_gpu_usage_percent()),
-        "gpu_temperature_c": -1 if gpu_temperature_c < 0 else round(gpu_temperature_c, 2),
-        "uptime_seconds": _get_uptime_seconds(),
-        "ollama_latency_ms": _get_ollama_latency_ms(ollama_status),
-        "last_ai_status": _get_last_ai_status(),
+        **_serialize_admin_health(current_status),
+        "status": next_status,
+        "message": "Ollama start requested." if next_status == "starting" else "Ollama is running.",
+        "started": True,
+    }
+
+
+@app.post("/admin/ollama/stop")
+def admin_stop_ollama(current_user: User = Depends(require_admin_user)) -> dict[str, Any]:
+    current_status = get_ollama_status()
+    pids = _ollama_service_pids()
+    if not current_status.get("available") and not pids:
+        log_admin_action(current_user, "ollama_stop", note="already_stopped")
+        return {
+            **_serialize_admin_health(current_status),
+            "message": "Ollama is already stopped.",
+            "stopped": False,
+        }
+
+    stopped_any = False
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            stopped_any = True
+        except ProcessLookupError:
+            continue
+        except OSError as exc:
+            report_logger.warning("[Admin] Ollama stop failed for pid=%s: %s", pid, exc)
+
+    current_status = _wait_for_ollama_availability(False)
+    next_status = "stopped" if not current_status.get("available") else "running"
+    log_admin_action(current_user, "ollama_stop", note=f"requested_pids={len(pids)} status={next_status}")
+    return {
+        **_serialize_admin_health(current_status),
+        "status": next_status,
+        "message": "Ollama is stopped." if next_status == "stopped" else "Ollama stop request did not stop the running service.",
+        "stopped": stopped_any or next_status == "stopped",
     }
 
 
@@ -2045,6 +2562,173 @@ def filters(_: User = Depends(get_current_user)) -> dict:
     }
 
 
+@app.get("/stats/summary")
+def stats_summary(_: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    return {
+        "items_returned_this_week": items_returned_this_week(db),
+    }
+
+
+@app.get("/room/items")
+def list_room_items(
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    items = (
+        db.query(LostFoundItem)
+        .filter(
+            LostFoundItem.deleted_at.is_(None),
+            LostFoundItem.is_room_item.is_(True),
+            LostFoundItem.returned_at.is_(None),
+        )
+        .order_by(LostFoundItem.room_recorded_at.desc(), LostFoundItem.created_at.desc())
+        .all()
+    )
+    reporters = get_user_map(db, [item.submitted_by_user_id or 0 for item in items])
+    return {
+        "items": [serialize_item(item, reporters.get(item.submitted_by_user_id or 0)) for item in items],
+        "items_returned_this_week": items_returned_this_week(db),
+    }
+
+
+@app.get("/returned/items")
+def list_recently_returned_items(
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    items = (
+        db.query(LostFoundItem)
+        .filter(
+            LostFoundItem.deleted_at.is_(None),
+            LostFoundItem.returned_at.is_not(None),
+        )
+        .order_by(LostFoundItem.returned_at.desc(), LostFoundItem.updated_at.desc())
+        .limit(36)
+        .all()
+    )
+    reporters = get_user_map(db, [item.submitted_by_user_id or 0 for item in items])
+    return {
+        "items": [serialize_item(item, reporters.get(item.submitted_by_user_id or 0)) for item in items],
+        "items_returned_this_week": items_returned_this_week(db),
+    }
+
+
+@app.post("/admin/room/items")
+def admin_upload_room_items(
+    payload: RoomUploadPayload,
+    current_user: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    if not payload.images:
+        raise HTTPException(status_code=400, detail="Upload at least one image for the lost and found room.")
+
+    label = str(payload.label or "").strip()
+    cleaned_label = moderate_field(label, "Room label", min_meaningful_chars=2, max_chars=80) if label else ""
+    created_items: list[LostFoundItem] = []
+
+    for index, image_payload in enumerate(payload.images, start=1):
+        image_path = decode_image_payload(image_payload)
+        ai_result = None
+        try:
+            if image_path:
+                image_file = BASE_DIR / image_path.lstrip("/")
+                inspection = inspect_image_upload(str(image_file), item_label=cleaned_label or f"room-item-{index}")
+                if inspection.get("moderation") != "SAFE":
+                    delete_uploaded_path(image_path)
+                    raise HTTPException(status_code=400, detail="Image rejected as unsafe for the school lost and found system.")
+                ai_result = {
+                    "summary": "Room upload image reviewed.",
+                    "category": "Other",
+                    "color": "",
+                    "tags": inspection.get("tags", []),
+                    "tag_source": "llava-image",
+                }
+
+            if not ai_result:
+                ai_result = generate_text_tag_result(
+                    title=cleaned_label or "Lost & Found Room item",
+                    description=cleaned_label or "Physical item stored in the lost and found room.",
+                    location=LOST_FOUND_ROOM_LABEL,
+                    category="Other",
+                    color="",
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            ai_result = fallback_tags(
+                cleaned_label or "Lost & Found Room item",
+                cleaned_label or "Physical item stored in the lost and found room.",
+                "Other",
+                "",
+                LOST_FOUND_ROOM_LABEL,
+            )
+
+        title = cleaned_label or f"Room item {index}"
+        description = cleaned_label or "Physical item currently stored in the lost and found room."
+        tags: list[str] = []
+        for tag in ai_result.get("tags", []):
+            normalized = str(tag).strip().lower()
+            if normalized and normalized not in tags:
+                tags.append(normalized)
+
+        item = LostFoundItem(
+            report_type="found",
+            reporter_name=current_user.username,
+            title=title,
+            description=description,
+            location=LOST_FOUND_ROOM_LABEL,
+            secondary_location="room-upload",
+            category=ai_result.get("category") or "Other",
+            color=ai_result.get("color") or "",
+            time_slot="Unknown",
+            event_date=date.today(),
+            status="Open",
+            tags=tags,
+            ai_summary=ai_result.get("summary", ""),
+            image_path=image_path,
+            search_text=build_search_text(
+                title=title,
+                description=description,
+                location=LOST_FOUND_ROOM_LABEL,
+                category=ai_result.get("category") or "Other",
+                color=ai_result.get("color") or "",
+                tags=tags,
+            ),
+            tag_source=ai_result.get("tag_source", "fallback-text"),
+            submitted_by_user_id=current_user.id,
+            claimed=False,
+            is_room_item=True,
+            room_label=cleaned_label,
+            room_recorded_at=datetime.utcnow(),
+            evidence_validity="Admin uploaded",
+            review_status="approved",
+            review_notes="Admin uploaded directly to Lost & Found Room.",
+        )
+        item.evidence_images = [image_path] if image_path else []
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        create_audit_log(
+            db,
+            user_id=current_user.id,
+            action_type="room_item_uploaded",
+            entity_type="report",
+            entity_id=item.id,
+            before_state=None,
+            after_state=snapshot_item(item),
+            metadata={"route": "/admin/room/items", "image_index": index},
+        )
+        maybe_notify_potential_matches(db, item=item)
+        apply_abuse_analysis(db, current_user=current_user, item=item)
+        created_items.append(item)
+
+    reporters = get_user_map(db, [item.submitted_by_user_id or 0 for item in created_items])
+    return {
+        "message": "Item added to Lost & Found Room" if len(created_items) == 1 else "Items added to Lost & Found Room",
+        "items": [serialize_item(item, reporters.get(item.submitted_by_user_id or 0)) for item in created_items],
+    }
+
+
 @app.post("/items/report")
 async def report_item(
     payload: ReportPayload,
@@ -2072,19 +2756,12 @@ async def report_item(
     )
 
     reporter_name = payload.reporter_name.strip() or current_user.username
-    location = payload.location.strip()
-    category = payload.category.strip()
-
-    if not reporter_name:
-        raise HTTPException(status_code=400, detail="Reporter name is required.")
-    if not location:
-        raise HTTPException(status_code=400, detail="Location is required.")
-    if not category:
-        raise HTTPException(status_code=400, detail="Category is required.")
+    location = payload.location.strip() or "Unknown"
+    category = payload.category.strip() or "Other"
 
     reporter_name = moderate_field(reporter_name, "Reporter name", min_meaningful_chars=2, max_chars=80)
     title = moderate_field(payload.title, "Item title", min_meaningful_chars=3, max_chars=80)
-    description = moderate_field(payload.description, "Item description", min_meaningful_chars=10, max_chars=450)
+    description = moderate_field(payload.description, "Item description", min_meaningful_chars=6, max_chars=450)
     evidence_details = payload.evidence_details.strip()
     secondary_location = payload.secondary_location.strip()
     student_id = payload.student_id.strip()
@@ -2191,7 +2868,7 @@ async def report_item(
         category=ai_result.get("category") or category,
         color=ai_result.get("color") or color,
         time_slot=time_slot,
-        event_date=payload.event_date,
+        event_date=payload.event_date or date.today(),
         status="Open",
         tags=tags,
         ai_summary=ai_result.get("summary", ""),
@@ -2229,6 +2906,7 @@ async def report_item(
         after_state=snapshot_item(item),
         metadata={"route": "/items/report"},
     )
+    maybe_notify_potential_matches(db, item=item)
     apply_abuse_analysis(db, current_user=current_user, item=item)
     return {
         "message": "Report submitted successfully",
@@ -2248,6 +2926,22 @@ def get_item(
     return {"item": serialize_item(item, reporter)}
 
 
+@app.post("/items/{item_id}/claim-preview")
+def preview_claim_region(
+    item_id: int,
+    payload: ClaimPreviewPayload,
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    item = fetch_item_or_404(db, item_id)
+    analysis = analyze_item_region(item, payload.selection)
+    return {
+        "message": "Selected area analyzed.",
+        "preview": analysis,
+        "item": serialize_item(item, get_item_reporter(db, item)),
+    }
+
+
 @app.get("/items")
 def list_items(
     report_type: Optional[str] = None,
@@ -2255,10 +2949,18 @@ def list_items(
     location: Optional[str] = None,
     category: Optional[str] = None,
     q: Optional[str] = None,
+    include_room: bool = False,
+    room_only: bool = False,
+    returned_only: bool = False,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     base_query = db.query(LostFoundItem).filter(LostFoundItem.deleted_at.is_(None))
+
+    if room_only:
+        base_query = base_query.filter(LostFoundItem.is_room_item.is_(True))
+    elif not include_room:
+        base_query = base_query.filter(LostFoundItem.is_room_item.is_(False))
 
     if report_type:
         base_query = base_query.filter(LostFoundItem.report_type == report_type)
@@ -2268,6 +2970,8 @@ def list_items(
         base_query = base_query.filter(LostFoundItem.location == location)
     if category:
         base_query = base_query.filter(LostFoundItem.category == category)
+    if returned_only:
+        base_query = base_query.filter(LostFoundItem.returned_at.is_not(None))
 
     if q:
         lowered = q.strip().lower()
@@ -2411,6 +3115,13 @@ def claim_item(
         identifying_info=identifying_info,
         match_score=int(claim_match.get("match_score", 0) or 0),
         match_reasoning=str(claim_match.get("reasoning", "")).strip(),
+        visual_selection_json=json.dumps(payload.visual_selection or {}),
+        visual_summary=str(payload.visual_summary or "").strip()[:240],
+        visual_tags_json=json.dumps([
+            str(tag).strip().lower()
+            for tag in payload.visual_tags[:5]
+            if str(tag).strip()
+        ]),
         status="pending",
     )
     db.add(claim)
@@ -2427,6 +3138,7 @@ def claim_item(
         metadata={"item_id": item.id, "match_score": int(claim.match_score or 0)},
     )
     notify_claim_match(db, item=item, claim=claim, claimant=current_user)
+    notify_claim_submitted(db, item=item, claim=claim, claimant=current_user)
 
     apply_abuse_analysis(db, current_user=current_user, item=item)
 
@@ -2463,6 +3175,61 @@ def claim_history(current_user: User = Depends(get_current_user), db: Session = 
             for claim in claims
             if claim.item_id in item_map
         ]
+    }
+
+
+@app.post("/items/{item_id}/returned-disputes")
+def submit_returned_item_dispute(
+    item_id: int,
+    payload: ReturnedItemDisputePayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    item = fetch_item_or_404(db, item_id)
+    if not item.returned_at:
+        raise HTTPException(status_code=400, detail="This item is not in the recently returned list.")
+
+    existing_dispute = (
+        db.query(ReturnedItemDispute)
+        .filter(
+            ReturnedItemDispute.item_id == item.id,
+            ReturnedItemDispute.user_id == current_user.id,
+            ReturnedItemDispute.status == "pending",
+        )
+        .first()
+    )
+    if existing_dispute:
+        raise HTTPException(status_code=409, detail="You already submitted a dispute for this returned item.")
+
+    reason = moderate_field(payload.reason, "Dispute reason", min_meaningful_chars=8, max_chars=240)
+    dispute = ReturnedItemDispute(
+        item_id=item.id,
+        user_id=current_user.id,
+        reason=reason,
+        status="pending",
+    )
+    db.add(dispute)
+    db.commit()
+    db.refresh(dispute)
+    create_audit_log(
+        db,
+        user_id=current_user.id,
+        action_type="returned_item_disputed",
+        entity_type="report",
+        entity_id=item.id,
+        before_state=None,
+        after_state={
+            "dispute_id": dispute.id,
+            "status": dispute.status,
+            "reason": dispute.reason,
+        },
+        metadata={"item_id": item.id},
+    )
+    notify_dispute_submitted(db, item=item, dispute=dispute, actor=current_user)
+    db.commit()
+    return {
+        "message": "Your dispute has been sent to the admin team for review.",
+        "dispute": serialize_returned_dispute(dispute, item, current_user, get_item_reporter(db, item)),
     }
 
 
@@ -2744,8 +3511,7 @@ def admin_approve_claim(
         raise HTTPException(status_code=409, detail="This item already has an approved claim.")
 
     claim.status = "approved"
-    item.claimed = True
-    item.status = "Claimed"
+    mark_item_returned(item, claim_id=claim.id)
     create_audit_log(
         db,
         user_id=current_user.id,
@@ -2846,6 +3612,7 @@ def admin_undo_claim_decision(
         if not other_approved_claim:
             item.claimed = False
             item.status = "Open"
+            clear_item_returned(item)
     create_audit_log(
         db,
         user_id=current_user.id,
@@ -2875,8 +3642,7 @@ def mark_item_claimed(
 ) -> dict:
     item = fetch_item_or_404(db, item_id)
     before_state = snapshot_item(item)
-    item.claimed = True
-    item.status = "Claimed"
+    mark_item_returned(item)
     create_audit_log(
         db,
         user_id=current_user.id,
@@ -2971,6 +3737,8 @@ def admin_move_item_to_room(
     if item.location and item.location != LOST_FOUND_ROOM_LABEL:
         item.secondary_location = item.location
     item.location = LOST_FOUND_ROOM_LABEL
+    item.is_room_item = True
+    item.room_recorded_at = datetime.utcnow()
     create_audit_log(
         db,
         user_id=current_user.id,
@@ -2982,6 +3750,7 @@ def admin_move_item_to_room(
         metadata={"subaction": "moved_to_room"},
     )
     notify_report_room_move(db, item=item)
+    maybe_notify_potential_matches(db, item=item)
     db.commit()
     db.refresh(item)
     reporter = db.query(User).filter(User.id == item.submitted_by_user_id).first() if item.submitted_by_user_id else None
@@ -3107,6 +3876,8 @@ async def create_query(
         db.add(user_query)
         db.commit()
         db.refresh(user_query)
+        notify_query_interaction(db, item=item, actor=current_user)
+        db.commit()
     except Exception:
         cleanup_query_attachment(attachment)
         raise

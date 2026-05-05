@@ -6,12 +6,12 @@ const API_BASE = window.location.hostname
     : `${API_PROTOCOL}//${window.location.hostname}:${API_PORT}`
   : "";
 const SESSION_STORAGE_KEY = "lostfound_session";
-const THEME_STORAGE_KEY = "lostfound_theme";
+const THEME_STORAGE_KEY = "theme";
 const CURRENT_ITEM_STORAGE_KEY = "lostfound_current_item";
 const LANGUAGE_STORAGE_KEY = "lostfound_language";
 const TUTORIAL_STORAGE_KEY = "lostfound_tutorial_seen";
 const INITIALS_PATTERN = /^[a-z]+(?:\.[a-z]+)+$/;
-const THEMES = ["dark", "light", "aurora", "transparent"];
+const THEME_MODES = ["dark", "light"];
 const SUPPORTED_LANGUAGES = ["en", "zh-CN", "th"];
 const CHAT_UPLOAD_LIMIT_BYTES = 5 * 1024 * 1024;
 const CHAT_ALLOWED_FILE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".pdf", ".txt"];
@@ -35,6 +35,7 @@ const SERVER_SIDE_IMAGE_CONVERSION_EXTENSIONS = [".heic", ".heif"];
 const REPORT_IMAGE_MAX_DIMENSION = 800;
 const REPORT_IMAGE_JPEG_QUALITY = 0.65;
 const ADMIN_MONITOR_POLL_INTERVAL_MS = 5000;
+const NOTIFICATION_POLL_INTERVAL_MS = 25000;
 const SEARCH_DEBOUNCE_MS = 400;
 const QUERY_SUGGESTION_LIMIT = 6;
 const GLOBAL_BACKGROUND_URL = "/uploads/background.png";
@@ -610,6 +611,8 @@ const state = {
   user: null,
   token: localStorage.getItem(SESSION_STORAGE_KEY) || "",
   items: [],
+  roomItems: [],
+  returnedItems: [],
   notifications: [],
   unreadNotifications: 0,
   claims: [],
@@ -646,6 +649,13 @@ const state = {
   confirmState: null,
   undoState: null,
   undoTimer: null,
+  notificationTimer: null,
+  statsSummary: {
+    items_returned_this_week: 0,
+  },
+  activeRoomPreviewItem: null,
+  roomPreviewAnalysis: null,
+  roomPreviewDrag: null,
   progressTimers: {
     report: null,
     query: null,
@@ -668,11 +678,14 @@ const loginTab = document.querySelector("#loginTab");
 const registerTab = document.querySelector("#registerTab");
 
 const showReportsButton = document.querySelector("#showReportsButton");
+const showRoomButton = document.querySelector("#showRoomButton");
+const showReturnedButton = document.querySelector("#showReturnedButton");
 const showQueryButton = document.querySelector("#showQueryButton");
 const showClaimsButton = document.querySelector("#showClaimsButton");
 const showAccountButton = document.querySelector("#showAccountButton");
 const showAdminButton = document.querySelector("#showAdminButton");
-const themeSelect = document.querySelector("#themeSelect");
+const themeToggleButton = document.querySelector("#theme-toggle");
+const themeIcon = document.querySelector("#theme-icon");
 const languageSelect = document.querySelector("#languageSelect");
 const logoutButton = document.querySelector("#logoutButton");
 const accountName = document.querySelector("#accountName");
@@ -681,12 +694,18 @@ const notificationButton = document.querySelector("#notificationButton");
 const notificationBadge = document.querySelector("#notificationBadge");
 const notificationDropdown = document.querySelector("#notificationDropdown");
 const notificationList = document.querySelector("#notificationList");
+const weeklyReturnedCount = document.querySelector("#weeklyReturnedCount");
 const reportsSection = document.querySelector("#reportsSection");
+const roomSection = document.querySelector("#roomSection");
+const returnedSection = document.querySelector("#returnedSection");
 const claimsSection = document.querySelector("#claimsSection");
 const accountSection = document.querySelector("#accountSection");
 const adminSection = document.querySelector("#adminSection");
 const querySection = document.querySelector("#querySection");
 
+const openReportModalButton = document.querySelector("#openReportModalButton");
+const reportDialog = document.querySelector("#reportDialog");
+const closeReportDialog = document.querySelector("#closeReportDialog");
 const form = document.querySelector("#itemForm");
 const dropZone = document.querySelector("#dropZone");
 const imageInput = document.querySelector("#imageInput");
@@ -698,12 +717,7 @@ const categoryInput = document.querySelector("#categoryInput");
 const categoryFilter = document.querySelector("#categoryFilter");
 const statusFilter = document.querySelector("#statusFilter");
 const locationFilter = document.querySelector("#locationFilter");
-const predefinedLocation = document.querySelector("#predefinedLocation");
-const predefinedWrap = document.querySelector("#predefinedWrap");
-const roomWrap = document.querySelector("#roomWrap");
-const roomCodeInput = document.querySelector("#roomCodeInput");
-const locationPreview = document.querySelector("#locationPreview");
-const locationError = document.querySelector("#locationError");
+const optionalLocationInput = document.querySelector("#optionalLocationInput");
 const dateInput = document.querySelector("#dateInput");
 const descriptionInput = document.querySelector("#descriptionInput");
 const evidenceDetailsInput = document.querySelector("#evidenceDetailsInput");
@@ -722,6 +736,24 @@ const searchInput = document.querySelector("#searchInput");
 const searchLoading = document.querySelector("#searchLoading");
 const searchWarningCard = document.querySelector("#searchWarningCard");
 const refreshButton = document.querySelector("#refreshButton");
+
+const roomAdminPanel = document.querySelector("#roomAdminPanel");
+const roomLabelInput = document.querySelector("#roomLabelInput");
+const roomUploadInput = document.querySelector("#roomUploadInput");
+const uploadRoomButton = document.querySelector("#uploadRoomButton");
+const roomUploadMessage = document.querySelector("#roomUploadMessage");
+const roomGallery = document.querySelector("#roomGallery");
+const roomCount = document.querySelector("#roomCount");
+const roomLoading = document.querySelector("#roomLoading");
+const roomWarningCard = document.querySelector("#roomWarningCard");
+const refreshRoomButton = document.querySelector("#refreshRoomButton");
+
+const returnedList = document.querySelector("#returnedList");
+const returnedCount = document.querySelector("#returnedCount");
+const returnedLoading = document.querySelector("#returnedLoading");
+const returnedMessage = document.querySelector("#returnedMessage");
+const returnedWarningCard = document.querySelector("#returnedWarningCard");
+const refreshReturnedButton = document.querySelector("#refreshReturnedButton");
 
 const claimsList = document.querySelector("#claimsList");
 const claimsCount = document.querySelector("#claimsCount");
@@ -748,6 +780,8 @@ const adminItemsTab = document.querySelector("#adminItemsTab");
 const adminClaimsTab = document.querySelector("#adminClaimsTab");
 const adminInspectionTab = document.querySelector("#adminInspectionTab");
 const adminMonitorTab = document.querySelector("#adminMonitorTab");
+const startOllamaButton = document.querySelector("#startOllamaButton");
+const stopOllamaButton = document.querySelector("#stopOllamaButton");
 const adminSummary = document.querySelector("#adminSummary");
 const adminLoading = document.querySelector("#adminLoading");
 const adminMessage = document.querySelector("#adminMessage");
@@ -761,10 +795,6 @@ const adminItemsList = document.querySelector("#adminItemsList");
 const adminClaimsList = document.querySelector("#adminClaimsList");
 const adminAuditList = document.querySelector("#adminAuditList");
 const adminInspectionList = document.querySelector("#adminInspectionList");
-const adminMonitorCpu = document.querySelector("#adminMonitorCpu");
-const adminMonitorRam = document.querySelector("#adminMonitorRam");
-const adminMonitorGpu = document.querySelector("#adminMonitorGpu");
-const adminMonitorGpuTemp = document.querySelector("#adminMonitorGpuTemp");
 const adminMonitorUptime = document.querySelector("#adminMonitorUptime");
 const adminMonitorStatus = document.querySelector("#adminMonitorStatus");
 const adminMonitorUpdated = document.querySelector("#adminMonitorUpdated");
@@ -800,6 +830,19 @@ const queryEmptyState = document.querySelector("#queryEmptyState");
 const querySuggestions = document.querySelector("#querySuggestions");
 
 const claimDialog = document.querySelector("#claimDialog");
+const roomClaimPreviewDialog = document.querySelector("#roomClaimPreviewDialog");
+const closeRoomClaimPreviewDialog = document.querySelector("#closeRoomClaimPreviewDialog");
+const roomPreviewCancelButton = document.querySelector("#roomPreviewCancelButton");
+const roomClaimPreviewLabel = document.querySelector("#roomClaimPreviewLabel");
+const roomPreviewImage = document.querySelector("#roomPreviewImage");
+const roomPreviewStage = document.querySelector("#roomPreviewStage");
+const roomPreviewCircle = document.querySelector("#roomPreviewCircle");
+const roomPreviewHandle = document.querySelector("#roomPreviewHandle");
+const roomPreviewResult = document.querySelector("#roomPreviewResult");
+const roomPreviewTags = document.querySelector("#roomPreviewTags");
+const roomPreviewMessage = document.querySelector("#roomPreviewMessage");
+const roomAnalyzeButton = document.querySelector("#roomAnalyzeButton");
+const roomConfirmButton = document.querySelector("#roomConfirmButton");
 const claimForm = document.querySelector("#claimForm");
 const claimItemLabel = document.querySelector("#claimItemLabel");
 const claimReasonInput = document.querySelector("#claimReasonInput");
@@ -911,6 +954,18 @@ function applyTranslations() {
   if (state.tutorialActive) {
     void syncTutorialStep();
   }
+  showRoomButton.textContent = langText({ en: "Lost & Found Room", "zh-CN": "失物招领室", th: "ห้องของหายและของพบ" });
+  showReturnedButton.textContent = langText({ en: "Recently Returned", "zh-CN": "最近归还", th: "เพิ่งถูกรับคืน" });
+  refreshRoomButton.textContent = langText({ en: "Refresh room", "zh-CN": "刷新招领室", th: "รีเฟรชห้องของหาย" });
+  refreshReturnedButton.textContent = langText({ en: "Refresh returned", "zh-CN": "刷新归还列表", th: "รีเฟรชรายการที่รับคืน" });
+  uploadRoomButton.textContent = langText({ en: "Upload to Room", "zh-CN": "上传到招领室", th: "อัปโหลดเข้าห้องของหาย" });
+  roomAnalyzeButton.textContent = langText({ en: "Analyze selected area", "zh-CN": "分析选中区域", th: "วิเคราะห์บริเวณที่เลือก" });
+  roomConfirmButton.textContent = langText({ en: "Yes, this is my item", "zh-CN": "是的，这是我的物品", th: "ใช่ นี่คือของของฉัน" });
+  roomPreviewCancelButton.textContent = t("common.cancel");
+  const statEyebrow = document.querySelector(".stat-card .eyebrow");
+  const statCopy = document.querySelector(".stat-card p");
+  if (statEyebrow) statEyebrow.textContent = langText({ en: "Trust builder", "zh-CN": "信任指标", th: "ตัวชี้วัดความน่าเชื่อถือ" });
+  if (statCopy) statCopy.textContent = langText({ en: "Items returned this week", "zh-CN": "本周归还物品", th: "สิ่งของที่ส่งคืนสัปดาห์นี้" });
   renderNotifications(state.notifications);
 }
 
@@ -960,18 +1015,53 @@ function todayIso() {
 function formatDateTime(value) {
   if (!value) return "";
   const locale = currentLanguage() === "zh-CN" ? "zh-CN" : currentLanguage() === "th" ? "th-TH" : "en-US";
-  return new Date(value).toLocaleString(locale);
+  const target = new Date(value);
+  if (Number.isNaN(target.getTime())) return "";
+
+  const now = new Date();
+  const diffMs = now.getTime() - target.getTime();
+  const diffMinutes = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / (60 * 60000));
+  const diffDays = Math.floor(diffMs / (24 * 60 * 60000));
+
+  if (diffMinutes >= 0 && diffMinutes < 1) {
+    return langText({ en: "Just now", "zh-CN": "刚刚", th: "เมื่อสักครู่" });
+  }
+  if (diffMinutes < 60) {
+    return langText({
+      en: `${diffMinutes}m ago`,
+      "zh-CN": `${diffMinutes} 分钟前`,
+      th: `${diffMinutes} นาทีที่แล้ว`,
+    });
+  }
+  if (diffHours < 24) {
+    return langText({
+      en: `${diffHours}h ago`,
+      "zh-CN": `${diffHours} 小时前`,
+      th: `${diffHours} ชม. ที่แล้ว`,
+    });
+  }
+  if (diffDays === 1) {
+    return langText({ en: "Yesterday", "zh-CN": "昨天", th: "เมื่อวาน" });
+  }
+  if (diffDays < 7) {
+    return langText({
+      en: `${diffDays}d ago`,
+      "zh-CN": `${diffDays} 天前`,
+      th: `${diffDays} วันที่แล้ว`,
+    });
+  }
+  return target.toLocaleDateString(locale, {
+    month: "short",
+    day: "numeric",
+    year: target.getFullYear() === now.getFullYear() ? undefined : "numeric",
+  });
 }
 
 function emptyAdminMonitor() {
   return {
-    cpu_usage_percent: null,
-    memory_usage_percent: null,
-    gpu_usage_percent: null,
-    gpu_temperature_c: null,
+    status: "unknown",
     uptime_seconds: null,
-    last_ai_status: "unknown",
-    ollama_latency_ms: null,
     fetched_at: null,
   };
 }
@@ -991,20 +1081,22 @@ function formatDuration(totalSeconds) {
   return `${remainingSeconds}s`;
 }
 
-function formatMonitorPercent(value) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) && numeric >= 0 ? `${Math.round(numeric)}%` : "--";
-}
-
-function formatMonitorTemperature(value) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) && numeric >= 0 ? `${Math.round(numeric)}°C` : "--";
-}
-
 function formatMonitorStatus(value) {
   const status = String(value || "").trim().toLowerCase();
   if (!status || status === "unknown") {
     return langText({ en: "Unknown", "zh-CN": "未知", th: "ไม่ทราบ" });
+  }
+  if (currentLanguage() === "zh-CN") {
+    if (status === "running") return "运行中";
+    if (status === "stopped") return "已停止";
+    if (status === "starting") return "启动中";
+    if (status === "stopping") return "停止中";
+  }
+  if (currentLanguage() === "th") {
+    if (status === "running") return "กำลังทำงาน";
+    if (status === "stopped") return "หยุดแล้ว";
+    if (status === "starting") return "กำลังเริ่ม";
+    if (status === "stopping") return "กำลังหยุด";
   }
   if (currentLanguage() === "zh-CN") {
     if (status === "success") return "正常";
@@ -1177,11 +1269,39 @@ function validateReportImageFile(file) {
   return "";
 }
 
-function applyTheme(theme) {
-  const chosenTheme = THEMES.includes(theme) ? theme : "dark";
-  document.documentElement.dataset.theme = chosenTheme;
-  themeSelect.value = chosenTheme;
-  localStorage.setItem(THEME_STORAGE_KEY, chosenTheme);
+function currentThemeMode() {
+  return document.body.classList.contains("dark-mode") ? "dark" : "light";
+}
+
+function syncThemeIcon(mode = currentThemeMode()) {
+  if (!themeIcon) return;
+  themeIcon.textContent = mode === "dark" ? "☀️" : "🌙";
+}
+
+function applyThemeMode(mode, { persist = true } = {}) {
+  const nextMode = THEME_MODES.includes(mode) ? mode : "dark";
+  document.body.classList.remove("dark-mode", "light-mode");
+  document.body.classList.add(`${nextMode}-mode`);
+  if (persist) {
+    localStorage.setItem(THEME_STORAGE_KEY, nextMode);
+  }
+  syncThemeIcon(nextMode);
+}
+
+function initializeTheme() {
+  localStorage.removeItem("lostfound_theme");
+  const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+  if (savedTheme) {
+    applyThemeMode(savedTheme);
+    return;
+  }
+  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  applyThemeMode(prefersDark ? "dark" : "light", { persist: false });
+}
+
+function toggleThemeMode() {
+  const nextMode = currentThemeMode() === "dark" ? "light" : "dark";
+  applyThemeMode(nextMode);
 }
 
 function sleep(ms) {
@@ -1375,15 +1495,6 @@ async function compressImageFile(file) {
     type: "image/jpeg",
     lastModified: Date.now(),
   });
-  console.info("[Upload] compressed image", {
-    originalName: file.name,
-    originalBytes: file.size,
-    compressedName: compressedFile.name,
-    compressedBytes: compressedFile.size,
-    width,
-    height,
-    mimeType: compressedFile.type,
-  });
   return compressedFile;
 }
 
@@ -1411,14 +1522,6 @@ async function prepareUploadFile(file, kind, labels) {
     if (!compressedFile.size) {
       throw new Error("Prepared image file was empty.");
     }
-    console.info("[Upload] prepared image file", {
-      kind,
-      originalName: file.name,
-      originalBytes: file.size,
-      preparedName: compressedFile.name,
-      preparedBytes: compressedFile.size,
-      preparedType: compressedFile.type,
-    });
     setProgress(kind, 20, labels.compress, true);
     return compressedFile;
   }
@@ -1430,7 +1533,8 @@ async function prepareUploadFile(file, kind, labels) {
 function apiRequestWithProgress(path, { method = "GET", headers = {}, body = null, onUploadProgress = null, onUploadComplete = null } = {}) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open(method, ensureApiBase(path));
+    const requestMethod = String(method || "GET").toUpperCase();
+    xhr.open(requestMethod, ensureApiBase(path));
     xhr.responseType = "text";
     xhr.timeout = 60000;
 
@@ -1507,6 +1611,20 @@ function showAppShell() {
   appShell.classList.remove("is-hidden");
 }
 
+function openReportModal() {
+  if (!reportDialog) return;
+  reportDialog.showModal();
+  setWarningCard(reportWarningCard, "");
+  window.setTimeout(() => {
+    titleInput?.focus();
+  }, 0);
+}
+
+function closeReportModal() {
+  if (!reportDialog?.open) return;
+  reportDialog.close();
+}
+
 function setAuthView(view) {
   state.authView = view;
   authSubmitLabel.textContent = t(view === "login" ? "auth.login" : "auth.register");
@@ -1530,7 +1648,7 @@ function tutorialSteps() {
     },
     {
       section: "reports",
-      selector: "#itemForm",
+      selector: "#openReportModalButton",
       title: t("tutorial.reportsTitle"),
       body: t("tutorial.reportsBody"),
       requiresInteraction: true,
@@ -1541,6 +1659,9 @@ function tutorialSteps() {
       title: t("tutorial.searchTitle"),
       body: t("tutorial.searchBody"),
       requiresInteraction: true,
+      onEnter: () => {
+        closeReportModal();
+      },
     },
     {
       section: "reports",
@@ -1734,41 +1855,20 @@ function positionTutorialCard(targetRect) {
 
   const viewportWidth = window.innerWidth;
   const viewportHeight = window.innerHeight;
-  const padding = Math.min(TUTORIAL_VIEWPORT_PADDING, Math.max(8, Math.floor(viewportWidth * 0.03)));
-  const margin = Math.min(TUTORIAL_CARD_MARGIN, Math.max(12, Math.floor(viewportWidth * 0.03)));
-
-  tutorialCard.style.maxHeight = `${Math.max(180, viewportHeight - (padding * 2))}px`;
   const currentRect = tutorialCard.getBoundingClientRect();
-  const cardWidth = Math.min(currentRect.width, viewportWidth - (padding * 2));
-  const cardHeight = currentRect.height;
-  const preferredSide = tutorialPreferredPlacement(targetRect);
-  const sideOrder = [preferredSide, "below", "above", "right", "left"].filter(
-    (side, index, array) => array.indexOf(side) === index,
-  );
+  const padding = Math.max(10, Math.min(TUTORIAL_VIEWPORT_PADDING, Math.floor(viewportWidth * 0.03)));
+  const cardWidth = Math.min(currentRect.width || 320, viewportWidth - (padding * 2));
+  const cardHeight = currentRect.height || 240;
+  const maxLeft = Math.max(10, viewportWidth - cardWidth - 10);
+  const anchoredLeft = Math.max(10, Math.min(targetRect.left, maxLeft));
+  const belowTop = targetRect.bottom + 10;
+  const aboveTop = Math.max(padding, targetRect.top - cardHeight - TUTORIAL_CARD_MARGIN);
+  const top = belowTop + cardHeight <= viewportHeight - padding ? belowTop : aboveTop;
 
-  for (const side of sideOrder) {
-    const placement = buildTutorialCardPlacement(
-      side,
-      targetRect,
-      cardWidth,
-      cardHeight,
-      viewportWidth,
-      viewportHeight,
-      padding,
-      margin,
-    );
-    if (!placement) continue;
-    tutorialCard.style.top = `${placement.top}px`;
-    tutorialCard.style.left = `${placement.left}px`;
-    tutorialCard.style.transform = "none";
-    tutorialCard.style.maxHeight = `${placement.maxHeight}px`;
-    return;
-  }
-
-  tutorialCard.style.top = "50%";
-  tutorialCard.style.left = "50%";
-  tutorialCard.style.transform = "translate(-50%, -50%)";
-  tutorialCard.style.maxHeight = `${Math.max(180, viewportHeight - (padding * 2))}px`;
+  tutorialCard.style.top = `${Math.max(padding, top)}px`;
+  tutorialCard.style.left = `${anchoredLeft}px`;
+  tutorialCard.style.transform = "none";
+  tutorialCard.style.maxHeight = `${Math.max(120, viewportHeight - Math.max(padding, top) - padding)}px`;
 }
 
 function positionTutorialBackdrop(rect) {
@@ -1884,7 +1984,7 @@ async function syncTutorialStep() {
     target.classList.add("tutorial-target-active");
     target.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
     await sleep(240);
-    updateTutorialSpotlight(target);
+    window.requestAnimationFrame(() => updateTutorialSpotlight(target));
     if (step.requiresInteraction) {
       const handleInteraction = () => {
         state.tutorialInteractionSatisfied = true;
@@ -1983,54 +2083,17 @@ function validateRoomCode(value) {
   return /^[SPA][0-9]{3}$/.test(code);
 }
 
-function getLocationMode() {
-  return document.querySelector("input[name='locationMode']:checked").value;
-}
-
 function currentLocation() {
-  if (getLocationMode() === "predefined") {
-    return {
-      valid: true,
-      value: predefinedLocation.value,
-      meta: `predefined:${predefinedLocation.value}`,
-    };
-  }
-
-  const code = normalizeRoomCode(roomCodeInput.value);
-  if (!validateRoomCode(code)) {
-  return {
-      valid: false,
-      value: "",
-      meta: "",
-      error: langText({
-        en: "Room code must be S, P, or A followed by 3 digits, like S302.",
-        "zh-CN": "教室代码必须以 S、P 或 A 开头，后跟 3 位数字，例如 S302。",
-        th: "รหัสห้องต้องขึ้นต้นด้วย S, P หรือ A และตามด้วยตัวเลข 3 หลัก เช่น S302",
-      }),
-    };
-  }
-
+  const value = String(optionalLocationInput?.value || "").trim();
   return {
     valid: true,
-    value: roomCodeToLabel(code),
-    meta: `room:${code}`,
+    value: value || "Unknown",
+    meta: value ? "optional-text" : "unknown",
   };
 }
 
 function updateLocationUi() {
-  const mode = getLocationMode();
-  predefinedWrap.classList.toggle("is-hidden", mode !== "predefined");
-  roomWrap.classList.toggle("is-hidden", mode !== "room");
-
-  const location = currentLocation();
-  locationPreview.textContent = location.valid
-    ? location.value
-    : langText({
-      en: "Enter a room code like S302, P101, or A204",
-      "zh-CN": "请输入类似 S302、P101 或 A204 的教室代码",
-      th: "กรุณากรอกรหัสห้อง เช่น S302, P101 หรือ A204",
-    });
-  locationError.textContent = location.valid ? "" : location.error;
+  return currentLocation();
 }
 
 function prefillReporter() {
@@ -2062,28 +2125,15 @@ function validateRegisterFields() {
 }
 
 function validateReportForm() {
-  const location = currentLocation();
   const imageValidationMessage = validateReportImageFile(state.selectedFile);
   if (!titleInput.value.trim() || titleInput.value.trim().length < 3) {
     return langText({ en: "Item title must be at least 3 characters.", "zh-CN": "物品标题至少需要 3 个字符。", th: "ชื่อสิ่งของต้องมีอย่างน้อย 3 ตัวอักษร" });
   }
-  if (!reporterInput.value.trim()) {
-    return langText({ en: "Display name is required.", "zh-CN": "必须填写显示名称。", th: "ต้องกรอกชื่อที่แสดง" });
-  }
-  if (!categoryInput.value) {
-    return langText({ en: "Category is required.", "zh-CN": "必须选择分类。", th: "ต้องเลือกหมวดหมู่" });
-  }
-  if (!dateInput.value) {
-    return langText({ en: "Date is required.", "zh-CN": "必须填写日期。", th: "ต้องกรอกวันที่" });
-  }
-  if (!descriptionInput.value.trim() || descriptionInput.value.trim().length < 10) {
-    return langText({ en: "Description must be at least 10 characters.", "zh-CN": "描述至少需要 10 个字符。", th: "คำอธิบายต้องมีอย่างน้อย 10 ตัวอักษร" });
+  if (!descriptionInput.value.trim() || descriptionInput.value.trim().length < 6) {
+    return langText({ en: "Description must be at least 6 characters.", "zh-CN": "描述至少需要 6 个字符。", th: "คำอธิบายต้องมีอย่างน้อย 6 ตัวอักษร" });
   }
   if (imageValidationMessage) {
     return imageValidationMessage;
-  }
-  if (!location.valid) {
-    return location.error;
   }
   return "";
 }
@@ -2232,7 +2282,7 @@ function readRoute() {
     const itemId = Number(raw.slice("query-".length)) || null;
     return { section: "query", itemId };
   }
-  if (["reports", "claims", "account", "admin"].includes(raw)) {
+  if (["reports", "room", "returned", "claims", "account", "admin"].includes(raw)) {
     return { section: raw, itemId: state.currentItemId };
   }
   return { section: "reports", itemId: state.currentItemId };
@@ -2250,6 +2300,8 @@ function navigateTo(section, itemId = null) {
 function updateTopbarState() {
   const toggle = (button, active) => button.classList.toggle("is-active", active);
   toggle(showReportsButton, state.currentView === "reports");
+  toggle(showRoomButton, state.currentView === "room");
+  toggle(showReturnedButton, state.currentView === "returned");
   toggle(showQueryButton, state.currentView === "query");
   toggle(showClaimsButton, state.currentView === "claims");
   toggle(showAccountButton, state.currentView === "account");
@@ -2259,6 +2311,8 @@ function updateTopbarState() {
 function switchSection(section) {
   state.currentView = section;
   reportsSection.classList.toggle("is-hidden", section !== "reports");
+  roomSection.classList.toggle("is-hidden", section !== "room");
+  returnedSection.classList.toggle("is-hidden", section !== "returned");
   claimsSection.classList.toggle("is-hidden", section !== "claims");
   accountSection.classList.toggle("is-hidden", section !== "account");
   adminSection.classList.toggle("is-hidden", section !== "admin");
@@ -2279,6 +2333,18 @@ async function activateRoute(route = readRoute()) {
   if (section === "claims") {
     switchSection("claims");
     await loadClaims();
+    return;
+  }
+
+  if (section === "room") {
+    switchSection("room");
+    await loadRoomItems();
+    return;
+  }
+
+  if (section === "returned") {
+    switchSection("returned");
+    await loadReturnedItems();
     return;
   }
 
@@ -2312,8 +2378,10 @@ async function activateRoute(route = readRoute()) {
 async function apiFetch(path, options = {}) {
   let response;
   try {
+    const method = String(options.method || "GET").toUpperCase();
     response = await fetch(ensureApiBase(path), {
       ...options,
+      method,
       headers: {
         ...(options.headers || {}),
         ...authHeaders(),
@@ -2370,8 +2438,8 @@ async function loadFilters() {
   fillSelect(categoryInput, state.filters.categories);
   fillSelect(categoryFilter, state.filters.categories, true);
   fillSelect(statusFilter, state.filters.statuses, true);
-  fillSelect(predefinedLocation, predefinedLocations);
   fillSelect(locationFilter, state.filters.locations, true);
+  categoryInput.value = "Other";
 }
 
 function renderNotifications(notifications = state.notifications) {
@@ -2436,6 +2504,272 @@ async function loadNotifications() {
   } catch (error) {
     logClientError("loading notifications failed", error);
   }
+}
+
+function renderStatsSummary() {
+  const count = Number(state.statsSummary?.items_returned_this_week || 0);
+  if (weeklyReturnedCount) {
+    weeklyReturnedCount.textContent = String(count);
+  }
+}
+
+async function loadStatsSummary() {
+  if (!state.user) return;
+  try {
+    const data = await apiFetch("/stats/summary");
+    state.statsSummary = {
+      items_returned_this_week: Number(data.items_returned_this_week || 0),
+    };
+    renderStatsSummary();
+  } catch (error) {
+    logClientError("loading stats summary failed", error);
+  }
+}
+
+function stopNotificationPolling() {
+  if (!state.notificationTimer) return;
+  window.clearInterval(state.notificationTimer);
+  state.notificationTimer = null;
+}
+
+function startNotificationPolling() {
+  stopNotificationPolling();
+  if (!state.user) return;
+  state.notificationTimer = window.setInterval(() => {
+    void loadNotifications();
+  }, NOTIFICATION_POLL_INTERVAL_MS);
+}
+
+function roomItemTimestamp(item) {
+  return formatDateTime(item.room_recorded_at || item.created_at || item.updated_at);
+}
+
+function renderRoomItems(items) {
+  roomGallery.replaceChildren();
+  roomCount.textContent = langText({
+    en: `${items.length} item${items.length === 1 ? "" : "s"}`,
+    "zh-CN": `${items.length} 个物品`,
+    th: `${items.length} รายการ`,
+  });
+
+  if (!items.length) {
+    const empty = document.createElement("p");
+    empty.className = "status-message";
+    empty.textContent = langText({
+      en: "No room items are visible right now.",
+      "zh-CN": "目前招领室中没有可显示的物品。",
+      th: "ขณะนี้ยังไม่มีสิ่งของในห้องของหาย",
+    });
+    roomGallery.append(empty);
+    return;
+  }
+
+  items.forEach((item) => {
+    const card = document.createElement("article");
+    card.className = "room-card surface-card";
+
+    const imageWrap = document.createElement("button");
+    imageWrap.className = "room-card-image";
+    imageWrap.type = "button";
+
+    const image = document.createElement("img");
+    const preview = state.previewUrls.get(item.id) || resolveImageUrl(item);
+    if (canPreviewImage(preview)) {
+      image.src = preview;
+      image.alt = item.title || "Room item";
+      imageWrap.append(image);
+    } else {
+      const placeholder = document.createElement("div");
+      placeholder.className = "image-placeholder";
+      placeholder.textContent = "Image unavailable";
+      imageWrap.append(placeholder);
+    }
+
+    const body = document.createElement("div");
+    body.className = "room-card-body";
+
+    const title = document.createElement("strong");
+    title.textContent = item.room_label || item.title || langText({ en: "Room item", "zh-CN": "招领室物品", th: "สิ่งของในห้องของหาย" });
+
+    const meta = document.createElement("p");
+    meta.className = "room-card-meta";
+    meta.textContent = roomItemTimestamp(item);
+
+    const tags = document.createElement("div");
+    tags.className = "tag-row";
+    renderTags(tags, item.tags || []);
+
+    const action = document.createElement("button");
+    action.className = "primary-button card-button";
+    action.type = "button";
+    action.textContent = langText({
+      en: "Open visual claim",
+      "zh-CN": "打开可视认领",
+      th: "เปิดการยืนยันแบบภาพ",
+    });
+    action.addEventListener("click", () => openRoomClaimPreview(item));
+    imageWrap.addEventListener("click", () => openRoomClaimPreview(item));
+
+    body.append(title, meta, tags, action);
+    card.append(imageWrap, body);
+    roomGallery.append(card);
+  });
+}
+
+async function loadRoomItems() {
+  setLoadingLine(roomLoading, true);
+  setWarningCard(roomWarningCard, "");
+  try {
+    const data = await apiFetch("/room/items");
+    state.roomItems = data.items || [];
+    if (typeof data.items_returned_this_week !== "undefined") {
+      state.statsSummary.items_returned_this_week = Number(data.items_returned_this_week || 0);
+      renderStatsSummary();
+    }
+    renderRoomItems(state.roomItems);
+  } catch (error) {
+    roomGallery.replaceChildren();
+    setWarningCard(roomWarningCard, error.message);
+    logClientError("loading room items failed", error);
+  } finally {
+    setLoadingLine(roomLoading, false);
+  }
+}
+
+function renderReturnedItems(items) {
+  returnedList.replaceChildren();
+  returnedCount.textContent = langText({
+    en: `${items.length} item${items.length === 1 ? "" : "s"}`,
+    "zh-CN": `${items.length} 个物品`,
+    th: `${items.length} รายการ`,
+  });
+
+  if (!items.length) {
+    const empty = document.createElement("p");
+    empty.className = "status-message";
+    empty.textContent = langText({
+      en: "No items were returned recently.",
+      "zh-CN": "最近还没有已归还物品。",
+      th: "ยังไม่มีสิ่งของที่เพิ่งถูกรับคืน",
+    });
+    returnedList.append(empty);
+    return;
+  }
+
+  items.forEach((item) => {
+    const card = document.createElement("article");
+    card.className = "claim-history-card returned-card";
+
+    const preview = state.previewUrls.get(item.id) || resolveImageUrl(item);
+    if (canPreviewImage(preview)) {
+      const image = document.createElement("img");
+      image.className = "returned-card-image";
+      image.src = preview;
+      image.alt = item.title || "Returned item";
+      card.append(image);
+    }
+
+    const head = document.createElement("div");
+    head.className = "claim-history-head";
+    const titleWrap = document.createElement("div");
+    const title = document.createElement("h3");
+    title.textContent = item.title || langText({ en: "Returned item", "zh-CN": "已归还物品", th: "สิ่งของที่ถูกรับคืน" });
+    const meta = document.createElement("p");
+    meta.className = "claim-history-meta";
+    meta.textContent = langText({
+      en: `Returned ${formatDateTime(item.returned_at || item.updated_at)}`,
+      "zh-CN": `归还于 ${formatDateTime(item.returned_at || item.updated_at)}`,
+      th: `รับคืน ${formatDateTime(item.returned_at || item.updated_at)}`,
+    });
+    titleWrap.append(title, meta);
+
+    const badge = document.createElement("span");
+    badge.className = "status-badge is-claimed";
+    badge.textContent = langText({ en: "Returned", "zh-CN": "已归还", th: "รับคืนแล้ว" });
+    head.append(titleWrap, badge);
+
+    const info = document.createElement("dl");
+    info.className = "info-list";
+    addInfo(info, langText({ en: "Location", "zh-CN": "地点", th: "สถานที่" }), localizeValue(item.location || ""));
+    addInfo(info, langText({ en: "Created", "zh-CN": "创建时间", th: "สร้างเมื่อ" }), formatDateTime(item.created_at));
+    addInfo(info, langText({ en: "Returned", "zh-CN": "归还时间", th: "เวลาที่รับคืน" }), formatDateTime(item.returned_at));
+
+    const actions = document.createElement("div");
+    actions.className = "card-actions";
+    const disputeButton = document.createElement("button");
+    disputeButton.className = "ghost-button card-button danger-button";
+    disputeButton.type = "button";
+    disputeButton.textContent = langText({
+      en: "This was wrongly claimed",
+      "zh-CN": "这件物品被错误认领",
+      th: "สิ่งของนี้ถูกรับคืนผิดคน",
+    });
+    disputeButton.addEventListener("click", () => openConfirmModal({
+      title: langText({ en: "Dispute returned item", "zh-CN": "提交归还争议", th: "โต้แย้งการรับคืน" }),
+      body: langText({
+        en: "Tell the admin team why this returned item may have been claimed incorrectly.",
+        "zh-CN": "请说明为什么你认为这件已归还物品可能被错误认领。",
+        th: "อธิบายให้ผู้ดูแลทราบว่าทำไมคุณคิดว่าสิ่งของนี้อาจถูกรับคืนผิดคน",
+      }),
+      confirmLabel: langText({ en: "Send dispute", "zh-CN": "发送争议", th: "ส่งคำโต้แย้ง" }),
+      notesLabel: langText({ en: "Why this looks wrong", "zh-CN": "争议原因", th: "เหตุผลของคำโต้แย้ง" }),
+      requireNotes: true,
+      onConfirm: async (notes) => {
+        try {
+          const data = await apiFetch(`/items/${item.id}/returned-disputes`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reason: notes }),
+          });
+          closeConfirmModal();
+          setWarningCard(returnedWarningCard, "");
+          await Promise.all([loadReturnedItems(), loadNotifications()]);
+          setMessage(confirmMessage, "");
+          setMessage(returnedMessage, data.message || "");
+        } catch (error) {
+          setMessage(confirmMessage, error.message, true);
+          logClientError("submitting returned dispute failed", error, { itemId: item.id });
+        }
+      },
+    }));
+    actions.append(disputeButton);
+
+    card.append(head, info, actions);
+    returnedList.append(card);
+  });
+}
+
+async function loadReturnedItems() {
+  setLoadingLine(returnedLoading, true);
+  setWarningCard(returnedWarningCard, "");
+  setMessage(returnedMessage, "");
+  try {
+    const data = await apiFetch("/returned/items");
+    state.returnedItems = data.items || [];
+    if (typeof data.items_returned_this_week !== "undefined") {
+      state.statsSummary.items_returned_this_week = Number(data.items_returned_this_week || 0);
+      renderStatsSummary();
+    }
+    renderReturnedItems(state.returnedItems);
+  } catch (error) {
+    returnedList.replaceChildren();
+    setWarningCard(returnedWarningCard, error.message);
+    logClientError("loading returned items failed", error);
+  } finally {
+    setLoadingLine(returnedLoading, false);
+  }
+}
+
+async function refreshItemSurfaces({ includeAdmin = currentUserCanAdmin(), includeClaims = false, includeNotifications = false } = {}) {
+  await Promise.all([
+    loadItems(),
+    loadRoomItems(),
+    loadReturnedItems(),
+    loadStatsSummary(),
+    includeClaims ? loadClaims() : Promise.resolve(),
+    includeNotifications ? loadNotifications() : Promise.resolve(),
+    includeAdmin ? loadAdminData() : Promise.resolve(),
+  ]);
 }
 
 async function loadItems() {
@@ -2675,27 +3009,16 @@ function renderAccount() {
 }
 
 function renderAdminMonitor(monitor = state.adminMonitor || emptyAdminMonitor()) {
-  const cpuPercent = formatMonitorPercent(monitor.cpu_usage_percent);
-  const memoryPercent = formatMonitorPercent(monitor.memory_usage_percent);
-  const gpuPercent = formatMonitorPercent(monitor.gpu_usage_percent);
-  const gpuTemperature = formatMonitorTemperature(monitor.gpu_temperature_c);
   const uptime = Number.isFinite(Number(monitor.uptime_seconds)) ? formatDuration(monitor.uptime_seconds) : "--";
 
-  adminMonitorCpu.textContent = cpuPercent;
-  adminMonitorRam.textContent = memoryPercent;
-  adminMonitorGpu.textContent = gpuPercent;
-  adminMonitorGpuTemp.textContent = gpuTemperature;
   adminMonitorUptime.textContent = uptime;
-  adminMonitorStatus.textContent = formatMonitorStatus(monitor.last_ai_status);
+  adminMonitorStatus.textContent = formatMonitorStatus(monitor.status);
 
   if (monitor.fetched_at) {
-    const latencyText = Number.isFinite(Number(monitor.ollama_latency_ms)) && Number(monitor.ollama_latency_ms) >= 0
-      ? `${Math.round(Number(monitor.ollama_latency_ms))} ms`
-      : "--";
     adminMonitorUpdated.textContent = langText({
-      en: `Last refresh: ${formatDateTime(monitor.fetched_at)} · Service latency ${latencyText}`,
-      "zh-CN": `上次刷新：${formatDateTime(monitor.fetched_at)} · 服务延迟 ${latencyText}`,
-      th: `รีเฟรชล่าสุด: ${formatDateTime(monitor.fetched_at)} · ความหน่วง ${latencyText}`,
+      en: `Last refresh: ${formatDateTime(monitor.fetched_at)}`,
+      "zh-CN": `上次刷新：${formatDateTime(monitor.fetched_at)}`,
+      th: `รีเฟรชล่าสุด: ${formatDateTime(monitor.fetched_at)}`,
     });
   } else {
     adminMonitorUpdated.textContent = t("admin.monitorWaiting");
@@ -2736,6 +3059,22 @@ async function loadAdminMonitor() {
     logClientError("loading admin monitor failed", error);
   } finally {
     state.adminMonitorRequestInFlight = false;
+  }
+}
+
+async function updateOllamaService(action, button) {
+  if (!currentUserCanAdmin()) return;
+  setButtonLoading(button, true);
+  setMessage(adminMessage, `${action === "start" ? "Starting" : "Stopping"} Ollama...`);
+  try {
+    const data = await apiFetch(`/admin/ollama/${action}`, { method: "POST" });
+    setMessage(adminMessage, data.message || `Ollama ${action} request completed.`);
+    await loadAdminMonitor();
+  } catch (error) {
+    setMessage(adminMessage, error.message, true);
+    logClientError(`ollama ${action} failed`, error);
+  } finally {
+    setButtonLoading(button, false);
   }
 }
 
@@ -2973,7 +3312,7 @@ function renderAdminItems(items) {
         await apiFetch(`/admin/items/${item.id}/restore`, { method: "POST" });
         hideUndoToast();
         invalidateSearchCache();
-        await Promise.all([loadAdminData(), loadItems(), loadNotifications()]);
+        await refreshItemSurfaces({ includeAdmin: true, includeNotifications: true });
       },
     }));
 
@@ -3340,11 +3679,11 @@ async function handleAdminClaimDecision(claimId, action, button) {
             await apiFetch(`/admin/claims/${claimId}/undo-decision`, { method: "POST" });
             hideUndoToast();
             invalidateSearchCache();
-            await Promise.all([loadAdminData(), loadItems(), loadClaims(), loadNotifications()]);
+            await refreshItemSurfaces({ includeAdmin: true, includeClaims: true, includeNotifications: true });
           },
         );
         invalidateSearchCache();
-        await Promise.all([loadAdminData(), loadItems(), loadClaims(), loadNotifications()]);
+        await refreshItemSurfaces({ includeAdmin: true, includeClaims: true, includeNotifications: true });
       } catch (error) {
         setMessage(adminMessage, error.message, true);
         setMessage(confirmMessage, error.message, true);
@@ -3368,7 +3707,7 @@ async function handleAdminDelete({ path, confirmationMessage, undoMessage = "", 
         closeConfirmModal();
         setMessage(adminMessage, data.message || langText({ en: "Deleted.", "zh-CN": "已删除。", th: "ลบแล้ว" }));
         invalidateSearchCache();
-        await Promise.all([loadAdminData(), loadItems(), loadClaims(), loadNotifications()]);
+        await refreshItemSurfaces({ includeAdmin: true, includeClaims: true, includeNotifications: true });
         if (onUndo) {
           showUndoToast(undoMessage || data.message || "", onUndo);
         }
@@ -3433,7 +3772,7 @@ async function handleAdminItemReview(itemId, status) {
         closeConfirmModal();
         setMessage(adminMessage, data.message || langText({ en: "Item review updated.", "zh-CN": "物品审核已更新。", th: "อัปเดตการตรวจสอบแล้ว" }));
         invalidateSearchCache();
-        await Promise.all([loadAdminData(), loadItems()]);
+        await refreshItemSurfaces({ includeAdmin: true });
       } catch (error) {
         setMessage(adminMessage, error.message, true);
         setMessage(confirmMessage, error.message, true);
@@ -3468,7 +3807,7 @@ async function handleAdminAbuseOverride(item, status) {
         closeConfirmModal();
         setMessage(adminMessage, data.message || langText({ en: "Abuse override updated.", "zh-CN": "风险覆盖已更新。", th: "อัปเดตการแทนค่าแล้ว" }));
         invalidateSearchCache();
-        await Promise.all([loadAdminData(), loadItems(), loadNotifications()]);
+        await refreshItemSurfaces({ includeAdmin: true, includeNotifications: true });
         showUndoToast(
           langText({ en: "Override saved.", "zh-CN": "覆盖已保存。", th: "บันทึกการแทนค่าแล้ว" }),
           async () => {
@@ -3479,7 +3818,7 @@ async function handleAdminAbuseOverride(item, status) {
             });
             hideUndoToast();
             invalidateSearchCache();
-            await Promise.all([loadAdminData(), loadItems(), loadNotifications()]);
+            await refreshItemSurfaces({ includeAdmin: true, includeNotifications: true });
           },
         );
       } catch (error) {
@@ -3507,7 +3846,7 @@ async function handleAdminMoveToRoom(item) {
         closeConfirmModal();
         setMessage(adminMessage, data.message || langText({ en: "Report moved.", "zh-CN": "报告已移动。", th: "ย้ายรายงานแล้ว" }));
         invalidateSearchCache();
-        await Promise.all([loadAdminData(), loadItems(), loadNotifications()]);
+        await refreshItemSurfaces({ includeAdmin: true, includeNotifications: true });
       } catch (error) {
         setMessage(adminMessage, error.message, true);
         setMessage(confirmMessage, error.message, true);
@@ -3538,7 +3877,6 @@ function renderQueryItemSelector(selectedItemId = null) {
 function setCurrentQueryItem(item) {
   state.currentQueryItem = item || null;
   persistCurrentItemId(item?.id || null);
-  console.log("[Query] selected item", state.currentQueryItem);
 }
 
 function clearQueryState() {
@@ -3805,7 +4143,6 @@ function handleQueryItemSelection() {
   const nextItem = nextItemId ? findItemById(nextItemId) : null;
   state.currentQueryItem = nextItem;
   persistCurrentItemId(nextItemId);
-  console.log("[Query] selector changed", { nextItemId, nextItem });
   navigateTo("query", nextItemId);
 }
 
@@ -3826,7 +4163,6 @@ async function loadQueryPage(itemId) {
   try {
     const hasItem = Boolean(itemId);
     const cacheKey = hasItem ? `item:${itemId}` : "general";
-    console.log("[Query] loading page", { selectedItemId: itemId || null, mode: hasItem ? "item" : "general" });
     const cached = state.queryCache.get(cacheKey);
     const [itemData, queryData] = await Promise.all(cached
       ? [
@@ -3892,7 +4228,6 @@ async function submitQuery(event) {
   setWarningCard(queryWarningCard, "");
   try {
     const path = itemId ? `/items/${itemId}/query` : "/query";
-    console.log("[Query] submitting", { selectedItem: state.currentQueryItem, itemId, path });
     const uploadFile = await prepareUploadFile(state.selectedQueryFile, "query", {
       compress: progressCopy("queryCompress"),
       prepare: progressCopy("queryPrepare"),
@@ -4020,6 +4355,7 @@ async function enterAuthenticatedApp() {
     ? langText({ en: "Admin access", "zh-CN": "管理员权限", th: "สิทธิ์ผู้ดูแล" })
     : `@${state.user.username}`;
   showAdminButton.classList.toggle("is-hidden", !currentUserCanAdmin());
+  roomAdminPanel.classList.toggle("is-hidden", !currentUserCanAdmin());
   prefillReporter();
   dateInput.value = todayIso();
   updateLocationUi();
@@ -4027,10 +4363,14 @@ async function enterAuthenticatedApp() {
   await Promise.all([
     loadFilters(),
     loadItems(),
+    loadRoomItems(),
+    loadReturnedItems(),
     loadClaims(),
     loadNotifications(),
+    loadStatsSummary(),
     currentUserCanAdmin() ? loadAdminData() : Promise.resolve(),
   ]);
+  startNotificationPolling();
   await activateRoute(readRoute());
   await maybeStartTutorial();
 }
@@ -4050,7 +4390,7 @@ async function submitReport(event) {
 
   setButtonLoading(submitButton, true);
   setProgress("report", 0, progressCopy("reportPrepare"), true);
-  setMessage(uploadMessage, langText({ en: "Submitting your report...", "zh-CN": "正在提交报告...", th: "กำลังส่งรายงาน..." }));
+    setMessage(uploadMessage, langText({ en: "Publishing your report...", "zh-CN": "正在发布你的报告...", th: "กำลังเผยแพร่รายงานของคุณ..." }));
   try {
     const uploadFile = await prepareUploadFile(state.selectedFile, "report", {
       compress: progressCopy("reportCompress"),
@@ -4063,13 +4403,6 @@ async function submitReport(event) {
           data: await readFileAsDataUrl(uploadFile),
         }
       : null;
-    if (imagePayload) {
-      console.info("[Upload] sending report image payload", {
-        filename: imagePayload.filename,
-        contentType: imagePayload.content_type,
-        base64Length: imagePayload.data.length,
-      });
-    }
     const requestBody = {
       reporter_name: reporterInput.value.trim(),
       title: titleInput.value.trim(),
@@ -4111,10 +4444,17 @@ async function submitReport(event) {
     updateLocationUi();
     updateReportSubmitState();
     await completeProgress("report");
-    setMessage(uploadMessage, langText({ en: "Report submitted successfully.", "zh-CN": "报告已成功提交。", th: "ส่งรายงานเรียบร้อยแล้ว" }));
+    setMessage(uploadMessage, langText({
+      en: "Your report is now live. We'll notify you if a match is found.",
+      "zh-CN": "你的报告已发布。如果发现匹配项，我们会通知你。",
+      th: "รายงานของคุณเผยแพร่แล้ว เราจะแจ้งให้ทราบหากพบสิ่งของที่ตรงกัน",
+    }));
+    window.setTimeout(() => {
+      closeReportModal();
+    }, 700);
     setWarningCard(reportWarningCard, "");
     invalidateSearchCache();
-    await loadItems();
+    await Promise.all([loadItems(), loadStatsSummary()]);
   } catch (error) {
     resetProgress("report");
     setMessage(uploadMessage, langText({
@@ -4178,21 +4518,245 @@ async function uploadProfileImage() {
   }
 }
 
-function openClaimDialog(item) {
+async function uploadRoomItems() {
+  const files = Array.from(roomUploadInput.files || []);
+  if (!files.length) {
+    setMessage(roomUploadMessage, langText({
+      en: "Choose at least one image for the room.",
+      "zh-CN": "请至少选择一张招领室图片。",
+      th: "กรุณาเลือกรูปภาพอย่างน้อยหนึ่งรูป",
+    }), true);
+    return;
+  }
+
+  setButtonLoading(uploadRoomButton, true);
+  setMessage(roomUploadMessage, langText({
+    en: "Uploading room items...",
+    "zh-CN": "正在上传招领室物品...",
+    th: "กำลังอัปโหลดสิ่งของเข้าห้องของหาย...",
+  }));
+
+  try {
+    const images = [];
+    for (const file of files) {
+      const validationMessage = validateReportImageFile(file);
+      if (validationMessage) {
+        throw new Error(validationMessage);
+      }
+      let uploadFile = file;
+      if (REPORT_ALLOWED_IMAGE_EXTENSIONS.includes(fileExtension(file.name))) {
+        try {
+          uploadFile = await compressImageFile(file);
+        } catch (error) {
+          if (!SERVER_SIDE_IMAGE_CONVERSION_EXTENSIONS.includes(fileExtension(file.name))) {
+            throw error;
+          }
+        }
+      }
+      images.push({
+        filename: uploadFile.name,
+        content_type: uploadFile.type || "application/octet-stream",
+        data: await readFileAsDataUrl(uploadFile),
+      });
+    }
+
+    const data = await apiFetch("/admin/room/items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        label: roomLabelInput.value.trim(),
+        images,
+      }),
+    });
+    roomUploadInput.value = "";
+    roomLabelInput.value = "";
+    setMessage(roomUploadMessage, data.message || "Item added to Lost & Found Room");
+    await refreshItemSurfaces({ includeAdmin: true, includeNotifications: true });
+  } catch (error) {
+    setMessage(roomUploadMessage, error.message, true);
+    logClientError("uploading room items failed", error);
+  } finally {
+    setButtonLoading(uploadRoomButton, false);
+  }
+}
+
+function roomPreviewSelection() {
+  return {
+    x: Number(roomPreviewCircle.dataset.x || 0.5),
+    y: Number(roomPreviewCircle.dataset.y || 0.5),
+    radius: Number(roomPreviewCircle.dataset.radius || 0.18),
+  };
+}
+
+function applyRoomPreviewSelection(selection = roomPreviewSelection()) {
+  const x = Math.min(1, Math.max(0, Number(selection.x || 0.5)));
+  const y = Math.min(1, Math.max(0, Number(selection.y || 0.5)));
+  const radius = Math.min(0.48, Math.max(0.04, Number(selection.radius || 0.18)));
+  roomPreviewCircle.dataset.x = String(x);
+  roomPreviewCircle.dataset.y = String(y);
+  roomPreviewCircle.dataset.radius = String(radius);
+  roomPreviewCircle.style.left = `${(x - radius) * 100}%`;
+  roomPreviewCircle.style.top = `${(y - radius) * 100}%`;
+  roomPreviewCircle.style.width = `${radius * 200}%`;
+  roomPreviewCircle.style.height = `${radius * 200}%`;
+}
+
+function resetRoomPreviewState() {
+  state.roomPreviewAnalysis = null;
+  state.roomPreviewDrag = null;
+  setMessage(roomPreviewMessage, "");
+  roomPreviewResult.textContent = langText({
+    en: "No selection analysis yet.",
+    "zh-CN": "还没有选区分析结果。",
+    th: "ยังไม่มีผลการวิเคราะห์บริเวณที่เลือก",
+  });
+  roomConfirmButton.disabled = true;
+  renderTags(roomPreviewTags, []);
+  applyRoomPreviewSelection({ x: 0.5, y: 0.5, radius: 0.18 });
+}
+
+function closeRoomClaimPreview() {
+  state.activeRoomPreviewItem = null;
+  resetRoomPreviewState();
+  if (roomClaimPreviewDialog.open) {
+    roomClaimPreviewDialog.close();
+  }
+}
+
+function openRoomClaimPreview(item) {
+  if (!item?.image_url && !item?.image_path) {
+    setWarningCard(roomWarningCard, langText({
+      en: "This room item does not have a preview image yet.",
+      "zh-CN": "这件招领室物品暂时没有预览图片。",
+      th: "สิ่งของชิ้นนี้ยังไม่มีภาพตัวอย่าง",
+    }));
+    return;
+  }
+  state.activeRoomPreviewItem = item;
+  roomClaimPreviewLabel.textContent = `${item.title || "Room item"} • ${roomItemTimestamp(item)}`;
+  roomPreviewImage.src = resolveImageUrl(item);
+  roomPreviewImage.alt = item.title || "Room item";
+  resetRoomPreviewState();
+  roomClaimPreviewDialog.showModal();
+}
+
+function updateRoomPreviewPointer(clientX, clientY, mode) {
+  const rect = roomPreviewStage.getBoundingClientRect();
+  if (!rect.width || !rect.height || !state.roomPreviewDrag) return;
+  const start = state.roomPreviewDrag.start;
+  const current = state.roomPreviewDrag.selection;
+  const deltaX = (clientX - start.clientX) / rect.width;
+  const deltaY = (clientY - start.clientY) / rect.height;
+  let next = { ...current };
+
+  if (mode === "move") {
+    next.x = Math.min(1 - current.radius, Math.max(current.radius, start.x + deltaX));
+    next.y = Math.min(1 - current.radius, Math.max(current.radius, start.y + deltaY));
+  } else {
+    const radiusDelta = Math.max(deltaX, deltaY);
+    next.radius = Math.min(
+      Math.min(start.x, start.y, 1 - start.x, 1 - start.y),
+      Math.max(0.04, start.radius + radiusDelta),
+    );
+  }
+
+  applyRoomPreviewSelection(next);
+}
+
+function handleRoomPreviewPointerDown(event) {
+  if (!roomClaimPreviewDialog.open) return;
+  const isResize = event.target === roomPreviewHandle;
+  const selection = roomPreviewSelection();
+  state.roomPreviewDrag = {
+    mode: isResize ? "resize" : "move",
+    selection,
+    start: {
+      clientX: event.clientX,
+      clientY: event.clientY,
+      x: selection.x,
+      y: selection.y,
+      radius: selection.radius,
+    },
+  };
+  event.preventDefault();
+}
+
+function handleRoomPreviewPointerMove(event) {
+  if (!state.roomPreviewDrag) return;
+  updateRoomPreviewPointer(event.clientX, event.clientY, state.roomPreviewDrag.mode);
+}
+
+function handleRoomPreviewPointerUp() {
+  state.roomPreviewDrag = null;
+}
+
+async function analyzeRoomPreview() {
+  if (!state.activeRoomPreviewItem) return;
+  roomConfirmButton.disabled = true;
+  setButtonLoading(roomAnalyzeButton, true);
+  setMessage(roomPreviewMessage, langText({
+    en: "Analyzing the selected area...",
+    "zh-CN": "正在分析选中的区域...",
+    th: "กำลังวิเคราะห์บริเวณที่เลือก...",
+  }));
+
+  try {
+    const data = await apiFetch(`/items/${state.activeRoomPreviewItem.id}/claim-preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ selection: roomPreviewSelection() }),
+    });
+    state.roomPreviewAnalysis = data.preview || null;
+    roomPreviewResult.textContent = data.preview?.description || "Selected area analyzed.";
+    renderTags(roomPreviewTags, data.preview?.tags || []);
+    roomConfirmButton.disabled = !state.roomPreviewAnalysis;
+    setMessage(roomPreviewMessage, langText({
+      en: "If this matches your item, confirm and continue to the claim form.",
+      "zh-CN": "如果这和你的物品一致，请确认并继续填写认领表单。",
+      th: "หากตรงกับสิ่งของของคุณ ให้ยืนยันและดำเนินการต่อไปยังแบบฟอร์มคำขอ",
+    }));
+  } catch (error) {
+    setMessage(roomPreviewMessage, error.message, true);
+    logClientError("analyzing room preview failed", error, { itemId: state.activeRoomPreviewItem.id });
+  } finally {
+    setButtonLoading(roomAnalyzeButton, false);
+  }
+}
+
+function confirmRoomPreviewSelection() {
+  if (!state.activeRoomPreviewItem || !state.roomPreviewAnalysis) return;
+  const item = state.activeRoomPreviewItem;
+  const analysis = state.roomPreviewAnalysis;
+  closeRoomClaimPreview();
+  openClaimDialog(item, analysis);
+}
+
+function openClaimDialog(item, previewAnalysis = null) {
   if (item.claimed) {
     setMessage(uploadMessage, langText({ en: "This item has already been marked as claimed.", "zh-CN": "该物品已被标记为已认领。", th: "สิ่งของนี้ถูกทำเครื่องหมายว่ารับคืนแล้ว" }), true);
     return;
   }
 
   state.activeClaimItem = item;
+  state.roomPreviewAnalysis = previewAnalysis;
   claimForm.reset();
   setMessage(claimMessage, "");
   claimItemLabel.textContent = `${item.title} • ${item.location}`;
+  if (previewAnalysis) {
+    claimReasonInput.value = langText({
+      en: "The circled detail matches my item.",
+      "zh-CN": "我圈出的细节和我的物品一致。",
+      th: "รายละเอียดที่วงไว้ตรงกับสิ่งของของฉัน",
+    });
+    claimDescriptionInput.value = previewAnalysis.description || item.title || "";
+    claimIdentifyingInput.value = (previewAnalysis.tags || []).join(", ");
+  }
   claimDialog.showModal();
 }
 
 function closeClaimModal() {
   state.activeClaimItem = null;
+  state.roomPreviewAnalysis = null;
   if (claimDialog.open) {
     claimDialog.close();
   }
@@ -4212,7 +4776,7 @@ async function submitClaim(event) {
   }
 
   setButtonLoading(claimSubmitButton, true);
-  setMessage(claimMessage, langText({ en: "Submitting your claim for review...", "zh-CN": "正在提交认领审核...", th: "กำลังส่งคำขอเพื่อให้ผู้ดูแลตรวจสอบ..." }));
+  setMessage(claimMessage, langText({ en: "Sending your claim for review...", "zh-CN": "正在发送认领审核...", th: "กำลังส่งคำขอเพื่อให้ผู้ดูแลตรวจสอบ..." }));
 
   try {
     await apiFetch(`/items/${state.activeClaimItem.id}/claim`, {
@@ -4223,11 +4787,18 @@ async function submitClaim(event) {
         item_description: claimDescriptionInput.value.trim(),
         lost_location: claimLocationInput.value.trim(),
         identifying_info: claimIdentifyingInput.value.trim(),
+        visual_selection: state.roomPreviewAnalysis?.selection || null,
+        visual_summary: state.roomPreviewAnalysis?.description || "",
+        visual_tags: state.roomPreviewAnalysis?.tags || [],
       }),
     });
-    setMessage(claimMessage, langText({ en: "Claim submitted for admin review.", "zh-CN": "认领已提交，等待管理员审核。", th: "ส่งคำขอเพื่อให้ผู้ดูแลตรวจสอบแล้ว" }));
+    setMessage(claimMessage, langText({
+      en: "Your claim has been sent for review. You'll be notified when it's checked.",
+      "zh-CN": "你的认领已发送审核，核查完成后我们会通知你。",
+      th: "ส่งคำขอของคุณไปตรวจสอบแล้ว เราจะแจ้งให้ทราบเมื่อมีการตรวจสอบเสร็จสิ้น",
+    }));
     invalidateSearchCache();
-    await Promise.all([loadClaims(), loadNotifications()]);
+    await Promise.all([loadClaims(), loadNotifications(), loadReturnedItems(), loadStatsSummary()]);
     window.setTimeout(closeClaimModal, 450);
   } catch (error) {
     setMessage(claimMessage, langText({
@@ -4246,7 +4817,14 @@ async function markItemClaimed(itemId, button) {
   try {
     await apiFetch(`/items/${itemId}/mark-claimed`, { method: "POST" });
     invalidateSearchCache();
-    await Promise.all([loadItems(), loadClaims(), currentUserCanAdmin() ? loadAdminData() : Promise.resolve()]);
+    await Promise.all([
+      loadItems(),
+      loadRoomItems(),
+      loadReturnedItems(),
+      loadClaims(),
+      loadStatsSummary(),
+      currentUserCanAdmin() ? loadAdminData() : Promise.resolve(),
+    ]);
   } catch (error) {
     setMessage(uploadMessage, error.message, true);
     logClientError("marking item claimed failed", error, { itemId });
@@ -4275,13 +4853,18 @@ function resetPreviewUrls() {
 function logout() {
   clearSession();
   closeTutorial({ markSeen: false, rememberSession: false });
+  closeReportModal();
   closeConfirmModal();
+  closeRoomClaimPreview();
   hideUndoToast();
   stopAdminMonitorPolling();
+  stopNotificationPolling();
   resetPreviewUrls();
   state.searchCache.clear();
   state.queryCache.clear();
   state.items = [];
+  state.roomItems = [];
+  state.returnedItems = [];
   state.notifications = [];
   state.unreadNotifications = 0;
   state.queryItems = [];
@@ -4293,11 +4876,14 @@ function logout() {
   state.aiInspectionLogs = [];
   state.adminMonitor = emptyAdminMonitor();
   state.adminTab = "users";
+  state.statsSummary = { items_returned_this_week: 0 };
   state.currentQueryItem = null;
   state.queryMessages = [];
   state.selectedQueryFile = null;
   state.tutorialDismissedForSession = false;
   gallery.replaceChildren();
+  roomGallery.replaceChildren();
+  returnedList.replaceChildren();
   claimsList.replaceChildren();
   adminUsersBody.replaceChildren();
   adminItemsList.replaceChildren();
@@ -4313,8 +4899,13 @@ function logout() {
   setWarningCard(reportWarningCard, "");
   setWarningCard(searchWarningCard, "");
   setWarningCard(queryWarningCard, "");
+  setWarningCard(roomWarningCard, "");
+  setWarningCard(returnedWarningCard, "");
   setMessage(queryMessage, "");
   setMessage(profileImageMessage, "");
+  setMessage(roomUploadMessage, "");
+  setMessage(returnedMessage, "");
+  renderStatsSummary();
   hideProgress("report");
   hideProgress("query");
   hideProgress("profile");
@@ -4334,12 +4925,14 @@ function bindEvents() {
   registerTab.addEventListener("click", () => setAuthView("register"));
 
   showReportsButton.addEventListener("click", () => navigateTo("reports"));
+  showRoomButton.addEventListener("click", () => navigateTo("room"));
+  showReturnedButton.addEventListener("click", () => navigateTo("returned"));
   showQueryButton.addEventListener("click", () => navigateTo("query"));
   showClaimsButton.addEventListener("click", () => navigateTo("claims"));
   showAccountButton.addEventListener("click", () => navigateTo("account"));
   showAdminButton.addEventListener("click", () => navigateTo("admin"));
   queryBackButton.addEventListener("click", () => navigateTo("reports"));
-  themeSelect.addEventListener("change", () => applyTheme(themeSelect.value));
+  themeToggleButton.addEventListener("click", toggleThemeMode);
   languageSelect.addEventListener("change", async () => {
     setLanguage(languageSelect.value);
     if (state.user) {
@@ -4356,8 +4949,11 @@ function bindEvents() {
       await Promise.all([
         loadFilters(),
         loadItems(),
+        loadRoomItems(),
+        loadReturnedItems(),
         state.currentView === "claims" ? loadClaims() : Promise.resolve(),
         loadNotifications(),
+        loadStatsSummary(),
         currentUserCanAdmin() ? loadAdminData() : Promise.resolve(),
       ]);
       if (currentUserCanAdmin()) {
@@ -4373,6 +4969,12 @@ function bindEvents() {
       }
     }
   });
+  openReportModalButton.addEventListener("click", openReportModal);
+  closeReportDialog.addEventListener("click", closeReportModal);
+  reportDialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeReportModal();
+  });
   logoutButton.addEventListener("click", logout);
   notificationButton.addEventListener("click", async () => {
     const willOpen = notificationDropdown.classList.contains("is-hidden");
@@ -4386,6 +4988,9 @@ function bindEvents() {
   form.addEventListener("submit", submitReport);
   imageInput.addEventListener("change", () => selectFile(imageInput.files[0]));
   refreshButton.addEventListener("click", loadItems);
+  refreshRoomButton.addEventListener("click", loadRoomItems);
+  refreshReturnedButton.addEventListener("click", loadReturnedItems);
+  uploadRoomButton.addEventListener("click", uploadRoomItems);
   refreshQueryItemsButton.addEventListener("click", loadQueryItemOptions);
   refreshClaimsButton.addEventListener("click", loadClaims);
   refreshAdminButton.addEventListener("click", loadAdminSurface);
@@ -4393,6 +4998,12 @@ function bindEvents() {
   adminItemsTab.addEventListener("click", () => switchAdminTab("items"));
   adminClaimsTab.addEventListener("click", () => switchAdminTab("claims"));
   adminInspectionTab.addEventListener("click", () => switchAdminTab("inspection"));
+  startOllamaButton.addEventListener("click", () => {
+    void updateOllamaService("start", startOllamaButton);
+  });
+  stopOllamaButton.addEventListener("click", () => {
+    void updateOllamaService("stop", stopOllamaButton);
+  });
   adminMonitorTab.addEventListener("click", async () => {
     switchAdminTab("monitor");
     if (currentUserCanAdmin() && state.currentView === "admin") {
@@ -4403,8 +5014,7 @@ function bindEvents() {
   categoryFilter.addEventListener("change", loadItems);
   statusFilter.addEventListener("change", loadItems);
   locationFilter.addEventListener("change", loadItems);
-  predefinedLocation.addEventListener("change", updateLocationUi);
-  roomCodeInput.addEventListener("input", updateLocationUi);
+  optionalLocationInput.addEventListener("input", updateLocationUi);
   queryItemSelect.addEventListener("change", handleQueryItemSelection);
   queryForm.addEventListener("submit", submitQuery);
   queryFileInput.addEventListener("change", () => selectQueryFile(queryFileInput.files?.[0] || null));
@@ -4419,6 +5029,14 @@ function bindEvents() {
   claimForm.addEventListener("submit", submitClaim);
   cancelClaimButton.addEventListener("click", closeClaimModal);
   closeClaimDialog.addEventListener("click", closeClaimModal);
+  closeRoomClaimPreviewDialog.addEventListener("click", closeRoomClaimPreview);
+  roomPreviewCancelButton.addEventListener("click", closeRoomClaimPreview);
+  roomAnalyzeButton.addEventListener("click", analyzeRoomPreview);
+  roomConfirmButton.addEventListener("click", confirmRoomPreviewSelection);
+  roomPreviewCircle.addEventListener("pointerdown", handleRoomPreviewPointerDown);
+  roomPreviewHandle.addEventListener("pointerdown", handleRoomPreviewPointerDown);
+  window.addEventListener("pointermove", handleRoomPreviewPointerMove);
+  window.addEventListener("pointerup", handleRoomPreviewPointerUp);
   confirmForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!state.confirmState?.onConfirm) return;
@@ -4485,10 +5103,6 @@ function bindEvents() {
     notificationButton.setAttribute("aria-expanded", "false");
   });
 
-  document.querySelectorAll("input[name='locationMode']").forEach((input) => {
-    input.addEventListener("change", updateLocationUi);
-  });
-
   ["dragenter", "dragover"].forEach((eventName) => {
     dropZone.addEventListener(eventName, (event) => {
       event.preventDefault();
@@ -4510,7 +5124,7 @@ function bindEvents() {
 
 async function init() {
   ensureGlobalBackground();
-  applyTheme(localStorage.getItem(THEME_STORAGE_KEY) || "dark");
+  initializeTheme();
   setLanguage(state.language);
   setAuthView("login");
   resetAdminMonitor();

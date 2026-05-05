@@ -45,6 +45,11 @@ class LostFoundItem(Base):
     tag_source = Column(String, default="fallback-text")
     submitted_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     claimed = Column(Boolean, default=False, nullable=False)
+    is_room_item = Column(Boolean, default=False, nullable=False, index=True)
+    room_label = Column(String, default="")
+    room_recorded_at = Column(DateTime, nullable=True, index=True)
+    returned_at = Column(DateTime, nullable=True, index=True)
+    returned_by_claim_id = Column(Integer, ForeignKey("claims.id"), nullable=True, index=True)
     evidence_details = Column(Text, default="")
     evidence_images_json = Column(Text, default="[]")
     evidence_summary = Column(Text, default="")
@@ -133,6 +138,9 @@ class Claim(Base):
     identifying_info = Column(Text, nullable=False)
     match_score = Column(Integer, default=0, nullable=False)
     match_reasoning = Column(Text, default="")
+    visual_selection_json = Column(Text, default="{}")
+    visual_summary = Column(Text, default="")
+    visual_tags_json = Column(Text, default="[]")
     status = Column(String, default="pending", index=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -279,6 +287,18 @@ class Notification(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class ReturnedItemDispute(Base):
+    __tablename__ = "returned_item_disputes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    item_id = Column(Integer, ForeignKey("lost_found_items.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    reason = Column(Text, nullable=False)
+    status = Column(String, default="pending", nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 def _add_column_if_missing(table_name: str, column_name: str, column_sql: str) -> None:
     inspector = inspect(engine)
     existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
@@ -313,6 +333,11 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _add_column_if_missing("lost_found_items", "claimed", "BOOLEAN NOT NULL DEFAULT 0")
     _add_column_if_missing("lost_found_items", "submitted_by_user_id", "INTEGER")
+    _add_column_if_missing("lost_found_items", "is_room_item", "BOOLEAN NOT NULL DEFAULT 0")
+    _add_column_if_missing("lost_found_items", "room_label", "VARCHAR DEFAULT ''")
+    _add_column_if_missing("lost_found_items", "room_recorded_at", "DATETIME")
+    _add_column_if_missing("lost_found_items", "returned_at", "DATETIME")
+    _add_column_if_missing("lost_found_items", "returned_by_claim_id", "INTEGER")
     _add_column_if_missing("lost_found_items", "tag_source", "VARCHAR DEFAULT 'fallback-text'")
     _add_column_if_missing("lost_found_items", "evidence_details", "TEXT DEFAULT ''")
     _add_column_if_missing("lost_found_items", "evidence_images_json", "TEXT DEFAULT '[]'")
@@ -337,6 +362,9 @@ def init_db() -> None:
     _add_column_if_missing("users", "preferred_language", "VARCHAR NOT NULL DEFAULT 'en'")
     _add_column_if_missing("claims", "match_score", "INTEGER NOT NULL DEFAULT 0")
     _add_column_if_missing("claims", "match_reasoning", "TEXT DEFAULT ''")
+    _add_column_if_missing("claims", "visual_selection_json", "TEXT DEFAULT '{}'")
+    _add_column_if_missing("claims", "visual_summary", "TEXT DEFAULT ''")
+    _add_column_if_missing("claims", "visual_tags_json", "TEXT DEFAULT '[]'")
     _add_column_if_missing("item_queries", "role", "VARCHAR NOT NULL DEFAULT 'user'")
     _add_column_if_missing("query_messages", "chat_mode", "VARCHAR NOT NULL DEFAULT 'message'")
     _add_column_if_missing("query_messages", "language", "VARCHAR NOT NULL DEFAULT 'en'")
@@ -352,6 +380,10 @@ def init_db() -> None:
     _add_column_if_missing("ai_inspection_logs", "fallback_triggered", "BOOLEAN NOT NULL DEFAULT 0")
     _add_column_if_missing("ai_inspection_logs", "request_metadata_json", "TEXT DEFAULT '{}'")
     _create_index_if_missing("ix_lost_found_items_submitted_by_user_id", "lost_found_items", "submitted_by_user_id")
+    _create_index_if_missing("ix_lost_found_items_is_room_item", "lost_found_items", "is_room_item")
+    _create_index_if_missing("ix_lost_found_items_room_recorded_at", "lost_found_items", "room_recorded_at")
+    _create_index_if_missing("ix_lost_found_items_returned_at", "lost_found_items", "returned_at")
+    _create_index_if_missing("ix_lost_found_items_returned_by_claim_id", "lost_found_items", "returned_by_claim_id")
     _create_index_if_missing("ix_lost_found_items_review_status", "lost_found_items", "review_status")
     _create_index_if_missing("ix_lost_found_items_abuse_risk_level", "lost_found_items", "abuse_risk_level")
     _create_index_if_missing("ix_lost_found_items_abuse_override_status", "lost_found_items", "abuse_override_status")

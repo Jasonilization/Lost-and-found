@@ -291,3 +291,162 @@ RuntimeError: ollama failed
 2026-05-05 06:36:21,595 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf463d0>: Failed to establish a new connection: [Errno 61] Connection refused'))
 2026-05-05 06:38:30,936 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf7b730>: Failed to establish a new connection: [Errno 61] Connection refused'))
 2026-05-05 06:38:35,936 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cf2abb0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 16:05:16,484 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b2ab760>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 16:11:09,506 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b2e1460>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 16:11:11,031 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b2a2a30>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 16:11:12,962 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b2eb880>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 16:11:13,304 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b2db400>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 16:11:13,516 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b1f26a0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 16:11:13,735 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b2e3d60>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 16:11:13,916 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b2abcd0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 16:11:14,119 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b2c8130>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 16:11:14,320 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b2facd0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 16:11:14,501 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b2a2400>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 16:11:14,525 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b2e3eb0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 16:11:14,700 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b2db850>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 16:11:14,905 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b1ec1c0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 16:11:15,981 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b2aba30>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 16:11:17,231 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b2a2700>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 16:11:19,526 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b30c3a0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 16:11:57,170 INFO Received report payload: {'reporter_name': 'Jasonilization', 'title': 'Blue water bottle', 'location': 'New Sports Hall', 'category': 'Electronics', 'evidence_details': '', 'event_date': '2026-05-05', 'has_image': True, 'image_filename': 'Francisco_de_Goya-_Saturno_devorando_a_su_hijo_-1819-1823.jpg'}
+2026-05-05 16:11:57,190 INFO [Upload] received image payload filename=Francisco_de_Goya-_Saturno_devorando_a_su_hijo_-1819-1823.jpg content_type=image/jpeg base64_length=56556
+2026-05-05 16:11:57,191 INFO [Upload] decoded image bytes filename=Francisco_de_Goya-_Saturno_devorando_a_su_hijo_-1819-1823.jpg bytes=42416
+2026-05-05 16:11:57,209 INFO [Upload] saved image filename=Francisco_de_Goya-_Saturno_devorando_a_su_hijo_-1819-1823.jpg stored_name=62ab486017ff438789626934e3f6282c.jpg bytes=59280 mime_type=image/jpeg path=/uploads/62ab486017ff438789626934e3f6282c.jpg
+2026-05-05 16:11:57,214 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b033850>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 16:11:57,214 WARNING [LLaVA] hard failure for item Blue water bottle: Ollama is unavailable.
+2026-05-05 16:11:57,215 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b2e3cd0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 16:13:11,651 INFO Received report payload: {'reporter_name': 'Jasonilization', 'title': 'Blue water bottle', 'location': 'New Sports Hall', 'category': 'Electronics', 'evidence_details': '', 'event_date': '2026-05-05', 'has_image': True, 'image_filename': 'Francisco_de_Goya-_Saturno_devorando_a_su_hijo_-1819-1823.jpg'}
+2026-05-05 16:13:18,983 INFO [Upload] received image payload filename=Francisco_de_Goya-_Saturno_devorando_a_su_hijo_-1819-1823.jpg content_type=image/jpeg base64_length=56556
+2026-05-05 16:13:18,985 INFO [Upload] decoded image bytes filename=Francisco_de_Goya-_Saturno_devorando_a_su_hijo_-1819-1823.jpg bytes=42416
+2026-05-05 16:13:18,991 INFO [Upload] saved image filename=Francisco_de_Goya-_Saturno_devorando_a_su_hijo_-1819-1823.jpg stored_name=b1cd1ba9a0844be281f3da8206d10e41.jpg bytes=59280 mime_type=image/jpeg path=/uploads/b1cd1ba9a0844be281f3da8206d10e41.jpg
+2026-05-05 16:13:18,999 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-05 16:13:18,999 INFO [LLaVA] tagging started for item Blue water bottle
+2026-05-05 16:13:19,000 INFO [LLaVA] image file bytes: 59280
+2026-05-05 16:13:19,000 INFO [LLaVA] image base64 length: 79040
+2026-05-05 16:13:19,000 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'Perform both checks below on the same image in one pass.\nSafety prompt:\nIs this image appropriate for a school lost and found system?\nAnswer ONLY: SAFE or UNSAFE.\nTagging prompt:\nAnalyze this image of a lost item.\nReturn ONLY a list of 5-8 short tags.\nUse commas if possible.\nFocus on object type, color, brand, and distinctive features.\nIf possible, return JSON like {"moderation":"SAFE","tags":["tag1","tag2"]}.\nIf the image is inappropriate, reply with UNSAFE.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [79040], 'stream': False}
+2026-05-05 16:13:35,101 INFO [LLaVA RAW] ```json
+{
+  "moderation":"UNSAFE",
+  "tags":["inappropriate art","painting","gore","blood","dark fantasy","horror","evil character"]
+}
+```
+2026-05-05 16:13:35,105 INFO [LLaVA] moderation result: UNSAFE
+2026-05-05 16:13:35,105 INFO [LLaVA TAGS] ['inappropriate', 'art', 'painting', 'gore', 'blood', 'dark', 'fantasy', 'horror']
+2026-05-05 16:13:57,854 INFO Received report payload: {'reporter_name': 'Jasonilization', 'title': 'Blue water bottle', 'location': 'New Sports Hall', 'category': 'Electronics', 'evidence_details': '', 'event_date': '2026-05-05', 'has_image': True, 'image_filename': 'the-original-backrooms-wallpaper-texture-v0-hdcmfpdh37ya1-2.jpg'}
+2026-05-05 16:13:57,859 INFO [Upload] received image payload filename=the-original-backrooms-wallpaper-texture-v0-hdcmfpdh37ya1-2.jpg content_type=image/jpeg base64_length=90976
+2026-05-05 16:13:57,860 INFO [Upload] decoded image bytes filename=the-original-backrooms-wallpaper-texture-v0-hdcmfpdh37ya1-2.jpg bytes=68232
+2026-05-05 16:13:57,873 INFO [Upload] saved image filename=the-original-backrooms-wallpaper-texture-v0-hdcmfpdh37ya1-2.jpg stored_name=af537248589d4fcdb0e09d39dc6ffcdf.jpg bytes=95883 mime_type=image/jpeg path=/uploads/af537248589d4fcdb0e09d39dc6ffcdf.jpg
+2026-05-05 16:13:57,918 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-05 16:13:57,919 INFO [LLaVA] tagging started for item Blue water bottle
+2026-05-05 16:13:57,919 INFO [LLaVA] image file bytes: 95883
+2026-05-05 16:13:57,919 INFO [LLaVA] image base64 length: 127844
+2026-05-05 16:13:57,919 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'Perform both checks below on the same image in one pass.\nSafety prompt:\nIs this image appropriate for a school lost and found system?\nAnswer ONLY: SAFE or UNSAFE.\nTagging prompt:\nAnalyze this image of a lost item.\nReturn ONLY a list of 5-8 short tags.\nUse commas if possible.\nFocus on object type, color, brand, and distinctive features.\nIf possible, return JSON like {"moderation":"SAFE","tags":["tag1","tag2"]}.\nIf the image is inappropriate, reply with UNSAFE.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [127844], 'stream': False}
+2026-05-05 16:14:08,823 INFO [LLaVA RAW] ```json
+{
+  "moderation":"UNSAFE",
+  "tags":["Adult content","Cursive text","Shrek","Spongebob Squarepants","Inappropriate for children"]
+}
+```
+2026-05-05 16:14:08,824 INFO [LLaVA] moderation result: UNSAFE
+2026-05-05 16:14:08,824 INFO [LLaVA TAGS] ['adult', 'content', 'cursive', 'text', 'shrek', 'spongebob', 'squarepants', 'inappropriate']
+2026-05-05 16:14:27,487 INFO Received report payload: {'reporter_name': 'Jasonilization', 'title': 'Blue water bottle', 'location': 'New Sports Hall', 'category': 'Electronics', 'evidence_details': '', 'event_date': '2026-05-05', 'has_image': True, 'image_filename': 'flippa.jpg'}
+2026-05-05 16:14:27,493 INFO [Upload] received image payload filename=flippa.jpg content_type=image/jpeg base64_length=42092
+2026-05-05 16:14:27,495 INFO [Upload] decoded image bytes filename=flippa.jpg bytes=31568
+2026-05-05 16:14:27,505 INFO [Upload] saved image filename=flippa.jpg stored_name=0731ec2e95854cc5a455f138bac38d2f.jpg bytes=39946 mime_type=image/jpeg path=/uploads/0731ec2e95854cc5a455f138bac38d2f.jpg
+2026-05-05 16:14:27,555 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-05 16:14:27,556 INFO [LLaVA] tagging started for item Blue water bottle
+2026-05-05 16:14:27,556 INFO [LLaVA] image file bytes: 39946
+2026-05-05 16:14:27,556 INFO [LLaVA] image base64 length: 53264
+2026-05-05 16:14:27,556 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'Perform both checks below on the same image in one pass.\nSafety prompt:\nIs this image appropriate for a school lost and found system?\nAnswer ONLY: SAFE or UNSAFE.\nTagging prompt:\nAnalyze this image of a lost item.\nReturn ONLY a list of 5-8 short tags.\nUse commas if possible.\nFocus on object type, color, brand, and distinctive features.\nIf possible, return JSON like {"moderation":"SAFE","tags":["tag1","tag2"]}.\nIf the image is inappropriate, reply with UNSAFE.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [53264], 'stream': False}
+2026-05-05 16:14:38,276 INFO [LLaVA RAW] ```json
+{
+  "moderation": "UNSAFE",
+  "tags": ["pokemon", "pixel art", "animal character", "icon", "small creature", "cartoon"]
+}
+```
+2026-05-05 16:14:38,277 INFO [LLaVA] moderation result: UNSAFE
+2026-05-05 16:14:38,277 INFO [LLaVA TAGS] ['pokemon', 'pixel', 'art', 'animal', 'character', 'icon', 'small', 'creature']
+2026-05-05 16:15:06,413 INFO Received report payload: {'reporter_name': 'Jasonilization', 'title': 'Blue water bottle', 'location': 'New Sports Hall', 'category': 'Electronics', 'evidence_details': '', 'event_date': '2026-05-05', 'has_image': True, 'image_filename': 'wp13122772-sousou-no-frieren-wallpapers.jpg'}
+2026-05-05 16:15:06,419 INFO [Upload] received image payload filename=wp13122772-sousou-no-frieren-wallpapers.jpg content_type=image/jpeg base64_length=80272
+2026-05-05 16:15:06,420 INFO [Upload] decoded image bytes filename=wp13122772-sousou-no-frieren-wallpapers.jpg bytes=60202
+2026-05-05 16:15:06,433 INFO [Upload] saved image filename=wp13122772-sousou-no-frieren-wallpapers.jpg stored_name=bca9e53183f24a7ea057ddcb9a8f9fdc.jpg bytes=81644 mime_type=image/jpeg path=/uploads/bca9e53183f24a7ea057ddcb9a8f9fdc.jpg
+2026-05-05 16:15:06,447 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-05 16:15:06,448 INFO [LLaVA] tagging started for item Blue water bottle
+2026-05-05 16:15:06,448 INFO [LLaVA] image file bytes: 81644
+2026-05-05 16:15:06,448 INFO [LLaVA] image base64 length: 108860
+2026-05-05 16:15:06,448 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'Perform both checks below on the same image in one pass.\nSafety prompt:\nIs this image appropriate for a school lost and found system?\nAnswer ONLY: SAFE or UNSAFE.\nTagging prompt:\nAnalyze this image of a lost item.\nReturn ONLY a list of 5-8 short tags.\nUse commas if possible.\nFocus on object type, color, brand, and distinctive features.\nIf possible, return JSON like {"moderation":"SAFE","tags":["tag1","tag2"]}.\nIf the image is inappropriate, reply with UNSAFE.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [108860], 'stream': False}
+2026-05-05 16:15:17,586 INFO [LLaVA RAW] ```json
+{
+  "moderation": "SAFE",
+  "tags": ["fantasy art", "character design", "anime style", "castle in background", "stone wall", "traveler"]
+}
+```
+2026-05-05 16:15:17,587 INFO [LLaVA] moderation result: SAFE
+2026-05-05 16:15:17,587 INFO [LLaVA TAGS] ['fantasy', 'art', 'character', 'design', 'anime', 'style', 'castle', 'in']
+2026-05-05 16:15:17,587 INFO [LLaVA] using raw output
+2026-05-05 17:51:31,965 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b4a4be0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 17:51:35,292 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b540610>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 17:51:40,316 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b4faa60>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 17:51:45,316 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b4bd610>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 17:53:25,571 INFO Received report payload: {'reporter_name': 'Jasonilization', 'title': 'Lost item', 'location': 'New Sports Hall', 'category': 'Other', 'evidence_details': '', 'event_date': '2026-05-05', 'has_image': True, 'image_filename': '0049.jpg'}
+2026-05-05 17:53:25,582 INFO [Upload] received image payload filename=0049.jpg content_type=image/jpeg base64_length=39516
+2026-05-05 17:53:25,583 INFO [Upload] decoded image bytes filename=0049.jpg bytes=29635
+2026-05-05 17:53:25,605 INFO [Upload] saved image filename=0049.jpg stored_name=86d61bc521a74db6adad2b01419e34a1.jpg bytes=30655 mime_type=image/jpeg path=/uploads/86d61bc521a74db6adad2b01419e34a1.jpg
+2026-05-05 17:53:25,606 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b4ec970>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 17:53:25,606 WARNING [LLaVA] hard failure for item Lost item: Ollama is unavailable.
+2026-05-05 17:53:25,608 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b5035b0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 18:08:14,055 INFO Received report payload: {'reporter_name': 'Jasonilization', 'title': 'Lost item', 'location': 'New Sports Hall', 'category': 'Electronics', 'evidence_details': '', 'event_date': '2026-05-05', 'has_image': True, 'image_filename': '0053.jpg'}
+2026-05-05 18:08:21,420 INFO [Upload] received image payload filename=0053.jpg content_type=image/jpeg base64_length=39328
+2026-05-05 18:08:21,420 INFO [Upload] decoded image bytes filename=0053.jpg bytes=29495
+2026-05-05 18:08:21,426 INFO [Upload] saved image filename=0053.jpg stored_name=d7b6c2ca4ebd44e5bceed1e1841c2651.jpg bytes=30639 mime_type=image/jpeg path=/uploads/d7b6c2ca4ebd44e5bceed1e1841c2651.jpg
+2026-05-05 18:08:21,434 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-05 18:08:21,435 INFO [LLaVA] tagging started for item Lost item
+2026-05-05 18:08:21,435 INFO [LLaVA] image file bytes: 30639
+2026-05-05 18:08:21,435 INFO [LLaVA] image base64 length: 40852
+2026-05-05 18:08:21,435 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'Perform both checks below on the same image in one pass.\nSafety prompt:\nIs this image appropriate for a school lost and found system?\nAnswer ONLY: SAFE or UNSAFE.\nTagging prompt:\nAnalyze this image of a lost item.\nReturn ONLY a list of 5-8 short tags.\nUse commas if possible.\nFocus on object type, color, brand, and distinctive features.\nIf possible, return JSON like {"moderation":"SAFE","tags":["tag1","tag2"]}.\nIf the image is inappropriate, reply with UNSAFE.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [40852], 'stream': False}
+2026-05-05 18:08:36,773 INFO [LLaVA RAW] {"moderation":"SAFE","tags":["office space","beige walls","partition","desk","modern","empty","unoccupied"]}
+2026-05-05 18:08:36,774 INFO [LLaVA] moderation result: SAFE
+2026-05-05 18:08:36,774 INFO [LLaVA TAGS] ['office', 'space', 'beige', 'walls', 'partition', 'desk', 'modern', 'empty']
+2026-05-05 18:08:36,774 INFO [LLaVA] using raw output
+2026-05-05 21:30:04,490 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b05a910>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 21:30:06,571 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b22cdf0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 21:30:09,504 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b10a6a0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 21:30:14,504 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10aff0b20>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 21:30:23,268 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b3454f0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 21:30:34,013 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b37fe50>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 21:30:44,745 INFO [Upload] received image payload filename=Lost-and-Found.jpg content_type=image/jpeg base64_length=170656
+2026-05-05 21:30:44,746 INFO [Upload] decoded image bytes filename=Lost-and-Found.jpg bytes=127991
+2026-05-05 21:30:44,772 INFO [Upload] saved image filename=Lost-and-Found.jpg stored_name=dbb7ac5e60c847d881cfbab393626e5a.jpg bytes=135159 mime_type=image/jpeg path=/uploads/dbb7ac5e60c847d881cfbab393626e5a.jpg
+2026-05-05 21:30:44,774 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b404820>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 21:31:06,473 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b564ac0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 21:31:18,597 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b56b1f0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 21:31:19,180 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b325c40>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 21:31:19,398 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b543400>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 21:31:19,591 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b564cd0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 21:31:19,824 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b56b430>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 21:31:20,727 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b55f8b0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-05 21:32:40,408 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-05 21:32:40,409 INFO [LLaVA] debug request started for item claim-preview:6
+2026-05-05 21:32:40,409 INFO [LLaVA] debug image file bytes: 65809
+2026-05-05 21:32:40,409 INFO [LLaVA] debug image base64 length: 87748
+2026-05-05 21:32:40,409 INFO [LLaVA] debug request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [87748], 'stream': False}
+2026-05-05 21:32:40,409 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [87748], 'stream': False}
+2026-05-05 21:32:52,718 INFO [LLaVA RAW] {
+"description": "A collection of various sports bottles and containers on a table",
+"tags": ["bottles", "sports equipment", "drinks", "container"]
+}
+2026-05-05 21:33:25,019 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-05 21:33:25,019 INFO [LLaVA] debug request started for item claim-preview:6
+2026-05-05 21:33:25,019 INFO [LLaVA] debug image file bytes: 65809
+2026-05-05 21:33:25,019 INFO [LLaVA] debug image base64 length: 87748
+2026-05-05 21:33:25,019 INFO [LLaVA] debug request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [87748], 'stream': False}
+2026-05-05 21:33:25,019 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [87748], 'stream': False}
+2026-05-05 21:33:29,845 INFO [LLaVA RAW] ```json
+{
+  "description": "A collection of water bottles and reusable containers in various colors, placed on a table or shelf. The image has a circular frame.",
+  "tags": ["bottles", "containers", "water", "storage", "organization"]
+}
+```
+2026-05-06 06:25:34,415 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10dc8f070>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 06:25:37,788 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10dc9ba60>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 06:25:41,376 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10dc9bf10>: Failed to establish a new connection: [Errno 61] Connection refused'))

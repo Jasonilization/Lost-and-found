@@ -24,7 +24,7 @@
           <button class="tab-button" id="registerTab" type="button" data-i18n="auth.register">Register</button>
         </div>
 
-        <form id="authForm" class="stack-form auth-form">
+        <form id="authForm" class="stack-form auth-form" method="post">
           <label>
             <span data-i18n="auth.username">Username</span>
             <input id="authUsername" type="text" minlength="3" autocomplete="username" required>
@@ -53,7 +53,7 @@
     </section>
 
     <div class="app-shell is-hidden" id="appShell">
-      <header class="topbar">
+      <header class="topbar glass">
         <div>
           <p class="eyebrow" data-i18n="topbar.eyebrow">Local campus desk</p>
           <h2 data-i18n="brand.title">SHR Lost &amp; Found System</h2>
@@ -76,15 +76,9 @@
               <div class="notification-list" id="notificationList"></div>
             </div>
           </div>
-          <label class="theme-select-wrap">
-            <span data-i18n="topbar.theme">Theme</span>
-            <select id="themeSelect" aria-label="Theme selector">
-              <option value="dark" data-i18n="theme.dark">Dark</option>
-              <option value="light" data-i18n="theme.light">Light</option>
-              <option value="aurora" data-i18n="theme.aurora">Aurora</option>
-              <option value="transparent" data-i18n="theme.transparent">Transparent</option>
-            </select>
-          </label>
+          <button class="icon-button glass" id="theme-toggle" type="button" aria-label="Toggle theme">
+            <span id="theme-icon">🌙</span>
+          </button>
           <label class="theme-select-wrap">
             <span data-i18n="topbar.language">Language</span>
             <select id="languageSelect" aria-label="Language selector">
@@ -94,6 +88,8 @@
             </select>
           </label>
           <button class="ghost-button" id="showReportsButton" type="button" data-i18n="nav.reports">Reports</button>
+          <button class="ghost-button" id="showRoomButton" type="button">Lost &amp; Found Room</button>
+          <button class="ghost-button" id="showReturnedButton" type="button">Recently Returned</button>
           <button class="ghost-button" id="showQueryButton" type="button" data-i18n="nav.query">Query</button>
           <button class="ghost-button" id="showClaimsButton" type="button" data-i18n="nav.claims">My Claims</button>
           <button class="ghost-button" id="showAccountButton" type="button" data-i18n="nav.account">Account</button>
@@ -104,103 +100,9 @@
 
       <main class="page-stack">
         <section id="reportsSection">
-          <div class="shell">
-            <aside class="sidebar-stack">
-              <section class="panel upload-panel surface-card" aria-labelledby="uploadTitle">
-                <div class="section-heading">
-                  <div>
-                    <p class="eyebrow" data-i18n="report.eyebrow">New report</p>
-                    <h3 id="uploadTitle" data-i18n="report.title">Upload a lost item</h3>
-                  </div>
-                  <span class="static-pill" data-i18n="report.lostOnly">Lost only</span>
-                </div>
-
-                <form id="itemForm" class="item-form">
-                  <label class="drop-zone" id="dropZone">
-                    <input id="imageInput" type="file" accept=".png,.jpg,.jpeg,.webp,.heic,.heif,image/png,image/jpeg,image/webp,image/heic,image/heif">
-                    <span class="drop-icon">+</span>
-                    <strong id="dropTitle" data-i18n="report.dropTitle">Drop image here</strong>
-                    <small id="dropHint" data-i18n="report.dropHint">or choose a JPG, PNG, WEBP, HEIC, or HEIF file</small>
-                  </label>
-
-                  <div class="form-grid">
-                    <label>
-                      <span data-i18n="report.itemTitle">Item title</span>
-                      <input id="titleInput" name="title" type="text" maxlength="80" placeholder="Blue water bottle" data-i18n-placeholder="report.itemTitlePlaceholder" required>
-                    </label>
-                    <label>
-                      <span data-i18n="common.category">Category</span>
-                      <select id="categoryInput" name="category" required></select>
-                    </label>
-                    <label>
-                      <span data-i18n="common.date">Date</span>
-                      <input id="dateInput" name="event_date" type="date" required>
-                    </label>
-                    <label>
-                      <span data-i18n="report.displayName">Display name</span>
-                      <input id="reporterInput" name="reporter_name" type="text" maxlength="80" placeholder="How this report should display" data-i18n-placeholder="report.displayNamePlaceholder" required>
-                    </label>
-                  </div>
-
-                  <fieldset class="location-box">
-                    <legend data-i18n="common.location">Location</legend>
-                    <div class="location-choice">
-                      <label>
-                        <input type="radio" name="locationMode" value="predefined" checked>
-                        <span data-i18n="report.predefinedLocation">Predefined location</span>
-                      </label>
-                      <label>
-                        <input type="radio" name="locationMode" value="room">
-                        <span data-i18n="report.roomCode">Room code</span>
-                      </label>
-                    </div>
-
-                    <div class="location-inputs">
-                      <label id="predefinedWrap">
-                        <span data-i18n="report.chooseLocation">Choose location</span>
-                        <select id="predefinedLocation"></select>
-                      </label>
-                      <label id="roomWrap" class="is-hidden">
-                        <span data-i18n="report.roomCode">Room code</span>
-                        <input id="roomCodeInput" type="text" maxlength="4" placeholder="S302" autocomplete="off">
-                      </label>
-                    </div>
-                    <p class="field-note" id="locationPreview">Library</p>
-                    <p class="error-text" id="locationError"></p>
-                  </fieldset>
-
-                  <label>
-                    <span data-i18n="common.description">Description</span>
-                    <textarea id="descriptionInput" name="description" rows="4" maxlength="450" placeholder="Add color, brand, markings, or details that would help someone confirm it." data-i18n-placeholder="report.descriptionPlaceholder" required></textarea>
-                    <small class="field-note" id="descriptionHelperText" data-i18n="report.descriptionHelper">Include color, brand, or unique marks</small>
-                  </label>
-
-                  <label>
-                    <span data-i18n="report.supportingEvidence">Supporting evidence</span>
-                    <textarea id="evidenceDetailsInput" name="evidence_details" rows="3" maxlength="320" placeholder="Optional: ownership clues, identifying marks, timeline, or extra evidence." data-i18n-placeholder="report.evidencePlaceholder"></textarea>
-                    <small class="field-note" id="evidenceHelperText" data-i18n="report.evidenceHelper">Optional but improves claim accuracy</small>
-                  </label>
-
-                  <div class="form-actions">
-                    <button class="primary-button" id="submitButton" type="submit">
-                      <span class="button-text" data-i18n="report.save">Submit Report</span>
-                    </button>
-                    <p class="status-message" id="uploadMessage"></p>
-                  </div>
-                  <div class="progress-widget is-hidden" id="reportProgress" aria-live="polite">
-                    <div class="progress-track"><span class="progress-fill" id="reportProgressFill"></span></div>
-                    <div class="progress-meta">
-                      <span id="reportProgressLabel">Preparing upload...</span>
-                      <span id="reportProgressValue">0%</span>
-                    </div>
-                  </div>
-                  <div class="warning-card is-hidden" id="reportWarningCard"></div>
-                </form>
-              </section>
-            </aside>
-
+          <div class="reports-stack">
             <section class="content-stack">
-              <section class="panel browse-panel surface-card" aria-labelledby="galleryTitle">
+              <section class="panel browse-panel surface-card glass" aria-labelledby="galleryTitle">
                 <div class="section-heading">
                   <div>
                     <p class="eyebrow" data-i18n="reports.eyebrow">Reports</p>
@@ -238,6 +140,65 @@
               </section>
             </section>
           </div>
+        </section>
+
+        <section class="panel page-panel surface-card is-hidden" id="roomSection" aria-labelledby="roomTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Physical room</p>
+              <h3 id="roomTitle">Lost &amp; Found Room</h3>
+            </div>
+            <button class="ghost-button" id="refreshRoomButton" type="button">Refresh room</button>
+          </div>
+          <p class="item-summary room-intro">Browse the items physically stored in the room. Open one, circle the exact part that proves it is yours, and then submit your claim.</p>
+
+          <section class="panel surface-card room-admin-panel is-hidden" id="roomAdminPanel" aria-labelledby="roomAdminTitle">
+            <div class="section-heading compact">
+              <div>
+                <p class="eyebrow">Admin upload</p>
+                <h4 id="roomAdminTitle">Add to the room</h4>
+              </div>
+            </div>
+            <div class="form-grid report-simplified-grid">
+              <label>
+                <span>Short label</span>
+                <input id="roomLabelInput" type="text" maxlength="80" placeholder="Optional short label">
+              </label>
+              <label>
+                <span>Images</span>
+                <input id="roomUploadInput" type="file" accept=".png,.jpg,.jpeg,.webp,.heic,.heif,image/png,image/jpeg,image/webp,image/heic,image/heif" multiple>
+              </label>
+            </div>
+            <div class="form-actions">
+              <button class="primary-button" id="uploadRoomButton" type="button">Upload to Room</button>
+              <p class="status-message" id="roomUploadMessage"></p>
+            </div>
+          </section>
+
+          <div class="list-meta">
+            <span id="roomCount">0 items</span>
+            <span class="loading-line" id="roomLoading">Loading room items...</span>
+          </div>
+          <div class="warning-card is-hidden" id="roomWarningCard"></div>
+          <div class="room-gallery" id="roomGallery"></div>
+        </section>
+
+        <section class="panel page-panel surface-card is-hidden" id="returnedSection" aria-labelledby="returnedTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Recently closed</p>
+              <h3 id="returnedTitle">Recently Returned</h3>
+            </div>
+            <button class="ghost-button" id="refreshReturnedButton" type="button">Refresh returned</button>
+          </div>
+          <p class="item-summary room-intro">These items were marked as returned recently. If something was claimed incorrectly, send a dispute so the admin team can review it.</p>
+          <div class="list-meta">
+            <span id="returnedCount">0 items</span>
+            <span class="loading-line" id="returnedLoading">Loading returned items...</span>
+          </div>
+          <p class="status-message" id="returnedMessage"></p>
+          <div class="warning-card is-hidden" id="returnedWarningCard"></div>
+          <div class="returned-list" id="returnedList"></div>
         </section>
 
         <section class="panel page-panel surface-card is-hidden" id="claimsSection" aria-labelledby="claimsTitle">
@@ -360,30 +321,18 @@
           </div>
 
           <div class="is-hidden" id="adminMonitorPanel">
+            <div class="form-actions admin-ollama-actions">
+              <button class="ghost-button glass" id="startOllamaButton" type="button">Start Ollama</button>
+              <button class="ghost-button glass" id="stopOllamaButton" type="button">Stop Ollama</button>
+            </div>
             <div class="admin-monitor-grid">
               <article class="admin-monitor-card surface-card">
-                <p class="eyebrow" data-i18n="admin.monitorCpu">CPU</p>
-                <p class="admin-monitor-value" id="adminMonitorCpu">--</p>
-              </article>
-              <article class="admin-monitor-card surface-card">
-                <p class="eyebrow" data-i18n="admin.monitorRam">RAM</p>
-                <p class="admin-monitor-value" id="adminMonitorRam">--</p>
-              </article>
-              <article class="admin-monitor-card surface-card">
-                <p class="eyebrow" data-i18n="admin.monitorGpu">GPU</p>
-                <p class="admin-monitor-value" id="adminMonitorGpu">--</p>
-              </article>
-              <article class="admin-monitor-card surface-card">
-                <p class="eyebrow" data-i18n="admin.monitorGpuTemp">GPU Temp</p>
-                <p class="admin-monitor-value" id="adminMonitorGpuTemp">--</p>
+                <p class="eyebrow">Status</p>
+                <p class="admin-monitor-value" id="adminMonitorStatus">--</p>
               </article>
               <article class="admin-monitor-card surface-card">
                 <p class="eyebrow" data-i18n="admin.monitorUptime">Uptime</p>
                 <p class="admin-monitor-value" id="adminMonitorUptime">--</p>
-              </article>
-              <article class="admin-monitor-card surface-card">
-                <p class="eyebrow" data-i18n="admin.monitorStatus">Processing status</p>
-                <p class="admin-monitor-value" id="adminMonitorStatus">--</p>
               </article>
             </div>
             <p class="status-message" id="adminMonitorUpdated" data-i18n="admin.monitorWaiting">Waiting for live data...</p>
@@ -432,7 +381,7 @@
             <div class="warning-card is-hidden" id="queryWarningCard"></div>
             <div class="query-page-messages" id="queryMessages"></div>
             <p class="status-message is-hidden" id="queryEmptyState" data-i18n="query.noMessages">No messages yet.</p>
-            <form class="query-page-form" id="queryForm">
+            <form class="query-page-form" id="queryForm" method="post">
               <div class="tag-row is-hidden" id="querySuggestions" aria-label="Suggested questions"></div>
               <input id="queryFileInput" type="file" accept=".png,.jpg,.jpeg,.pdf,.txt,image/png,image/jpeg,application/pdf,text/plain" class="is-hidden">
               <div class="query-upload-row">
@@ -461,13 +410,124 @@
           </div>
         </section>
       </main>
+      <button class="floating-report-button glass" id="openReportModalButton" type="button" aria-label="Open report form">+</button>
       <footer class="app-footer">
         <p class="brand-footer" data-i18n="brand.footer">For Shrewsbury international school riverside</p>
       </footer>
     </div>
 
-    <dialog class="claim-dialog" id="claimDialog">
-      <form class="claim-form" id="claimForm" method="dialog">
+    <dialog class="claim-dialog glass" id="reportDialog">
+      <div class="claim-form report-modal-form">
+        <div class="section-heading compact">
+          <div>
+            <p class="eyebrow" data-i18n="report.eyebrow">New report</p>
+            <h3 id="uploadTitle" data-i18n="report.title">Upload a lost item</h3>
+          </div>
+          <button class="icon-button glass" id="closeReportDialog" type="button" aria-label="Close report form">×</button>
+        </div>
+        <span class="static-pill" data-i18n="report.lostOnly">Lost only</span>
+
+        <form id="itemForm" class="item-form" method="post">
+          <label class="drop-zone" id="dropZone">
+            <input id="imageInput" type="file" accept=".png,.jpg,.jpeg,.webp,.heic,.heif,image/png,image/jpeg,image/webp,image/heic,image/heif">
+            <span class="drop-icon">+</span>
+            <strong id="dropTitle" data-i18n="report.dropTitle">Drop image here</strong>
+            <small id="dropHint" data-i18n="report.dropHint">or choose a JPG, PNG, WEBP, HEIC, or HEIF file</small>
+          </label>
+
+          <div class="form-grid report-simplified-grid">
+            <label>
+              <span data-i18n="report.itemTitle">Item title</span>
+              <input id="titleInput" name="title" type="text" maxlength="80" placeholder="Blue water bottle" data-i18n-placeholder="report.itemTitlePlaceholder" required>
+            </label>
+          </div>
+          <div class="report-hidden-fields is-hidden" aria-hidden="true">
+            <label>
+              <span data-i18n="common.category">Category</span>
+              <select id="categoryInput" name="category" required></select>
+            </label>
+            <label>
+              <span data-i18n="common.date">Date</span>
+              <input id="dateInput" name="event_date" type="date" required>
+            </label>
+            <label>
+              <span data-i18n="report.displayName">Display name</span>
+              <input id="reporterInput" name="reporter_name" type="text" maxlength="80" placeholder="How this report should display" data-i18n-placeholder="report.displayNamePlaceholder" required>
+            </label>
+          </div>
+
+          <label>
+            <span data-i18n="common.location">Location</span>
+            <input id="optionalLocationInput" type="text" maxlength="120" placeholder="Optional: library, sports hall, classroom..." autocomplete="off">
+            <small class="field-note">Optional. Leave blank if you are not sure.</small>
+          </label>
+
+          <label>
+            <span data-i18n="common.description">Description</span>
+            <textarea id="descriptionInput" name="description" rows="4" maxlength="450" placeholder="Add color, brand, markings, or details that would help someone confirm it." data-i18n-placeholder="report.descriptionPlaceholder" required></textarea>
+            <small class="field-note" id="descriptionHelperText" data-i18n="report.descriptionHelper">Include color, brand, or unique marks</small>
+          </label>
+
+          <label class="is-hidden" aria-hidden="true">
+            <span data-i18n="report.supportingEvidence">Supporting evidence</span>
+            <textarea id="evidenceDetailsInput" name="evidence_details" rows="3" maxlength="320" placeholder="Optional: ownership clues, identifying marks, timeline, or extra evidence." data-i18n-placeholder="report.evidencePlaceholder"></textarea>
+            <small class="field-note" id="evidenceHelperText" data-i18n="report.evidenceHelper">Optional but improves claim accuracy</small>
+          </label>
+
+          <div class="form-actions">
+            <button class="primary-button glass" id="submitButton" type="submit">
+              <span class="button-text" data-i18n="report.save">Submit Report</span>
+            </button>
+            <p class="status-message" id="uploadMessage"></p>
+          </div>
+          <div class="progress-widget is-hidden" id="reportProgress" aria-live="polite">
+            <div class="progress-track"><span class="progress-fill" id="reportProgressFill"></span></div>
+            <div class="progress-meta">
+              <span id="reportProgressLabel">Preparing upload...</span>
+              <span id="reportProgressValue">0%</span>
+            </div>
+          </div>
+          <div class="warning-card is-hidden" id="reportWarningCard"></div>
+        </form>
+      </div>
+    </dialog>
+
+    <dialog class="claim-dialog room-preview-dialog" id="roomClaimPreviewDialog">
+      <div class="claim-form room-preview-form">
+        <div class="section-heading compact">
+          <div>
+            <p class="eyebrow">Visual claim</p>
+            <h3 id="roomClaimPreviewTitle">Select your proof</h3>
+          </div>
+          <button class="icon-button" id="closeRoomClaimPreviewDialog" type="button" aria-label="Close visual claim preview">×</button>
+        </div>
+        <p class="dialog-subtitle" id="roomClaimPreviewLabel"></p>
+        <div class="room-preview-layout">
+          <div class="room-preview-stage-wrap">
+            <div class="room-preview-stage" id="roomPreviewStage">
+              <img id="roomPreviewImage" alt="">
+              <div class="room-preview-circle" id="roomPreviewCircle">
+                <button class="room-preview-handle" id="roomPreviewHandle" type="button" aria-label="Resize circle"></button>
+              </div>
+            </div>
+          </div>
+          <div class="room-preview-side">
+            <p class="item-description" id="roomPreviewHint">Drag the red circle and resize it so it covers the exact part that belongs to you.</p>
+            <p class="dialog-subtitle" id="roomPreviewResult">No selection analysis yet.</p>
+            <div class="tag-row" id="roomPreviewTags"></div>
+            <p class="status-message" id="roomPreviewMessage"></p>
+            <div class="form-actions room-preview-actions">
+              <button class="ghost-button" id="roomAnalyzeButton" type="button">Analyze selected area</button>
+              <button class="primary-button" id="roomConfirmButton" type="button" disabled>Yes, this is my item</button>
+              <button class="ghost-button" id="roomPreviewCancelButton" type="button">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="claim-dialog glass" id="claimDialog">
+      <form class="claim-form" id="claimForm" method="post">
         <div class="section-heading compact">
           <div>
             <p class="eyebrow" data-i18n="claim.eyebrow">Ownership check</p>
@@ -503,7 +563,7 @@
       </form>
     </dialog>
 
-    <dialog class="claim-dialog" id="confirmDialog">
+    <dialog class="claim-dialog glass" id="confirmDialog">
       <form class="claim-form" id="confirmForm" method="dialog">
         <div class="section-heading compact">
           <div>
@@ -533,7 +593,7 @@
       <div class="tutorial-backdrop tutorial-backdrop-right" data-tutorial-backdrop="right"></div>
       <div class="tutorial-backdrop tutorial-backdrop-bottom" data-tutorial-backdrop="bottom"></div>
       <div class="tutorial-spotlight is-hidden" id="tutorialSpotlight" aria-hidden="true"></div>
-      <div class="tutorial-card surface-card" id="tutorialCard" role="dialog" aria-modal="true" aria-labelledby="tutorialTitle" aria-describedby="tutorialBody">
+      <div class="tutorial-card surface-card glass" id="tutorialCard" role="dialog" aria-modal="true" aria-labelledby="tutorialTitle" aria-describedby="tutorialBody">
         <div class="section-heading compact">
           <div>
             <p class="eyebrow" id="tutorialStepLabel">Step 1 of 6</p>
@@ -556,7 +616,7 @@
       </div>
     </div>
 
-    <div class="undo-toast surface-card is-hidden" id="undoToast" aria-live="polite">
+    <div class="undo-toast surface-card glass is-hidden" id="undoToast" aria-live="polite">
       <p class="undo-toast-text" id="undoToastText"></p>
       <div class="form-actions">
         <button class="ghost-button" id="undoToastButton" type="button" data-i18n="common.undo">Undo</button>

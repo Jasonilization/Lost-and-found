@@ -157,3 +157,9 @@
 2026-05-05 06:35:35,514 admin_id=1 admin_username=Jasonilization action=delete-user claim_id= item_id= note=deleted_user_id=4
 2026-05-05 06:35:37,568 admin_id=1 admin_username=Jasonilization action=delete-user claim_id= item_id= note=deleted_user_id=3
 2026-05-05 06:36:02,626 admin_id=1 admin_username=Jasonilization action=override-abuse claim_id= item_id=1 note=abuse_override_status=
+2026-05-05 17:51:38,924 admin_id=1 admin_username=Jasonilization action=delete-item claim_id= item_id=3 note=title=Blue water bottle
+2026-05-05 17:51:45,447 admin_id=1 admin_username=Jasonilization action=delete-item claim_id= item_id=2 note=title=Blue water bottle
+2026-05-05 17:51:48,063 admin_id=1 admin_username=Jasonilization action=delete-item claim_id= item_id=1 note=title=BLUE WATER BOTTLE
+2026-05-05 21:31:35,651 route=/items/6/claim user_id=1 username=Jasonilization reason=Claim rejected because the provided details do not match the reported item closely enough. content=The circled detail matches my item. Selected area from Room item 1. computing room, item, physical, stored
+2026-05-05 21:31:39,004 route=/items/6/claim user_id=1 username=Jasonilization reason=Claim rejected because the provided details do not match the reported item closely enough. content=The circled detail matches my item. Selected area from Room item 1. computing room, item, physical, stored
+2026-05-05 21:34:07,577 route=/items/6/claim user_id=1 username=Jasonilization reason=Claim rejected because the provided details do not match the reported item closely enough. content=The circled detail matches my item. A collection of water bottles and reusable containers in various colors, placed on a table or shelf. The image has a circular frame. computing bottles, containers, water, storage, organization
