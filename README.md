@@ -38,8 +38,8 @@ Runtime data is stored in:
 ## Quick Start
 
 ```bash
-git clone <repo>
-cd AI-Powered-Lost-Found-Automation-System
+git clone <https://github.com/Jasonilization/Lost-and-found>
+cd Lost-and-found
 chmod +x deploy.sh
 ./deploy.sh
 ```
