@@ -450,3 +450,82 @@ RuntimeError: ollama failed
 2026-05-06 06:25:34,415 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10dc8f070>: Failed to establish a new connection: [Errno 61] Connection refused'))
 2026-05-06 06:25:37,788 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10dc9ba60>: Failed to establish a new connection: [Errno 61] Connection refused'))
 2026-05-06 06:25:41,376 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10dc9bf10>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 07:24:26,713 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b178310>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 07:24:28,445 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b375910>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 07:24:30,511 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b3a9f40>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 07:24:30,549 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b4418e0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 07:24:30,808 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b449220>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 07:24:31,066 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b449b20>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 07:24:31,322 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b451460>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 07:24:31,580 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b449d30>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 07:24:31,726 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b449760>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 07:24:31,840 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b28c3a0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 07:24:32,098 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b449a90>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 07:24:32,353 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b375b20>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 07:24:32,611 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b4415e0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 07:24:32,624 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b158d90>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 07:24:36,729 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b158880>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 07:24:48,807 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10b4b77f0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 07:25:09,085 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-06 07:25:09,086 INFO [LLaVA] debug request started for item claim-preview:6
+2026-05-06 07:25:09,086 INFO [LLaVA] debug image file bytes: 23425
+2026-05-06 07:25:09,086 INFO [LLaVA] debug image base64 length: 31236
+2026-05-06 07:25:09,086 INFO [LLaVA] debug request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [31236], 'stream': False}
+2026-05-06 07:25:09,086 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [31236], 'stream': False}
+2026-05-06 07:25:25,122 INFO [LLaVA RAW] ```json
+{
+  "description": "Book on a shelf with cover facing left. It features a graphic style illustration and text. The title visible reads 'DOG MAN' and there is an image of a character with supernatural powers. The book appears to be part of a series, possibly a comic or graphic novel.",
+  "tags": ["comic", "book", "shelf"]
+}
+```
+2026-05-06 07:25:26,265 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-06 07:25:26,265 INFO [LLaVA] debug request started for item claim-preview:6
+2026-05-06 07:25:26,265 INFO [LLaVA] debug image file bytes: 17557
+2026-05-06 07:25:26,265 INFO [LLaVA] debug image base64 length: 23412
+2026-05-06 07:25:26,265 INFO [LLaVA] debug request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [23412], 'stream': False}
+2026-05-06 07:25:26,265 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [23412], 'stream': False}
+2026-05-06 07:25:36,543 INFO [LLaVA RAW] Description: This appears to be an image of a book on a shelf. The book has a cover with illustrated characters and text. It looks like a fantasy or adventure-themed book, possibly part of a series given the title "DOG MAN."
+
+Tags: book, illustration, fantasy
+2026-05-06 12:08:15,032 INFO [Upload] received image payload filename=Lost-and-Found.jpg content_type=image/jpeg base64_length=170656
+2026-05-06 12:08:15,034 INFO [Upload] decoded image bytes filename=Lost-and-Found.jpg bytes=127991
+2026-05-06 12:08:15,058 INFO [Upload] saved image filename=Lost-and-Found.jpg stored_name=f9068681c9da437287e6e11aa26a5970.jpg bytes=135159 mime_type=image/jpeg path=/uploads/f9068681c9da437287e6e11aa26a5970.jpg
+2026-05-06 12:08:15,065 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-06 12:08:15,065 INFO [LLaVA] tagging started for item room-item-1
+2026-05-06 12:08:15,065 INFO [LLaVA] image file bytes: 135159
+2026-05-06 12:08:15,065 INFO [LLaVA] image base64 length: 180212
+2026-05-06 12:08:15,065 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'Perform both checks below on the same image in one pass.\nSafety prompt:\nIs this image appropriate for a school lost and found system?\nAnswer ONLY: SAFE or UNSAFE.\nTagging prompt:\nAnalyze this image of a lost item.\nReturn ONLY a list of 5-8 short tags.\nUse commas if possible.\nFocus on object type, color, brand, and distinctive features.\nIf possible, return JSON like {"moderation":"SAFE","tags":["tag1","tag2"]}.\nIf the image is inappropriate, reply with UNSAFE.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [180212], 'stream': False}
+2026-05-06 12:08:30,001 INFO [LLaVA RAW] ```json
+{
+  "moderation":"SAFE",
+  "tags":["cluttered shelf","miscellaneous items","lost and found", "school supplies", "outdoor gear"]
+}
+```
+2026-05-06 12:08:30,004 INFO [LLaVA] moderation result: SAFE
+2026-05-06 12:08:30,004 INFO [LLaVA TAGS] ['cluttered', 'shelf', 'miscellaneous', 'items', 'lost', 'and', 'found', 'school']
+2026-05-06 12:09:20,626 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-06 12:09:20,627 INFO [LLaVA] debug request started for item claim-preview:1
+2026-05-06 12:09:20,627 INFO [LLaVA] debug image file bytes: 61957
+2026-05-06 12:09:20,627 INFO [LLaVA] debug image base64 length: 82612
+2026-05-06 12:09:20,627 INFO [LLaVA] debug request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [82612], 'stream': False}
+2026-05-06 12:09:20,627 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [82612], 'stream': False}
+2026-05-06 12:09:30,746 INFO [LLaVA RAW] ```json
+{
+  "description": "A bookshelf with various items on it.",
+  "tags": ["books", "knick-knacks", "miscellaneous"]
+}
+```
+2026-05-06 12:09:59,347 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10d044d00>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 12:09:59,357 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10d067700>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 12:10:01,987 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10d073190>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 12:10:02,055 INFO Ollama health check failed: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x10cc49ca0>: Failed to establish a new connection: [Errno 61] Connection refused'))
+2026-05-06 12:16:57,875 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-06 12:16:57,876 INFO [LLaVA] debug request started for item claim-preview:1
+2026-05-06 12:16:57,876 INFO [LLaVA] debug image file bytes: 45592
+2026-05-06 12:16:57,876 INFO [LLaVA] debug image base64 length: 60792
+2026-05-06 12:16:57,876 INFO [LLaVA] debug request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [60792], 'stream': False}
+2026-05-06 12:16:57,876 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [60792], 'stream': False}
+2026-05-06 12:17:12,144 INFO [LLaVA RAW] {
+"description": "An open umbrella is visible among folded items on a shelf inside a cabinet.",
+"tags": ["umbrellas", "shelf", "storage", "cabinet"]
+}

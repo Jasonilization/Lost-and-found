@@ -41,6 +41,7 @@ const QUERY_SUGGESTION_LIMIT = 6;
 const GLOBAL_BACKGROUND_URL = "/uploads/background.png";
 const TUTORIAL_CARD_MARGIN = 16;
 const TUTORIAL_VIEWPORT_PADDING = 12;
+const UI_DEBUG_PREFIX = "[LostFound UI]";
 
 const translations = {
   en: {
@@ -143,8 +144,8 @@ const translations = {
     "tutorial.stepOf": "Step {current} of {total}",
     "tutorial.welcomeTitle": "Welcome to Lost and Found",
     "tutorial.welcomeBody": "This walkthrough points to the live interface so you can see where reports, claims, messaging, and admin tools live.",
-    "tutorial.reportsTitle": "Report an Item",
-    "tutorial.reportsBody": "Start here when you need to submit a lost-item report. Clear titles, locations, and identifying details make matching much easier.",
+    "tutorial.reportsTitle": "Use the + Button",
+    "tutorial.reportsBody": "Tap the floating + button to open the only report form. Clear titles, locations, and identifying details make matching much easier.",
     "tutorial.browseTitle": "Browse Reports",
     "tutorial.browseBody": "Use the report board to scan recent items, filter by category or location, and open a report before taking action.",
     "tutorial.claimsTitle": "Claim an Item",
@@ -269,8 +270,8 @@ const translations = {
     "tutorial.stepOf": "第 {current} / {total} 步",
     "tutorial.welcomeTitle": "欢迎使用失物招领",
     "tutorial.welcomeBody": "这个引导会直接指向真实界面，帮助你快速找到报告、认领、消息和管理员工具的位置。",
-    "tutorial.reportsTitle": "提交失物报告",
-    "tutorial.reportsBody": "当你需要登记失物时，从这里开始。标题、地点和识别细节越清晰，匹配就越容易。",
+    "tutorial.reportsTitle": "使用 + 按钮",
+    "tutorial.reportsBody": "需要登记失物时，请点击右下角浮动的 + 按钮。报告表单只有这一个入口。标题、地点和识别细节越清晰，匹配就越容易。",
     "tutorial.browseTitle": "浏览报告",
     "tutorial.browseBody": "使用报告看板查看最新物品，并按分类或地点筛选，再决定是否继续操作。",
     "tutorial.claimsTitle": "认领物品",
@@ -295,6 +296,12 @@ const translations = {
     "common.yes": "是",
     "common.no": "否",
   },
+};
+
+let uiInitialized = false;
+const uiBindingStats = {
+  attached: 0,
+  missing: 0,
 };
 
 const translationEnhancements = {
@@ -460,8 +467,8 @@ const translationEnhancements = {
     "tutorial.stepOf": "ขั้นตอน {current} จาก {total}",
     "tutorial.welcomeTitle": "ยินดีต้อนรับสู่ระบบของหายและของพบ",
     "tutorial.welcomeBody": "คู่มือนี้จะชี้ไปยังหน้าจอจริง เพื่อให้เห็นว่ารายงาน คำขอ ข้อความ และเครื่องมือผู้ดูแลอยู่ตรงไหน",
-    "tutorial.reportsTitle": "การสร้างรายงาน",
-    "tutorial.reportsBody": "เริ่มที่นี่เมื่อคุณต้องการส่งรายงานของหาย ชื่อ สถานที่ และข้อมูลระบุตัวตนที่ชัดเจนจะช่วยให้จับคู่ได้ง่ายขึ้น",
+    "tutorial.reportsTitle": "ใช้ปุ่ม +",
+    "tutorial.reportsBody": "เมื่อต้องการส่งรายงานของหาย ให้กดปุ่ม + แบบลอยที่มุมขวาล่าง แบบฟอร์มรายงานมีทางเข้าเพียงจุดเดียวนี้เท่านั้น รายละเอียดยิ่งชัดก็ยิ่งจับคู่ได้ง่าย",
     "tutorial.searchTitle": "การค้นหา",
     "tutorial.searchBody": "แถบค้นหารองรับการค้นหาแบบยืดหยุ่น โดยให้ความสำคัญกับชื่อ แท็ก หมวดหมู่ และคำสำคัญของสถานที่",
     "tutorial.claimFlowTitle": "การยื่นคำขอ",
@@ -656,6 +663,12 @@ const state = {
   activeRoomPreviewItem: null,
   roomPreviewAnalysis: null,
   roomPreviewDrag: null,
+  panelState: {},
+  activeLayoutResize: null,
+  layoutSizes: {
+    sidebarWidth: 280,
+    secondaryHeight: 320,
+  },
   progressTimers: {
     report: null,
     query: null,
@@ -684,6 +697,14 @@ const showQueryButton = document.querySelector("#showQueryButton");
 const showClaimsButton = document.querySelector("#showClaimsButton");
 const showAccountButton = document.querySelector("#showAccountButton");
 const showAdminButton = document.querySelector("#showAdminButton");
+let workspaceLayout = document.querySelector("#workspace");
+let windowWorkspace = document.querySelector("#windowWorkspace");
+let sidebarLauncherButton = document.querySelector("#sidebarLauncherButton");
+let sidebarPanel = document.querySelector("#sidebarPanel");
+let sidebarSplitter = document.querySelector("#sidebarSplitter");
+let contentSplitter = document.querySelector("#contentSplitter");
+let secondaryStack = document.querySelector("#secondaryStack");
+const sidebarCollapseButton = document.querySelector("#sidebarCollapseButton");
 const themeToggleButton = document.querySelector("#theme-toggle");
 const themeIcon = document.querySelector("#theme-icon");
 const languageSelect = document.querySelector("#languageSelect");
@@ -695,13 +716,14 @@ const notificationBadge = document.querySelector("#notificationBadge");
 const notificationDropdown = document.querySelector("#notificationDropdown");
 const notificationList = document.querySelector("#notificationList");
 const weeklyReturnedCount = document.querySelector("#weeklyReturnedCount");
-const reportsSection = document.querySelector("#reportsSection");
-const roomSection = document.querySelector("#roomSection");
-const returnedSection = document.querySelector("#returnedSection");
-const claimsSection = document.querySelector("#claimsSection");
-const accountSection = document.querySelector("#accountSection");
-const adminSection = document.querySelector("#adminSection");
-const querySection = document.querySelector("#querySection");
+let reportsSection = document.querySelector("#reportsSection");
+let reportsPanel = document.querySelector("#reportsPanel");
+let roomSection = document.querySelector("#roomSection");
+let returnedSection = document.querySelector("#returnedSection");
+let claimsSection = document.querySelector("#claimsSection");
+let accountSection = document.querySelector("#accountSection");
+let adminSection = document.querySelector("#adminSection");
+let querySection = document.querySelector("#querySection");
 
 const openReportModalButton = document.querySelector("#openReportModalButton");
 const reportDialog = document.querySelector("#reportDialog");
@@ -865,6 +887,11 @@ const confirmActionButton = document.querySelector("#confirmActionButton");
 const confirmActionLabel = document.querySelector("#confirmActionLabel");
 const closeConfirmDialog = document.querySelector("#closeConfirmDialog");
 const cancelConfirmButton = document.querySelector("#cancelConfirmButton");
+const imagePreviewDialog = document.querySelector("#imagePreviewDialog");
+const imagePreviewImage = document.querySelector("#imagePreviewImage");
+const imagePreviewTitle = document.querySelector("#imagePreviewTitle");
+const imagePreviewCaption = document.querySelector("#imagePreviewCaption");
+const closeImagePreviewDialog = document.querySelector("#closeImagePreviewDialog");
 const tutorialOverlay = document.querySelector("#tutorialOverlay");
 const tutorialBackdropPanes = Array.from(document.querySelectorAll("[data-tutorial-backdrop]"));
 const tutorialSpotlight = document.querySelector("#tutorialSpotlight");
@@ -906,6 +933,490 @@ const progressHandles = {
     value: profileProgressValue,
   },
 };
+
+let panelElements = {};
+
+function refreshPanelElements() {
+  panelElements = {
+    sidebar: sidebarPanel,
+    reports: reportsPanel,
+    room: roomSection,
+    returned: returnedSection,
+    claims: claimsSection,
+    account: accountSection,
+    admin: adminSection,
+    query: querySection,
+  };
+}
+
+function cacheLayoutDomReferences() {
+  workspaceLayout = document.querySelector("#workspace");
+  windowWorkspace = document.querySelector("#windowWorkspace");
+  sidebarLauncherButton = document.querySelector("#sidebarLauncherButton");
+  sidebarPanel = document.querySelector("#sidebarPanel");
+  sidebarSplitter = document.querySelector("#sidebarSplitter");
+  contentSplitter = document.querySelector("#contentSplitter");
+  secondaryStack = document.querySelector("#secondaryStack");
+  reportsSection = document.querySelector("#reportsSection");
+  reportsPanel = document.querySelector("#reportsPanel");
+  roomSection = document.querySelector("#roomSection");
+  returnedSection = document.querySelector("#returnedSection");
+  claimsSection = document.querySelector("#claimsSection");
+  accountSection = document.querySelector("#accountSection");
+  adminSection = document.querySelector("#adminSection");
+  querySection = document.querySelector("#querySection");
+  refreshPanelElements();
+}
+
+function logUiInfo(message, details = "") {
+  if (details) {
+    console.info(`${UI_DEBUG_PREFIX} ${message}`, details);
+    return;
+  }
+  console.info(`${UI_DEBUG_PREFIX} ${message}`);
+}
+
+function logMissingElement(label) {
+  uiBindingStats.missing += 1;
+  console.error(`${UI_DEBUG_PREFIX} Missing element: ${label}`);
+}
+
+function bindListener(target, eventName, handler, { label = "", options } = {}) {
+  if (!(target instanceof EventTarget)) {
+    logMissingElement(label || `${eventName} target`);
+    return false;
+  }
+  target.addEventListener(eventName, handler, options);
+  uiBindingStats.attached += 1;
+  logUiInfo(`Attached ${eventName} listener`, label || target.id || target.tagName);
+  return true;
+}
+
+function createFallbackPanelShell({ id, panelName, title, eyebrow, sectionClass = "panel page-panel surface-card glass window-panel" }) {
+  const panel = document.createElement("section");
+  panel.id = id;
+  panel.dataset.panel = panelName;
+  panel.className = sectionClass;
+  panel.innerHTML = `
+    <div class="window-header">
+      <div class="window-title-group">
+        <p class="eyebrow">${eyebrow}</p>
+        <h3>${title}</h3>
+      </div>
+    </div>
+    <div class="window-body">
+      <p class="item-summary">This panel was recreated during UI initialization.</p>
+    </div>
+  `;
+  return panel;
+}
+
+function ensureLayoutStructure() {
+  const shell = appShell || document.body;
+  const footer = shell.querySelector(".app-footer");
+  let workspace = document.querySelector("#workspace");
+  if (!workspace) {
+    logMissingElement("workspace");
+    workspace = document.createElement("div");
+    workspace.id = "workspace";
+    workspace.className = "workspace-layout";
+    shell.insertBefore(workspace, footer || null);
+  }
+
+  workspace.classList.add("workspace-layout");
+  workspace.style.display = "flex";
+
+  let sidebar = document.querySelector("#sidebarPanel");
+  if (!sidebar) {
+    logMissingElement("sidebarPanel");
+    sidebar = createFallbackPanelShell({
+      id: "sidebarPanel",
+      panelName: "sidebar",
+      title: "Workspace",
+      eyebrow: "Navigation",
+      sectionClass: "topbar navbar glass window-panel sidebar-window",
+    });
+    workspace.prepend(sidebar);
+  }
+
+  let sidebarResize = document.querySelector("#sidebarSplitter");
+  if (!sidebarResize) {
+    logMissingElement("sidebarSplitter");
+    sidebarResize = document.createElement("div");
+    sidebarResize.id = "sidebarSplitter";
+    sidebarResize.className = "layout-divider is-vertical";
+    sidebarResize.dataset.layoutResize = "sidebar";
+    sidebarResize.setAttribute("role", "separator");
+    sidebarResize.setAttribute("aria-orientation", "vertical");
+    sidebarResize.setAttribute("aria-label", "Resize navigation");
+    sidebar.after(sidebarResize);
+  }
+
+  let workspaceMain = document.querySelector("#windowWorkspace");
+  if (!workspaceMain) {
+    logMissingElement("windowWorkspace");
+    workspaceMain = document.createElement("main");
+    workspaceMain.id = "windowWorkspace";
+    workspaceMain.className = "page-stack main-content";
+    workspace.append(workspaceMain);
+  }
+
+  let reports = document.querySelector("#reportsSection");
+  if (!reports) {
+    logMissingElement("reportsSection");
+    reports = document.createElement("section");
+    reports.id = "reportsSection";
+    const reportsPanelFallback = createFallbackPanelShell({
+      id: "reportsPanel",
+      panelName: "reports",
+      title: "Live search",
+      eyebrow: "Reports",
+      sectionClass: "panel browse-panel surface-card glass window-panel",
+    });
+    reports.append(reportsPanelFallback);
+    workspaceMain.prepend(reports);
+  }
+
+  let contentResize = document.querySelector("#contentSplitter");
+  if (!contentResize) {
+    logMissingElement("contentSplitter");
+    contentResize = document.createElement("div");
+    contentResize.id = "contentSplitter";
+    contentResize.className = "layout-divider is-horizontal";
+    contentResize.dataset.layoutResize = "content";
+    contentResize.setAttribute("role", "separator");
+    contentResize.setAttribute("aria-orientation", "horizontal");
+    contentResize.setAttribute("aria-label", "Resize content panels");
+    workspaceMain.append(contentResize);
+  }
+
+  let secondary = document.querySelector("#secondaryStack");
+  if (!secondary) {
+    logMissingElement("secondaryStack");
+    secondary = document.createElement("div");
+    secondary.id = "secondaryStack";
+    secondary.className = "secondary-stack";
+    const queryFallback = createFallbackPanelShell({
+      id: "querySection",
+      panelName: "query",
+      title: "Activity",
+      eyebrow: "Logs",
+    });
+    secondary.append(queryFallback);
+    workspaceMain.append(secondary);
+  }
+
+  cacheLayoutDomReferences();
+}
+
+const secondaryPanelNames = ["room", "returned", "claims", "account", "admin", "query"];
+const LAYOUT_BREAKPOINT = 900;
+const SIDEBAR_EXPANDED_MIN_WIDTH = 220;
+const SIDEBAR_COLLAPSED_WIDTH = 170;
+const SIDEBAR_MAX_WIDTH = 420;
+const REPORTS_MIN_HEIGHT = 260;
+const SECONDARY_MIN_HEIGHT = 220;
+const SPLITTER_SIZE = 14;
+
+function defaultSecondaryPanelName() {
+  if (currentUserCanAdmin() && panelElements.admin) return "admin";
+  if (panelElements.query) return "query";
+  if (panelElements.claims) return "claims";
+  if (panelElements.returned) return "returned";
+  if (panelElements.room) return "room";
+  return "reports";
+}
+
+function renderDefaultLayout() {
+  cacheLayoutDomReferences();
+  if (!workspaceLayout) {
+    logMissingElement("workspace");
+    return;
+  }
+
+  workspaceLayout.classList.add("workspace-layout");
+  workspaceLayout.style.display = "flex";
+
+  syncAllPanels(Object.keys(state.panelState).length === 0);
+  openPanel("sidebar");
+  openPanel("reports");
+
+  if (!currentSecondaryPanelName()) {
+    const secondaryPanelName = defaultSecondaryPanelName();
+    if (secondaryPanelName !== "reports" && panelElements[secondaryPanelName]) {
+      state.currentView = secondaryPanelName;
+      openPanel(secondaryPanelName);
+    }
+  }
+
+  syncWorkspaceLayout();
+  logUiInfo("Rendered default layout", {
+    currentView: state.currentView,
+    secondaryPanel: currentSecondaryPanelName() || "none",
+  });
+}
+
+function isDesktopWindowLayout() {
+  return window.innerWidth >= LAYOUT_BREAKPOINT;
+}
+
+function defaultPanelLayout(name) {
+  return {
+    closed: !["sidebar", "reports"].includes(name),
+    minimized: false,
+    collapsed: name === "sidebar" ? false : undefined,
+  };
+}
+
+function ensurePanelState(name) {
+  if (!state.panelState[name]) {
+    state.panelState[name] = defaultPanelLayout(name);
+  }
+  return state.panelState[name];
+}
+
+function clampValue(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function currentSecondaryPanelName() {
+  return secondaryPanelNames.includes(state.currentView) ? state.currentView : "";
+}
+
+function clampLayoutSizes() {
+  const sidebarState = ensurePanelState("sidebar");
+  const layoutRect = workspaceLayout?.getBoundingClientRect();
+  const workspaceRect = windowWorkspace?.getBoundingClientRect();
+  const sidebarMin = sidebarState.collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_MIN_WIDTH;
+  const sidebarMax = Math.max(
+    sidebarMin,
+    Math.min(
+      SIDEBAR_MAX_WIDTH,
+      Math.round((layoutRect?.width || window.innerWidth) - 360),
+    ),
+  );
+  const nextSidebarWidth = sidebarState.collapsed
+    ? SIDEBAR_COLLAPSED_WIDTH
+    : clampValue(
+      Math.round(state.layoutSizes.sidebarWidth || 280),
+      sidebarMin,
+      sidebarMax,
+    );
+  state.layoutSizes.sidebarWidth = nextSidebarWidth;
+
+  const secondaryMax = Math.max(
+    SECONDARY_MIN_HEIGHT,
+    Math.round((workspaceRect?.height || window.innerHeight) - REPORTS_MIN_HEIGHT - SPLITTER_SIZE),
+  );
+  state.layoutSizes.secondaryHeight = clampValue(
+    Math.round(state.layoutSizes.secondaryHeight || 320),
+    SECONDARY_MIN_HEIGHT,
+    secondaryMax,
+  );
+}
+
+function applyPanelLayout(name) {
+  const panel = panelElements[name];
+  if (!panel) return;
+
+  const panelState = ensurePanelState(name);
+  panel.classList.toggle("is-minimized", panelState.minimized);
+  if (name === "sidebar") {
+    panel.classList.toggle("is-collapsed", Boolean(panelState.collapsed));
+    sidebarCollapseButton?.setAttribute("aria-pressed", String(Boolean(panelState.collapsed)));
+  }
+}
+
+function syncWorkspaceLayout() {
+  if (!workspaceLayout || !windowWorkspace) {
+    return;
+  }
+
+  clampLayoutSizes();
+
+  const sidebarState = ensurePanelState("sidebar");
+  const reportsState = ensurePanelState("reports");
+  const secondaryName = currentSecondaryPanelName();
+  const secondaryPanel = secondaryName ? panelElements[secondaryName] : null;
+  const secondaryState = secondaryName ? ensurePanelState(secondaryName) : null;
+  const sidebarVisible = !sidebarState.closed;
+  const reportsVisible = !reportsState.closed;
+  const secondaryVisible = Boolean(secondaryPanel && secondaryState && !secondaryState.closed);
+  const canResizeContent = isDesktopWindowLayout()
+    && reportsVisible
+    && secondaryVisible
+    && !reportsState.minimized
+    && !secondaryState.minimized;
+
+  appShell?.classList.toggle("has-open-sidebar", sidebarVisible);
+  sidebarPanel?.classList.toggle("is-hidden", !sidebarVisible);
+  sidebarLauncherButton?.classList.toggle("is-hidden", sidebarVisible);
+  sidebarSplitter?.classList.toggle("is-hidden", !sidebarVisible || !isDesktopWindowLayout());
+  contentSplitter?.classList.toggle("is-hidden", !canResizeContent);
+  reportsSection?.classList.toggle("is-hidden", !reportsVisible);
+  secondaryStack?.classList.toggle("is-hidden", !secondaryVisible);
+  windowWorkspace.classList.toggle("has-secondary", secondaryVisible);
+  windowWorkspace.classList.toggle("is-reports-hidden", !reportsVisible);
+  windowWorkspace.classList.toggle("is-reports-minimized", reportsState.minimized);
+  windowWorkspace.classList.toggle("is-secondary-minimized", Boolean(secondaryState?.minimized));
+
+  secondaryPanelNames.forEach((name) => {
+    const panel = panelElements[name];
+    const isVisible = secondaryVisible && name === secondaryName;
+    panel?.classList.toggle("is-hidden", !isVisible);
+  });
+
+  if (sidebarVisible && isDesktopWindowLayout()) {
+    const sidebarWidth = sidebarState.collapsed ? SIDEBAR_COLLAPSED_WIDTH : state.layoutSizes.sidebarWidth;
+    workspaceLayout.style.setProperty("--sidebar-width", `${sidebarWidth}px`);
+  } else {
+    workspaceLayout.style.removeProperty("--sidebar-width");
+  }
+
+  if (canResizeContent) {
+    secondaryStack?.style.setProperty("flex-basis", `${state.layoutSizes.secondaryHeight}px`);
+  } else if (secondaryStack) {
+    secondaryStack.style.removeProperty("flex-basis");
+  }
+}
+
+function syncAllPanels(forceReset = false) {
+  Object.keys(panelElements).forEach((name) => {
+    if (forceReset || !state.panelState[name]) {
+      const previous = state.panelState[name] || {};
+      state.panelState[name] = {
+        ...defaultPanelLayout(name),
+        minimized: Boolean(previous.minimized),
+        closed: typeof previous.closed === "boolean" ? previous.closed : defaultPanelLayout(name).closed,
+        collapsed: name === "sidebar" ? Boolean(previous.collapsed) : false,
+      };
+    }
+    applyPanelLayout(name);
+  });
+  syncWorkspaceLayout();
+}
+
+function openPanel(name, { unminimize = true } = {}) {
+  const panel = panelElements[name];
+  if (!panel) return;
+  const panelState = ensurePanelState(name);
+  panelState.closed = false;
+  if (unminimize) {
+    panelState.minimized = false;
+  }
+  applyPanelLayout(name);
+  syncWorkspaceLayout();
+}
+
+function closePanel(name) {
+  const panel = panelElements[name];
+  if (!panel) return;
+  if (name === "reports" && state.currentView === "reports") {
+    return;
+  }
+  if (secondaryPanelNames.includes(name) && state.currentView === name) {
+    navigateTo("reports");
+    return;
+  }
+  const panelState = ensurePanelState(name);
+  panelState.closed = true;
+  syncWorkspaceLayout();
+}
+
+function togglePanelMinimize(name) {
+  const panel = panelElements[name];
+  if (!panel) return;
+  const panelState = ensurePanelState(name);
+  panelState.minimized = !panelState.minimized;
+  applyPanelLayout(name);
+  syncWorkspaceLayout();
+}
+
+function toggleSidebarCollapse() {
+  const panelState = ensurePanelState("sidebar");
+  if (!isDesktopWindowLayout()) {
+    closePanel("sidebar");
+    return;
+  }
+  panelState.collapsed = !panelState.collapsed;
+  applyPanelLayout("sidebar");
+  syncWorkspaceLayout();
+}
+
+function beginLayoutResize(event) {
+  if (!isDesktopWindowLayout() || event.button !== 0) return;
+  const resizeType = event.currentTarget.dataset.layoutResize || "";
+  if (!resizeType) return;
+  state.activeLayoutResize = {
+    type: resizeType,
+    startX: event.clientX,
+    startY: event.clientY,
+    startSidebarWidth: state.layoutSizes.sidebarWidth,
+    startSecondaryHeight: state.layoutSizes.secondaryHeight,
+  };
+  document.body.classList.add("is-resizing-layout");
+  event.preventDefault();
+}
+
+function updateLayoutResize(clientX, clientY) {
+  if (!state.activeLayoutResize || !isDesktopWindowLayout()) return;
+  const interaction = state.activeLayoutResize;
+  if (interaction.type === "sidebar") {
+    const sidebarState = ensurePanelState("sidebar");
+    const layoutRect = workspaceLayout?.getBoundingClientRect();
+    const minWidth = sidebarState.collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_MIN_WIDTH;
+    const maxWidth = Math.max(
+      minWidth,
+      Math.min(
+        SIDEBAR_MAX_WIDTH,
+        Math.round((layoutRect?.width || window.innerWidth) - 360),
+      ),
+    );
+    state.layoutSizes.sidebarWidth = clampValue(
+      Math.round(interaction.startSidebarWidth + (clientX - interaction.startX)),
+      minWidth,
+      maxWidth,
+    );
+  }
+
+  if (interaction.type === "content") {
+    const workspaceRect = windowWorkspace?.getBoundingClientRect();
+    const maxHeight = Math.max(
+      SECONDARY_MIN_HEIGHT,
+      Math.round((workspaceRect?.height || window.innerHeight) - REPORTS_MIN_HEIGHT - SPLITTER_SIZE),
+    );
+    state.layoutSizes.secondaryHeight = clampValue(
+      Math.round(interaction.startSecondaryHeight - (clientY - interaction.startY)),
+      SECONDARY_MIN_HEIGHT,
+      maxHeight,
+    );
+  }
+
+  syncWorkspaceLayout();
+}
+
+function endLayoutResize() {
+  if (!state.activeLayoutResize) return;
+  state.activeLayoutResize = null;
+  document.body.classList.remove("is-resizing-layout");
+}
+
+function bindWindowPanelEvents() {
+  Array.from(document.querySelectorAll("[data-panel-close]")).forEach((button) => {
+    const panelName = button.dataset.panelClose || "";
+    bindListener(button, "click", () => closePanel(panelName), {
+      label: `close panel ${panelName || "unknown"}`,
+    });
+  });
+  Array.from(document.querySelectorAll("[data-panel-minimize]")).forEach((button) => {
+    const panelName = button.dataset.panelMinimize || "";
+    bindListener(button, "click", () => togglePanelMinimize(panelName), {
+      label: `minimize panel ${panelName || "unknown"}`,
+    });
+  });
+  bindListener(sidebarSplitter, "pointerdown", beginLayoutResize, { label: "sidebar splitter resize" });
+  bindListener(contentSplitter, "pointerdown", beginLayoutResize, { label: "content splitter resize" });
+}
 
 function logClientError(context, error, details = {}) {
   console.error(`[LostFound] ${context}`, {
@@ -1270,18 +1781,33 @@ function validateReportImageFile(file) {
 }
 
 function currentThemeMode() {
-  return document.body.classList.contains("dark-mode") ? "dark" : "light";
+  return document.body.classList.contains("light-mode") ? "light" : "dark";
 }
 
 function syncThemeIcon(mode = currentThemeMode()) {
-  if (!themeIcon) return;
-  themeIcon.textContent = mode === "dark" ? "☀️" : "🌙";
+  if (!themeToggleButton) return;
+  const toggleLabel = mode === "dark"
+    ? langText({
+        en: "Use light mode",
+        "zh-CN": "切换到浅色模式",
+        th: "เปลี่ยนเป็นโหมดสว่าง",
+      })
+    : langText({
+        en: "Use dark mode",
+        "zh-CN": "切换到深色模式",
+        th: "เปลี่ยนเป็นโหมดมืด",
+      });
+  themeToggleButton.setAttribute("aria-label", toggleLabel);
+  themeToggleButton.setAttribute("title", toggleLabel);
+  themeToggleButton.dataset.mode = mode;
+  themeIcon?.setAttribute("data-mode", mode);
 }
 
 function applyThemeMode(mode, { persist = true } = {}) {
   const nextMode = THEME_MODES.includes(mode) ? mode : "dark";
   document.body.classList.remove("dark-mode", "light-mode");
   document.body.classList.add(`${nextMode}-mode`);
+  document.documentElement.dataset.theme = nextMode;
   if (persist) {
     localStorage.setItem(THEME_STORAGE_KEY, nextMode);
   }
@@ -1602,17 +2128,43 @@ function persistCurrentItemId(itemId) {
 
 function showAuthScreen() {
   closeTutorial({ markSeen: false, rememberSession: false });
-  authScreen.classList.remove("is-hidden");
-  appShell.classList.add("is-hidden");
+  authScreen?.classList.remove("is-hidden");
+  appShell?.classList.add("is-hidden");
 }
 
 function showAppShell() {
-  authScreen.classList.add("is-hidden");
-  appShell.classList.remove("is-hidden");
+  authScreen?.classList.add("is-hidden");
+  appShell?.classList.remove("is-hidden");
+  window.requestAnimationFrame(() => {
+    syncAllPanels(Object.keys(state.panelState).length === 0);
+    openPanel("sidebar");
+  });
+}
+
+function resetReportModalState() {
+  form?.reset();
+  state.selectedFile = null;
+  dropZone?.classList.remove("is-dragging");
+  if (dropTitle) {
+    dropTitle.textContent = t("report.dropTitle");
+  }
+  if (dropHint) {
+    dropHint.textContent = t("report.dropHint");
+  }
+  if (dateInput) {
+    dateInput.value = todayIso();
+  }
+  prefillReporter();
+  updateLocationUi();
+  updateReportSubmitState();
+  hideProgress("report");
+  setMessage(uploadMessage, "");
+  setWarningCard(reportWarningCard, "");
 }
 
 function openReportModal() {
   if (!reportDialog) return;
+  reportDialog.classList.remove("is-closing");
   reportDialog.showModal();
   setWarningCard(reportWarningCard, "");
   window.setTimeout(() => {
@@ -1621,8 +2173,11 @@ function openReportModal() {
 }
 
 function closeReportModal() {
-  if (!reportDialog?.open) return;
-  reportDialog.close();
+  if (!reportDialog) return;
+  if (reportDialog.open) {
+    reportDialog.close();
+  }
+  resetReportModalState();
 }
 
 function setAuthView(view) {
@@ -1737,17 +2292,17 @@ function resolveTutorialTarget(step) {
 
 function tutorialViewportRect(target) {
   const rect = target.getBoundingClientRect();
-  const absoluteTop = rect.top + window.scrollY;
-  const absoluteLeft = rect.left + window.scrollX;
-  const top = absoluteTop - window.scrollY;
-  const left = absoluteLeft - window.scrollX;
+  const top = clamp(rect.top, 0, window.innerHeight);
+  const left = clamp(rect.left, 0, window.innerWidth);
+  const width = Math.max(0, Math.min(rect.width, window.innerWidth - left));
+  const height = Math.max(0, Math.min(rect.height, window.innerHeight - top));
   return {
     top,
     left,
-    width: rect.width,
-    height: rect.height,
-    right: left + rect.width,
-    bottom: top + rect.height,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
   };
 }
 
@@ -1857,18 +2412,46 @@ function positionTutorialCard(targetRect) {
   const viewportHeight = window.innerHeight;
   const currentRect = tutorialCard.getBoundingClientRect();
   const padding = Math.max(10, Math.min(TUTORIAL_VIEWPORT_PADDING, Math.floor(viewportWidth * 0.03)));
-  const cardWidth = Math.min(currentRect.width || 320, viewportWidth - (padding * 2));
-  const cardHeight = currentRect.height || 240;
-  const maxLeft = Math.max(10, viewportWidth - cardWidth - 10);
-  const anchoredLeft = Math.max(10, Math.min(targetRect.left, maxLeft));
-  const belowTop = targetRect.bottom + 10;
-  const aboveTop = Math.max(padding, targetRect.top - cardHeight - TUTORIAL_CARD_MARGIN);
-  const top = belowTop + cardHeight <= viewportHeight - padding ? belowTop : aboveTop;
+  const cardWidth = Math.min(currentRect.width || 360, viewportWidth - (padding * 2));
+  const cardHeight = Math.min(currentRect.height || 240, viewportHeight - (padding * 2));
+  const preferredSide = tutorialPreferredPlacement(targetRect);
+  const placements = [preferredSide, "right", "below", "left", "above"]
+    .filter((side, index, values) => values.indexOf(side) === index);
 
-  tutorialCard.style.top = `${Math.max(padding, top)}px`;
-  tutorialCard.style.left = `${anchoredLeft}px`;
+  for (const side of placements) {
+    const placement = buildTutorialCardPlacement(
+      side,
+      targetRect,
+      cardWidth,
+      cardHeight,
+      viewportWidth,
+      viewportHeight,
+      padding,
+      TUTORIAL_CARD_MARGIN,
+    );
+    if (!placement) continue;
+    tutorialCard.style.top = `${placement.top}px`;
+    tutorialCard.style.left = `${placement.left}px`;
+    tutorialCard.style.transform = "none";
+    tutorialCard.style.maxHeight = `${placement.maxHeight}px`;
+    return;
+  }
+
+  const fallbackTop = clamp(
+    targetRect.bottom + TUTORIAL_CARD_MARGIN,
+    padding,
+    viewportHeight - padding - cardHeight,
+  );
+  const fallbackLeft = clamp(
+    targetRect.left,
+    padding,
+    viewportWidth - padding - cardWidth,
+  );
+
+  tutorialCard.style.top = `${fallbackTop}px`;
+  tutorialCard.style.left = `${fallbackLeft}px`;
   tutorialCard.style.transform = "none";
-  tutorialCard.style.maxHeight = `${Math.max(120, viewportHeight - Math.max(padding, top) - padding)}px`;
+  tutorialCard.style.maxHeight = `${Math.max(180, viewportHeight - fallbackTop - padding)}px`;
 }
 
 function positionTutorialBackdrop(rect) {
@@ -2060,12 +2643,121 @@ function canPreviewImage(path) {
   return typeof path === "string" && /^(https?:|data:|blob:)/.test(path);
 }
 
-function resolveImageUrl(item) {
-  const path = item.image_url || item.image_path;
+function normalizeImageUrl(path) {
   if (!path) return "";
   if (/^(https?:|data:|blob:)/.test(path)) return path;
-  if (path.startsWith("/")) return `${API_BASE}${path}`;
+  if (typeof path === "string" && path.startsWith("/")) return `${API_BASE}${path}`;
   return "";
+}
+
+function resolveImageUrl(item) {
+  return normalizeImageUrl(item?.image_url || item?.image_path);
+}
+
+function openImagePreview(source, title = "Image preview", caption = "") {
+  if (!imagePreviewDialog || !canPreviewImage(source)) return;
+  imagePreviewTitle.textContent = title || "Image preview";
+  imagePreviewCaption.textContent = caption || title || "Preview image";
+  imagePreviewImage.src = source;
+  imagePreviewImage.alt = title || "Preview image";
+  if (imagePreviewDialog.open) return;
+  imagePreviewDialog.showModal();
+}
+
+function closeImagePreview() {
+  if (!imagePreviewDialog?.open) return;
+  imagePreviewDialog.close();
+  imagePreviewImage.removeAttribute("src");
+}
+
+function findKnownItemById(itemId) {
+  const numericId = Number(itemId || 0);
+  if (!numericId) return null;
+  const pools = [state.adminItems, state.items, state.roomItems, state.returnedItems];
+  for (const collection of pools) {
+    const match = collection.find((item) => Number(item.id) === numericId);
+    if (match) return match;
+  }
+  return null;
+}
+
+function previewPayloadForRecord(record, fallbackTitle = "Preview image") {
+  if (!record || typeof record !== "object") return null;
+
+  const directSources = [
+    record,
+    record.after_state,
+    record.before_state,
+    record.metadata,
+    record.request_metadata,
+  ];
+
+  for (const candidate of directSources) {
+    const source = normalizeImageUrl(candidate?.image_url || candidate?.image_path || candidate?.avatar_url || "");
+    if (canPreviewImage(source)) {
+      return {
+        src: source,
+        title: candidate?.title || record.title || fallbackTitle,
+        caption: candidate?.description || record.reason || "",
+      };
+    }
+  }
+
+  const relatedItemIds = [
+    record.item_id,
+    record.related_item_id,
+    record.entity_type === "item" ? record.entity_id : null,
+    record.metadata?.item_id,
+    record.request_metadata?.item_id,
+    record.after_state?.id,
+    record.before_state?.id,
+  ];
+
+  for (const itemId of relatedItemIds) {
+    const match = findKnownItemById(itemId);
+    const source = resolveImageUrl(match);
+    if (canPreviewImage(source)) {
+      return {
+        src: source,
+        title: match?.title || fallbackTitle,
+        caption: match?.description || "",
+      };
+    }
+  }
+
+  return null;
+}
+
+function createThumbnailButton(source, { title = "Preview image", caption = "" } = {}) {
+  if (!canPreviewImage(source)) return null;
+  const button = document.createElement("button");
+  button.className = "panel-thumbnail-button";
+  button.type = "button";
+  button.setAttribute("aria-label", title);
+  const image = document.createElement("img");
+  image.className = "panel-thumbnail";
+  image.src = source;
+  image.alt = title;
+  button.append(image);
+  button.addEventListener("click", () => openImagePreview(source, title, caption));
+  return button;
+}
+
+function createDetailsToggle(detailRegion) {
+  const button = document.createElement("button");
+  button.className = "ghost-button small-button log-detail-toggle";
+  button.type = "button";
+  const setLabel = () => {
+    button.textContent = detailRegion.classList.contains("is-hidden")
+      ? langText({ en: "Details", "zh-CN": "详情", th: "รายละเอียด" })
+      : langText({ en: "Hide details", "zh-CN": "收起详情", th: "ซ่อนรายละเอียด" });
+  };
+  setLabel();
+  button.addEventListener("click", () => {
+    detailRegion.classList.toggle("is-hidden");
+    setLabel();
+  });
+  return button;
 }
 
 function normalizeRoomCode(value) {
@@ -2273,7 +2965,11 @@ function buildHash(section, itemId = null) {
 function readRoute() {
   const raw = window.location.hash.replace(/^#/, "").trim();
   if (!raw) {
-    return { section: "reports", itemId: state.currentItemId };
+    const defaultSection = defaultSecondaryPanelName();
+    return {
+      section: defaultSection === "reports" ? "reports" : defaultSection,
+      itemId: state.currentItemId,
+    };
   }
   if (raw === "query") {
     return { section: "query", itemId: null };
@@ -2310,14 +3006,13 @@ function updateTopbarState() {
 
 function switchSection(section) {
   state.currentView = section;
-  reportsSection.classList.toggle("is-hidden", section !== "reports");
-  roomSection.classList.toggle("is-hidden", section !== "room");
-  returnedSection.classList.toggle("is-hidden", section !== "returned");
-  claimsSection.classList.toggle("is-hidden", section !== "claims");
-  accountSection.classList.toggle("is-hidden", section !== "account");
-  adminSection.classList.toggle("is-hidden", section !== "admin");
-  querySection.classList.toggle("is-hidden", section !== "query");
+  if (section === "reports") {
+    openPanel("reports", { unminimize: true });
+  } else if (secondaryPanelNames.includes(section)) {
+    openPanel(section, { unminimize: true });
+  }
   updateTopbarState();
+  syncWorkspaceLayout();
 }
 
 async function activateRoute(route = readRoute()) {
@@ -2666,6 +3361,10 @@ function renderReturnedItems(items) {
       image.className = "returned-card-image";
       image.src = preview;
       image.alt = item.title || "Returned item";
+      image.style.cursor = "zoom-in";
+      image.addEventListener("click", () => {
+        openImagePreview(preview, item.title || "Returned item", item.description || "");
+      });
       card.append(image);
     }
 
@@ -2906,12 +3605,17 @@ function renderItems(items) {
       image.src = preview;
       image.alt = item.title || "Uploaded item";
       imageFrame.classList.add("has-image");
+      imageFrame.style.cursor = "zoom-in";
+      imageFrame.addEventListener("click", () => {
+        openImagePreview(preview, item.title || "Report image", item.description || "");
+      });
       image.addEventListener("error", (event) => {
         logClientError("image failed to load", new Error("Image request failed"), {
           itemId: item.id,
           src: event.currentTarget?.src,
         });
         imageFrame.classList.remove("has-image");
+        imageFrame.style.cursor = "";
       }, { once: true });
     }
 
@@ -3259,11 +3963,14 @@ function renderAdminItems(items) {
     badge.textContent = item.status || (item.claimed ? "Claimed" : "Open");
     head.append(headText, badge);
 
+    const description = document.createElement("p");
+    description.className = "claim-history-reason";
+    description.textContent = item.description || "";
+
     const info = document.createElement("dl");
     info.className = "info-list";
     addInfo(info, "ID", item.id);
     addInfo(info, langText({ en: "Reporter", "zh-CN": "报告人", th: "ผู้รายงาน" }), item.reporter_identity || item.reporter_name || "");
-    addInfo(info, langText({ en: "Description", "zh-CN": "描述", th: "คำอธิบาย" }), item.description || "");
     addInfo(info, langText({ en: "Evidence", "zh-CN": "证据摘要", th: "สรุปหลักฐาน" }), item.evidence_summary || "");
     addInfo(info, langText({ en: "Missing info", "zh-CN": "缺失信息", th: "ข้อมูลที่ขาด" }), item.evidence_missing_info || "");
     addInfo(info, langText({ en: "Inconsistencies", "zh-CN": "矛盾点", th: "จุดไม่สอดคล้อง" }), item.evidence_inconsistencies || "");
@@ -3342,7 +4049,25 @@ function renderAdminItems(items) {
 
     actions.append(approveButton, rejectButton, incompleteButton, allowButton, flagButton, clearButton, roomButton, deleteButton);
 
-    card.append(head, info, actions);
+    const preview = state.previewUrls.get(item.id) || resolveImageUrl(item);
+    const thumbnail = createThumbnailButton(preview, {
+      title: item.title || "Admin item preview",
+      caption: item.description || "",
+    });
+
+    const body = document.createElement("div");
+    body.className = thumbnail ? "panel-media-row" : "panel-meta-stack";
+    const metaStack = document.createElement("div");
+    metaStack.className = "panel-meta-stack";
+    metaStack.append(head, description, info, actions);
+
+    if (thumbnail) {
+      body.append(thumbnail, metaStack);
+    } else {
+      body.append(metaStack);
+    }
+
+    card.append(body);
     adminItemsList.append(card);
   });
 }
@@ -3437,7 +4162,25 @@ function renderAdminClaims(claims) {
     }));
     actions.append(approveButton, rejectButton, deleteButton);
 
-    card.append(head, reason, info, actions);
+    const preview = resolveImageUrl(claim.item);
+    const thumbnail = createThumbnailButton(preview, {
+      title: claim.item?.title || "Claim item preview",
+      caption: claim.item_description || "",
+    });
+
+    const body = document.createElement("div");
+    body.className = thumbnail ? "panel-media-row" : "panel-meta-stack";
+    const metaStack = document.createElement("div");
+    metaStack.className = "panel-meta-stack";
+    metaStack.append(head, reason, info, actions);
+
+    if (thumbnail) {
+      body.append(thumbnail, metaStack);
+    } else {
+      body.append(metaStack);
+    }
+
+    card.append(body);
     adminClaimsList.append(card);
   });
 }
@@ -3476,11 +4219,14 @@ function renderAIInspection(logs) {
     head.append(headText, badge);
 
     const reason = document.createElement("p");
-    reason.className = "claim-history-reason";
+    reason.className = "claim-history-reason log-summary-text";
     reason.textContent = log.input_text;
 
+    const summaryActions = document.createElement("div");
+    summaryActions.className = "log-summary-actions";
+
     const info = document.createElement("dl");
-    info.className = "info-list";
+    info.className = "info-list log-scroll-region";
     addInfo(info, "Feature", log.feature || "");
     addInfo(info, "Decision", log.allowed ? "Allowed" : "Blocked");
     addInfo(info, "Reason", log.reason || "");
@@ -3506,7 +4252,31 @@ function renderAIInspection(logs) {
     outputText.textContent = log.output_text || log.raw_output || "";
     outputBlock.append(outputLabel, outputText);
 
-    card.append(head, reason, info, promptBlock, outputBlock);
+    const details = document.createElement("div");
+    details.className = "log-detail-region is-hidden";
+    details.append(info, promptBlock, outputBlock);
+
+    const detailsButton = createDetailsToggle(details);
+    summaryActions.append(detailsButton);
+
+    const preview = previewPayloadForRecord(log, log.route || "Inspection image");
+    const thumbnail = preview
+      ? createThumbnailButton(preview.src, { title: preview.title, caption: preview.caption })
+      : null;
+
+    const body = document.createElement("div");
+    body.className = thumbnail ? "panel-media-row" : "panel-meta-stack";
+    const metaStack = document.createElement("div");
+    metaStack.className = "panel-meta-stack";
+    metaStack.append(head, reason, summaryActions, details);
+
+    if (thumbnail) {
+      body.append(thumbnail, metaStack);
+    } else {
+      body.append(metaStack);
+    }
+
+    card.append(body);
     adminInspectionList.append(card);
   });
 }
@@ -3538,14 +4308,43 @@ function renderAuditLogs(audits) {
     textWrap.append(title, meta);
     head.append(textWrap, badge);
 
+    const summary = document.createElement("p");
+    summary.className = "claim-history-reason log-summary-text";
+    summary.textContent = `${audit.entity_type || "Entity"} #${audit.entity_id || "-"} updated`;
+
     const info = document.createElement("dl");
-    info.className = "info-list";
+    info.className = "info-list log-scroll-region";
     addInfo(info, "Entity", `${audit.entity_type || "-"} #${audit.entity_id || "-"}`);
     addInfo(info, "Before", JSON.stringify(audit.before_state ?? null));
     addInfo(info, "After", JSON.stringify(audit.after_state ?? null));
     addInfo(info, "Metadata", JSON.stringify(audit.metadata || {}));
 
-    card.append(head, info);
+    const details = document.createElement("div");
+    details.className = "log-detail-region is-hidden";
+    details.append(info);
+
+    const summaryActions = document.createElement("div");
+    summaryActions.className = "log-summary-actions";
+    summaryActions.append(createDetailsToggle(details));
+
+    const preview = previewPayloadForRecord(audit, audit.action_type || "Audit image");
+    const thumbnail = preview
+      ? createThumbnailButton(preview.src, { title: preview.title, caption: preview.caption })
+      : null;
+
+    const body = document.createElement("div");
+    body.className = thumbnail ? "panel-media-row" : "panel-meta-stack";
+    const metaStack = document.createElement("div");
+    metaStack.className = "panel-meta-stack";
+    metaStack.append(head, summary, summaryActions, details);
+
+    if (thumbnail) {
+      body.append(thumbnail, metaStack);
+    } else {
+      body.append(metaStack);
+    }
+
+    card.append(body);
     adminAuditList.append(card);
   });
 }
@@ -4682,11 +5481,16 @@ function handleRoomPreviewPointerDown(event) {
 }
 
 function handleRoomPreviewPointerMove(event) {
+  if (state.activeLayoutResize) {
+    updateLayoutResize(event.clientX, event.clientY);
+    return;
+  }
   if (!state.roomPreviewDrag) return;
   updateRoomPreviewPointer(event.clientX, event.clientY, state.roomPreviewDrag.mode);
 }
 
 function handleRoomPreviewPointerUp() {
+  endLayoutResize();
   state.roomPreviewDrag = null;
 }
 
@@ -4834,10 +5638,21 @@ async function markItemClaimed(itemId, button) {
 }
 
 function selectFile(file) {
-  if (!file) return;
+  if (!file) {
+    state.selectedFile = null;
+    if (dropTitle) {
+      dropTitle.textContent = t("report.dropTitle");
+    }
+    if (dropHint) {
+      dropHint.textContent = t("report.dropHint");
+    }
+    updateReportSubmitState();
+    return;
+  }
   state.selectedFile = file;
   dropTitle.textContent = file.name;
   dropHint.textContent = `${Math.max(1, Math.round(file.size / 1024))} KB selected`;
+  updateReportSubmitState();
 }
 
 function debounceLoadItems() {
@@ -4855,6 +5670,7 @@ function logout() {
   closeTutorial({ markSeen: false, rememberSession: false });
   closeReportModal();
   closeConfirmModal();
+  closeImagePreview();
   closeRoomClaimPreview();
   hideUndoToast();
   stopAdminMonitorPolling();
@@ -4881,6 +5697,12 @@ function logout() {
   state.queryMessages = [];
   state.selectedQueryFile = null;
   state.tutorialDismissedForSession = false;
+  state.panelState = {};
+  state.activeLayoutResize = null;
+  state.layoutSizes = {
+    sidebarWidth: 280,
+    secondaryHeight: 320,
+  };
   gallery.replaceChildren();
   roomGallery.replaceChildren();
   returnedList.replaceChildren();
@@ -4916,24 +5738,83 @@ function logout() {
   persistCurrentItemId(null);
   showAuthScreen();
   setAuthView("login");
-  navigateTo("reports");
+  window.location.hash = "";
+  state.currentView = "reports";
+  renderDefaultLayout();
 }
 
 function bindEvents() {
-  authForm.addEventListener("submit", submitAuth);
-  loginTab.addEventListener("click", () => setAuthView("login"));
-  registerTab.addEventListener("click", () => setAuthView("register"));
+  bindWindowPanelEvents();
+  [
+    [authForm, "submit", submitAuth, "auth form submit"],
+    [loginTab, "click", () => setAuthView("login"), "login tab"],
+    [registerTab, "click", () => setAuthView("register"), "register tab"],
+    [showReportsButton, "click", () => navigateTo("reports"), "reports nav"],
+    [showRoomButton, "click", () => navigateTo("room"), "room nav"],
+    [showReturnedButton, "click", () => navigateTo("returned"), "returned nav"],
+    [showQueryButton, "click", () => navigateTo("query"), "query nav"],
+    [showClaimsButton, "click", () => navigateTo("claims"), "claims nav"],
+    [showAccountButton, "click", () => navigateTo("account"), "account nav"],
+    [showAdminButton, "click", () => navigateTo("admin"), "admin nav"],
+    [sidebarLauncherButton, "click", () => openPanel("sidebar"), "sidebar launcher"],
+    [sidebarCollapseButton, "click", toggleSidebarCollapse, "sidebar collapse"],
+    [queryBackButton, "click", () => navigateTo("reports"), "query back"],
+    [themeToggleButton, "click", toggleThemeMode, "theme toggle"],
+    [openReportModalButton, "click", openReportModal, "open report modal"],
+    [closeReportDialog, "click", closeReportModal, "close report modal"],
+    [logoutButton, "click", logout, "logout"],
+    [form, "submit", submitReport, "report form submit"],
+    [imageInput, "change", () => selectFile(imageInput?.files?.[0] || null), "report image input"],
+    [refreshButton, "click", loadItems, "refresh reports"],
+    [refreshRoomButton, "click", loadRoomItems, "refresh room"],
+    [refreshReturnedButton, "click", loadReturnedItems, "refresh returned"],
+    [uploadRoomButton, "click", uploadRoomItems, "upload room items"],
+    [refreshQueryItemsButton, "click", loadQueryItemOptions, "refresh query items"],
+    [refreshClaimsButton, "click", loadClaims, "refresh claims"],
+    [refreshAdminButton, "click", loadAdminSurface, "refresh admin"],
+    [adminUsersTab, "click", () => switchAdminTab("users"), "admin users tab"],
+    [adminItemsTab, "click", () => switchAdminTab("items"), "admin items tab"],
+    [adminClaimsTab, "click", () => switchAdminTab("claims"), "admin claims tab"],
+    [adminInspectionTab, "click", () => switchAdminTab("inspection"), "admin inspection tab"],
+    [startOllamaButton, "click", () => { void updateOllamaService("start", startOllamaButton); }, "start ollama"],
+    [stopOllamaButton, "click", () => { void updateOllamaService("stop", stopOllamaButton); }, "stop ollama"],
+    [searchInput, "input", debounceLoadItems, "report search"],
+    [categoryFilter, "change", loadItems, "category filter"],
+    [statusFilter, "change", loadItems, "status filter"],
+    [locationFilter, "change", loadItems, "location filter"],
+    [optionalLocationInput, "input", updateLocationUi, "manual location input"],
+    [queryItemSelect, "change", handleQueryItemSelection, "query item select"],
+    [queryForm, "submit", submitQuery, "query form submit"],
+    [queryFileInput, "change", () => selectQueryFile(queryFileInput?.files?.[0] || null), "query file input"],
+    [queryFileRemoveButton, "click", clearSelectedQueryFile, "clear query file"],
+    [claimForm, "submit", submitClaim, "claim form submit"],
+    [cancelClaimButton, "click", closeClaimModal, "cancel claim"],
+    [closeClaimDialog, "click", closeClaimModal, "close claim dialog"],
+    [closeRoomClaimPreviewDialog, "click", closeRoomClaimPreview, "close room preview"],
+    [roomPreviewCancelButton, "click", closeRoomClaimPreview, "cancel room preview"],
+    [roomAnalyzeButton, "click", analyzeRoomPreview, "analyze room preview"],
+    [roomConfirmButton, "click", confirmRoomPreviewSelection, "confirm room preview"],
+    [roomPreviewCircle, "pointerdown", handleRoomPreviewPointerDown, "room preview drag circle"],
+    [roomPreviewHandle, "pointerdown", handleRoomPreviewPointerDown, "room preview drag handle"],
+    [cancelConfirmButton, "click", closeConfirmModal, "cancel confirm"],
+    [closeConfirmDialog, "click", closeConfirmModal, "close confirm dialog"],
+    [closeImagePreviewDialog, "click", closeImagePreview, "close image preview"],
+    [undoToastClose, "click", hideUndoToast, "close undo toast"],
+    [profileImageButton, "click", uploadProfileImage, "upload profile image"],
+    [tutorialBackButton, "click", () => { void rewindTutorial(); }, "tutorial back"],
+    [tutorialNextButton, "click", () => { void advanceTutorial(); }, "tutorial next"],
+    [tutorialSkipButton, "click", () => {
+      tutorialDontShowAgain.checked = true;
+      closeTutorial({ markSeen: false });
+    }, "tutorial skip"],
+    [tutorialCloseButton, "click", () => {
+      closeTutorial({ markSeen: false });
+    }, "tutorial close"],
+  ].forEach(([target, eventName, handler, label]) => {
+    bindListener(target, eventName, handler, { label });
+  });
 
-  showReportsButton.addEventListener("click", () => navigateTo("reports"));
-  showRoomButton.addEventListener("click", () => navigateTo("room"));
-  showReturnedButton.addEventListener("click", () => navigateTo("returned"));
-  showQueryButton.addEventListener("click", () => navigateTo("query"));
-  showClaimsButton.addEventListener("click", () => navigateTo("claims"));
-  showAccountButton.addEventListener("click", () => navigateTo("account"));
-  showAdminButton.addEventListener("click", () => navigateTo("admin"));
-  queryBackButton.addEventListener("click", () => navigateTo("reports"));
-  themeToggleButton.addEventListener("click", toggleThemeMode);
-  languageSelect.addEventListener("change", async () => {
+  bindListener(languageSelect, "change", async () => {
     setLanguage(languageSelect.value);
     if (state.user) {
       try {
@@ -4968,76 +5849,44 @@ function bindEvents() {
         renderAccount();
       }
     }
-  });
-  openReportModalButton.addEventListener("click", openReportModal);
-  closeReportDialog.addEventListener("click", closeReportModal);
-  reportDialog.addEventListener("cancel", (event) => {
+  }, { label: "language select" });
+
+  bindListener(reportDialog, "cancel", (event) => {
     event.preventDefault();
     closeReportModal();
-  });
-  logoutButton.addEventListener("click", logout);
-  notificationButton.addEventListener("click", async () => {
+  }, { label: "report dialog cancel" });
+  bindListener(reportDialog, "close", resetReportModalState, { label: "report dialog close reset" });
+
+  bindListener(notificationButton, "click", async () => {
+    if (!notificationDropdown) {
+      logMissingElement("notificationDropdown");
+      return;
+    }
     const willOpen = notificationDropdown.classList.contains("is-hidden");
     notificationDropdown.classList.toggle("is-hidden", !willOpen);
-    notificationButton.setAttribute("aria-expanded", willOpen ? "true" : "false");
+    notificationButton?.setAttribute("aria-expanded", willOpen ? "true" : "false");
     if (willOpen) {
       await loadNotifications();
     }
-  });
+  }, { label: "notification toggle" });
 
-  form.addEventListener("submit", submitReport);
-  imageInput.addEventListener("change", () => selectFile(imageInput.files[0]));
-  refreshButton.addEventListener("click", loadItems);
-  refreshRoomButton.addEventListener("click", loadRoomItems);
-  refreshReturnedButton.addEventListener("click", loadReturnedItems);
-  uploadRoomButton.addEventListener("click", uploadRoomItems);
-  refreshQueryItemsButton.addEventListener("click", loadQueryItemOptions);
-  refreshClaimsButton.addEventListener("click", loadClaims);
-  refreshAdminButton.addEventListener("click", loadAdminSurface);
-  adminUsersTab.addEventListener("click", () => switchAdminTab("users"));
-  adminItemsTab.addEventListener("click", () => switchAdminTab("items"));
-  adminClaimsTab.addEventListener("click", () => switchAdminTab("claims"));
-  adminInspectionTab.addEventListener("click", () => switchAdminTab("inspection"));
-  startOllamaButton.addEventListener("click", () => {
-    void updateOllamaService("start", startOllamaButton);
-  });
-  stopOllamaButton.addEventListener("click", () => {
-    void updateOllamaService("stop", stopOllamaButton);
-  });
-  adminMonitorTab.addEventListener("click", async () => {
+  bindListener(adminMonitorTab, "click", async () => {
     switchAdminTab("monitor");
     if (currentUserCanAdmin() && state.currentView === "admin") {
       await loadAdminMonitor();
     }
-  });
-  searchInput.addEventListener("input", debounceLoadItems);
-  categoryFilter.addEventListener("change", loadItems);
-  statusFilter.addEventListener("change", loadItems);
-  locationFilter.addEventListener("change", loadItems);
-  optionalLocationInput.addEventListener("input", updateLocationUi);
-  queryItemSelect.addEventListener("change", handleQueryItemSelection);
-  queryForm.addEventListener("submit", submitQuery);
-  queryFileInput.addEventListener("change", () => selectQueryFile(queryFileInput.files?.[0] || null));
-  queryFileRemoveButton.addEventListener("click", clearSelectedQueryFile);
-  queryInput.addEventListener("keydown", (event) => {
+  }, { label: "admin monitor tab" });
+
+  bindListener(queryInput, "keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      queryForm.requestSubmit();
+      queryForm?.requestSubmit();
     }
-  });
+  }, { label: "query submit shortcut" });
 
-  claimForm.addEventListener("submit", submitClaim);
-  cancelClaimButton.addEventListener("click", closeClaimModal);
-  closeClaimDialog.addEventListener("click", closeClaimModal);
-  closeRoomClaimPreviewDialog.addEventListener("click", closeRoomClaimPreview);
-  roomPreviewCancelButton.addEventListener("click", closeRoomClaimPreview);
-  roomAnalyzeButton.addEventListener("click", analyzeRoomPreview);
-  roomConfirmButton.addEventListener("click", confirmRoomPreviewSelection);
-  roomPreviewCircle.addEventListener("pointerdown", handleRoomPreviewPointerDown);
-  roomPreviewHandle.addEventListener("pointerdown", handleRoomPreviewPointerDown);
-  window.addEventListener("pointermove", handleRoomPreviewPointerMove);
-  window.addEventListener("pointerup", handleRoomPreviewPointerUp);
-  confirmForm.addEventListener("submit", async (event) => {
+  bindListener(window, "pointermove", handleRoomPreviewPointerMove, { label: "window room preview pointer move" });
+  bindListener(window, "pointerup", handleRoomPreviewPointerUp, { label: "window room preview pointer up" });
+  bindListener(confirmForm, "submit", async (event) => {
     event.preventDefault();
     if (!state.confirmState?.onConfirm) return;
     const notes = confirmNotesInput.value.trim();
@@ -5046,94 +5895,102 @@ function bindEvents() {
       return;
     }
     await state.confirmState.onConfirm(notes);
-  });
-  cancelConfirmButton.addEventListener("click", closeConfirmModal);
-  closeConfirmDialog.addEventListener("click", closeConfirmModal);
-  undoToastButton.addEventListener("click", async () => {
+  }, { label: "confirm form submit" });
+
+  bindListener(imagePreviewDialog, "cancel", (event) => {
+    event.preventDefault();
+    closeImagePreview();
+  }, { label: "image preview cancel" });
+
+  bindListener(undoToastButton, "click", async () => {
     if (!state.undoState) return;
     try {
       await state.undoState();
     } catch (error) {
       logClientError("undo action failed", error);
     }
-  });
-  undoToastClose.addEventListener("click", hideUndoToast);
-  profileImageButton.addEventListener("click", uploadProfileImage);
-  tutorialBackButton.addEventListener("click", () => {
-    void rewindTutorial();
-  });
-  tutorialNextButton.addEventListener("click", () => {
-    void advanceTutorial();
-  });
-  tutorialSkipButton.addEventListener("click", () => {
-    tutorialDontShowAgain.checked = true;
-    closeTutorial({ markSeen: false });
-  });
-  tutorialCloseButton.addEventListener("click", () => {
-    closeTutorial({ markSeen: false });
-  });
+  }, { label: "undo toast action" });
+
   tutorialBackdropPanes.forEach((pane) => {
-    pane.addEventListener("click", (event) => {
+    bindListener(pane, "click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-    });
-    pane.addEventListener("pointerdown", (event) => {
+    }, { label: `tutorial backdrop ${pane.dataset.tutorialBackdrop || "pane"} click` });
+    bindListener(pane, "pointerdown", (event) => {
       event.preventDefault();
       event.stopPropagation();
-    });
+    }, { label: `tutorial backdrop ${pane.dataset.tutorialBackdrop || "pane"} pointerdown` });
   });
 
-  window.addEventListener("hashchange", () => {
+  bindListener(window, "hashchange", () => {
     if (state.user) {
       void activateRoute(readRoute());
     }
-  });
-  window.addEventListener("resize", () => {
+  }, { label: "window hashchange" });
+  bindListener(window, "resize", () => {
+    syncAllPanels(false);
     if (state.tutorialActive) {
       scheduleTutorialSpotlightUpdate();
     }
-  });
-  window.addEventListener("scroll", () => {
+  }, { label: "window resize" });
+  bindListener(window, "scroll", () => {
     scheduleTutorialSpotlightUpdate();
-  }, { passive: true, capture: true });
-  document.addEventListener("click", (event) => {
+  }, { label: "window scroll", options: { passive: true, capture: true } });
+  bindListener(document, "click", (event) => {
     if (!notificationDropdown || notificationDropdown.classList.contains("is-hidden")) return;
-    if (notificationDropdown.contains(event.target) || notificationButton.contains(event.target)) return;
+    if (notificationDropdown.contains(event.target) || notificationButton?.contains(event.target)) return;
     notificationDropdown.classList.add("is-hidden");
-    notificationButton.setAttribute("aria-expanded", "false");
-  });
+    notificationButton?.setAttribute("aria-expanded", "false");
+  }, { label: "document notification dismiss" });
 
   ["dragenter", "dragover"].forEach((eventName) => {
-    dropZone.addEventListener(eventName, (event) => {
+    bindListener(dropZone, eventName, (event) => {
       event.preventDefault();
       dropZone.classList.add("is-dragging");
-    });
+    }, { label: `report drop zone ${eventName}` });
   });
 
   ["dragleave", "drop"].forEach((eventName) => {
-    dropZone.addEventListener(eventName, (event) => {
+    bindListener(dropZone, eventName, (event) => {
       event.preventDefault();
       dropZone.classList.remove("is-dragging");
-    });
+    }, { label: `report drop zone ${eventName}` });
   });
 
-  dropZone.addEventListener("drop", (event) => {
-    selectFile(event.dataTransfer.files[0]);
-  });
+  bindListener(dropZone, "drop", (event) => {
+    selectFile(event.dataTransfer?.files?.[0] || null);
+  }, { label: "report drop zone file drop" });
+
+  logUiInfo(`Listener summary: ${uiBindingStats.attached} attached, ${uiBindingStats.missing} missing`);
 }
 
-async function init() {
+async function initUI() {
+  if (uiInitialized) {
+    logUiInfo("initUI skipped because the UI is already initialized");
+    return;
+  }
+  uiInitialized = true;
+  ensureLayoutStructure();
   ensureGlobalBackground();
   initializeTheme();
   setLanguage(state.language);
   setAuthView("login");
   resetAdminMonitor();
   switchAdminTab("users");
+  renderDefaultLayout();
   bindEvents();
   renderSelectedQueryFile();
   updateReportSubmitState();
-  dateInput.value = todayIso();
+  if (dateInput) {
+    dateInput.value = todayIso();
+  }
   await restoreSession();
 }
 
-init();
+document.addEventListener("DOMContentLoaded", () => {
+  void initUI();
+}, { once: true });
+
+if (document.readyState !== "loading") {
+  void initUI();
+}

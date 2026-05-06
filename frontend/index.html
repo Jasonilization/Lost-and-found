@@ -53,63 +53,97 @@
     </section>
 
     <div class="app-shell is-hidden" id="appShell">
-      <header class="topbar glass">
-        <div>
-          <p class="eyebrow" data-i18n="topbar.eyebrow">Local campus desk</p>
-          <h2 data-i18n="brand.title">SHR Lost &amp; Found System</h2>
-          <p class="hero-copy" data-i18n="topbar.hero">Reports stay local, admin actions stay guarded, and item questions live in their own chat page.</p>
+      <header class="app-topbar surface-card glass">
+        <div class="app-topbar-start">
+          <button class="sidebar-launcher glass is-hidden" id="sidebarLauncherButton" type="button" aria-label="Show navigation">☰</button>
+          <div class="app-topbar-copy">
+            <p class="eyebrow" data-i18n="topbar.eyebrow">Local campus desk</p>
+            <p class="app-topbar-title" data-i18n="brand.title">SHR Lost &amp; Found System</p>
+          </div>
         </div>
-        <div class="topbar-actions">
-          <div class="account-chip surface-card">
-            <p class="account-name" id="accountName"></p>
-            <p class="account-meta" id="accountMeta"></p>
-          </div>
-          <div class="notification-wrap">
-            <button class="ghost-button notification-button" id="notificationButton" type="button" aria-haspopup="true" aria-expanded="false">
-              <span class="notification-button-label" data-i18n="notifications.button">Notifications</span>
-              <span class="notification-badge is-hidden" id="notificationBadge">0</span>
-            </button>
-            <div class="notification-dropdown surface-card is-hidden" id="notificationDropdown" role="menu">
-              <div class="notification-head">
-                <strong data-i18n="notifications.title">Notifications</strong>
-              </div>
-              <div class="notification-list" id="notificationList"></div>
-            </div>
-          </div>
-          <button class="icon-button glass" id="theme-toggle" type="button" aria-label="Toggle theme">
-            <span id="theme-icon">🌙</span>
+        <div class="app-topbar-end">
+          <button class="theme-toggle glass" id="theme-toggle" type="button" aria-label="Use light mode" title="Toggle theme">
+            <span class="theme-toggle-dot" id="theme-icon" aria-hidden="true"></span>
           </button>
-          <label class="theme-select-wrap">
-            <span data-i18n="topbar.language">Language</span>
-            <select id="languageSelect" aria-label="Language selector">
-              <option value="en">English</option>
-              <option value="zh-CN">简体中文</option>
-              <option value="th">ไทย</option>
-            </select>
-          </label>
-          <button class="ghost-button" id="showReportsButton" type="button" data-i18n="nav.reports">Reports</button>
-          <button class="ghost-button" id="showRoomButton" type="button">Lost &amp; Found Room</button>
-          <button class="ghost-button" id="showReturnedButton" type="button">Recently Returned</button>
-          <button class="ghost-button" id="showQueryButton" type="button" data-i18n="nav.query">Query</button>
-          <button class="ghost-button" id="showClaimsButton" type="button" data-i18n="nav.claims">My Claims</button>
-          <button class="ghost-button" id="showAccountButton" type="button" data-i18n="nav.account">Account</button>
-          <button class="ghost-button is-hidden" id="showAdminButton" type="button" data-i18n="nav.admin">Admin Panel</button>
-          <button class="ghost-button danger-button" id="logoutButton" type="button" data-i18n="nav.logout">Logout</button>
         </div>
       </header>
+      <div class="workspace-layout" id="workspace">
+        <header class="topbar navbar glass window-panel sidebar-window" id="sidebarPanel" data-panel="sidebar">
+          <div class="window-header">
+            <div class="window-title-group">
+              <p class="eyebrow">Navigation</p>
+              <h3>Workspace</h3>
+            </div>
+            <div class="window-controls">
+              <button class="icon-button window-control" id="sidebarCollapseButton" type="button" aria-label="Collapse navigation">◧</button>
+              <button class="icon-button window-control" data-panel-close="sidebar" type="button" aria-label="Hide navigation">×</button>
+            </div>
+          </div>
+          <div class="window-body sidebar-body">
+            <div class="topbar-brand">
+              <p class="eyebrow" data-i18n="topbar.eyebrow">Local campus desk</p>
+              <h2 data-i18n="brand.title">SHR Lost &amp; Found System</h2>
+              <p class="hero-copy" data-i18n="topbar.hero">Reports stay local, admin actions stay guarded, and item questions live in their own chat page.</p>
+            </div>
+            <div class="sidebar-utility-stack">
+              <div class="account-chip surface-card">
+                <p class="account-name" id="accountName"></p>
+                <p class="account-meta" id="accountMeta"></p>
+              </div>
+              <div class="notification-wrap">
+                <button class="ghost-button notification-button" id="notificationButton" type="button" aria-haspopup="true" aria-expanded="false">
+                  <span class="notification-button-label" data-i18n="notifications.button">Notifications</span>
+                  <span class="notification-badge is-hidden" id="notificationBadge">0</span>
+                </button>
+                <div class="notification-dropdown surface-card is-hidden" id="notificationDropdown" role="menu">
+                  <div class="notification-head">
+                    <strong data-i18n="notifications.title">Notifications</strong>
+                  </div>
+                  <div class="notification-list" id="notificationList"></div>
+                </div>
+              </div>
+              <label class="theme-select-wrap">
+                <span data-i18n="topbar.language">Language</span>
+                <select id="languageSelect" aria-label="Language selector">
+                  <option value="en">English</option>
+                  <option value="zh-CN">简体中文</option>
+                  <option value="th">ไทย</option>
+                </select>
+              </label>
+            </div>
+            <div class="topbar-actions sidebar-nav-group">
+              <button class="ghost-button" id="showReportsButton" type="button" data-i18n="nav.reports">Reports</button>
+              <button class="ghost-button" id="showRoomButton" type="button">Lost &amp; Found Room</button>
+              <button class="ghost-button" id="showReturnedButton" type="button">Recently Returned</button>
+              <button class="ghost-button" id="showQueryButton" type="button" data-i18n="nav.query">Query</button>
+              <button class="ghost-button" id="showClaimsButton" type="button" data-i18n="nav.claims">My Claims</button>
+              <button class="ghost-button" id="showAccountButton" type="button" data-i18n="nav.account">Account</button>
+              <button class="ghost-button is-hidden" id="showAdminButton" type="button" data-i18n="nav.admin">Admin Panel</button>
+              <button class="ghost-button danger-button" id="logoutButton" type="button" data-i18n="nav.logout">Logout</button>
+            </div>
+          </div>
+        </header>
+        <div class="layout-divider is-vertical" id="sidebarSplitter" data-layout-resize="sidebar" role="separator" aria-orientation="vertical" aria-label="Resize navigation"></div>
 
-      <main class="page-stack">
-        <section id="reportsSection">
+        <main class="page-stack main-content" id="windowWorkspace">
+          <section id="reportsSection">
           <div class="reports-stack">
             <section class="content-stack">
-              <section class="panel browse-panel surface-card glass" aria-labelledby="galleryTitle">
-                <div class="section-heading">
+              <section class="panel browse-panel surface-card glass window-panel" id="reportsPanel" data-panel="reports" aria-labelledby="galleryTitle">
+                <div class="section-heading window-header">
                   <div>
                     <p class="eyebrow" data-i18n="reports.eyebrow">Reports</p>
                     <h3 id="galleryTitle" data-i18n="reports.title">Live search</h3>
                   </div>
-                  <button class="ghost-button" id="refreshButton" type="button" data-i18n="common.refresh">Refresh</button>
+                  <div class="window-header-actions">
+                    <button class="ghost-button" id="refreshButton" type="button" data-i18n="common.refresh">Refresh</button>
+                    <div class="window-controls">
+                      <button class="icon-button window-control" data-panel-minimize="reports" type="button" aria-label="Minimize reports">−</button>
+                      <button class="icon-button window-control" data-panel-close="reports" type="button" aria-label="Close reports">×</button>
+                    </div>
+                  </div>
                 </div>
+                <div class="window-body">
 
                 <div class="filters" role="search">
                   <label class="search-field">
@@ -137,19 +171,29 @@
                 <div class="warning-card is-hidden" id="searchWarningCard"></div>
 
                 <div class="gallery" id="gallery"></div>
+                </div>
               </section>
             </section>
           </div>
         </section>
+          <div class="layout-divider is-horizontal is-hidden" id="contentSplitter" data-layout-resize="content" role="separator" aria-orientation="horizontal" aria-label="Resize content panels"></div>
+          <div class="secondary-stack is-hidden" id="secondaryStack">
 
-        <section class="panel page-panel surface-card is-hidden" id="roomSection" aria-labelledby="roomTitle">
-          <div class="section-heading">
+        <section class="panel page-panel surface-card window-panel is-hidden" id="roomSection" data-panel="room" aria-labelledby="roomTitle">
+          <div class="section-heading window-header">
             <div>
               <p class="eyebrow">Physical room</p>
               <h3 id="roomTitle">Lost &amp; Found Room</h3>
             </div>
-            <button class="ghost-button" id="refreshRoomButton" type="button">Refresh room</button>
+            <div class="window-header-actions">
+              <button class="ghost-button" id="refreshRoomButton" type="button">Refresh room</button>
+              <div class="window-controls">
+                <button class="icon-button window-control" data-panel-minimize="room" type="button" aria-label="Minimize room panel">−</button>
+                <button class="icon-button window-control" data-panel-close="room" type="button" aria-label="Close room panel">×</button>
+              </div>
+            </div>
           </div>
+          <div class="window-body">
           <p class="item-summary room-intro">Browse the items physically stored in the room. Open one, circle the exact part that proves it is yours, and then submit your claim.</p>
 
           <section class="panel surface-card room-admin-panel is-hidden" id="roomAdminPanel" aria-labelledby="roomAdminTitle">
@@ -181,16 +225,24 @@
           </div>
           <div class="warning-card is-hidden" id="roomWarningCard"></div>
           <div class="room-gallery" id="roomGallery"></div>
+          </div>
         </section>
 
-        <section class="panel page-panel surface-card is-hidden" id="returnedSection" aria-labelledby="returnedTitle">
-          <div class="section-heading">
+        <section class="panel page-panel surface-card window-panel is-hidden" id="returnedSection" data-panel="returned" aria-labelledby="returnedTitle">
+          <div class="section-heading window-header">
             <div>
               <p class="eyebrow">Recently closed</p>
               <h3 id="returnedTitle">Recently Returned</h3>
             </div>
-            <button class="ghost-button" id="refreshReturnedButton" type="button">Refresh returned</button>
+            <div class="window-header-actions">
+              <button class="ghost-button" id="refreshReturnedButton" type="button">Refresh returned</button>
+              <div class="window-controls">
+                <button class="icon-button window-control" data-panel-minimize="returned" type="button" aria-label="Minimize returned panel">−</button>
+                <button class="icon-button window-control" data-panel-close="returned" type="button" aria-label="Close returned panel">×</button>
+              </div>
+            </div>
           </div>
+          <div class="window-body">
           <p class="item-summary room-intro">These items were marked as returned recently. If something was claimed incorrectly, send a dispute so the admin team can review it.</p>
           <div class="list-meta">
             <span id="returnedCount">0 items</span>
@@ -199,30 +251,44 @@
           <p class="status-message" id="returnedMessage"></p>
           <div class="warning-card is-hidden" id="returnedWarningCard"></div>
           <div class="returned-list" id="returnedList"></div>
+          </div>
         </section>
 
-        <section class="panel page-panel surface-card is-hidden" id="claimsSection" aria-labelledby="claimsTitle">
-          <div class="section-heading">
+        <section class="panel page-panel surface-card window-panel is-hidden" id="claimsSection" data-panel="claims" aria-labelledby="claimsTitle">
+          <div class="section-heading window-header">
             <div>
               <p class="eyebrow">Claim history</p>
               <h3 id="claimsTitle">My Claims</h3>
             </div>
-            <button class="ghost-button" id="refreshClaimsButton" type="button" data-i18n="claims.refresh">Refresh claims</button>
+            <div class="window-header-actions">
+              <button class="ghost-button" id="refreshClaimsButton" type="button" data-i18n="claims.refresh">Refresh claims</button>
+              <div class="window-controls">
+                <button class="icon-button window-control" data-panel-minimize="claims" type="button" aria-label="Minimize claims panel">−</button>
+                <button class="icon-button window-control" data-panel-close="claims" type="button" aria-label="Close claims panel">×</button>
+              </div>
+            </div>
           </div>
+          <div class="window-body">
           <div class="list-meta">
             <span id="claimsCount">0 claims</span>
             <span class="loading-line" id="claimsLoading">Loading claims...</span>
           </div>
           <div class="claims-list" id="claimsList"></div>
+          </div>
         </section>
 
-        <section class="panel page-panel surface-card is-hidden" id="accountSection" aria-labelledby="accountTitle">
-          <div class="section-heading">
+        <section class="panel page-panel surface-card window-panel is-hidden" id="accountSection" data-panel="account" aria-labelledby="accountTitle">
+          <div class="section-heading window-header">
             <div>
               <p class="eyebrow">Profile</p>
               <h3 id="accountTitle">Account</h3>
             </div>
+            <div class="window-controls">
+              <button class="icon-button window-control" data-panel-minimize="account" type="button" aria-label="Minimize account panel">−</button>
+              <button class="icon-button window-control" data-panel-close="account" type="button" aria-label="Close account panel">×</button>
+            </div>
           </div>
+          <div class="window-body">
 
           <div class="account-page-grid">
             <article class="account-hero surface-card">
@@ -254,16 +320,24 @@
               <dl class="info-list account-info-list" id="accountInfoList"></dl>
             </article>
           </div>
+          </div>
         </section>
 
-        <section class="panel page-panel surface-card is-hidden" id="adminSection" aria-labelledby="adminTitle">
-          <div class="section-heading">
+        <section class="panel page-panel surface-card window-panel is-hidden" id="adminSection" data-panel="admin" aria-labelledby="adminTitle">
+          <div class="section-heading window-header">
             <div>
               <p class="eyebrow" data-i18n="admin.eyebrow">Admin tools</p>
               <h3 id="adminTitle" data-i18n="admin.title">Admin Panel</h3>
             </div>
-            <button class="ghost-button" id="refreshAdminButton" type="button" data-i18n="admin.refresh">Refresh admin data</button>
+            <div class="window-header-actions">
+              <button class="ghost-button" id="refreshAdminButton" type="button" data-i18n="admin.refresh">Refresh admin data</button>
+              <div class="window-controls">
+                <button class="icon-button window-control" data-panel-minimize="admin" type="button" aria-label="Minimize admin panel">−</button>
+                <button class="icon-button window-control" data-panel-close="admin" type="button" aria-label="Close admin panel">×</button>
+              </div>
+            </div>
           </div>
+          <div class="window-body">
 
           <div class="admin-toolbar">
             <div class="tab-switch admin-tab-switch" role="tablist" aria-label="Admin tabs">
@@ -317,7 +391,15 @@
               </div>
               <div class="admin-router-list" id="adminAuditList"></div>
             </article>
-            <div class="admin-router-list" id="adminInspectionList"></div>
+            <article class="admin-audit-section surface-card">
+              <div class="section-heading compact">
+                <div>
+                  <p class="eyebrow" data-i18n="admin.inspection">Inspection log</p>
+                  <h4>AI inspection records</h4>
+                </div>
+              </div>
+              <div class="admin-router-list" id="adminInspectionList"></div>
+            </article>
           </div>
 
           <div class="is-hidden" id="adminMonitorPanel">
@@ -338,16 +420,24 @@
             <p class="status-message" id="adminMonitorUpdated" data-i18n="admin.monitorWaiting">Waiting for live data...</p>
             <div class="warning-card is-hidden" id="adminMonitorWarning"></div>
           </div>
+          </div>
         </section>
 
-        <section class="panel page-panel surface-card is-hidden" id="querySection" aria-labelledby="queryPageTitle">
-          <div class="section-heading">
+        <section class="panel page-panel surface-card window-panel is-hidden" id="querySection" data-panel="query" aria-labelledby="queryPageTitle">
+          <div class="section-heading window-header">
             <div>
               <p class="eyebrow" data-i18n="query.eyebrow">Item chat</p>
               <h3 id="queryPageTitle" data-i18n="query.title">Query page</h3>
             </div>
-            <button class="ghost-button" id="queryBackButton" type="button" data-i18n="query.back">Back to reports</button>
+            <div class="window-header-actions">
+              <button class="ghost-button" id="queryBackButton" type="button" data-i18n="query.back">Back to reports</button>
+              <div class="window-controls">
+                <button class="icon-button window-control" data-panel-minimize="query" type="button" aria-label="Minimize query panel">−</button>
+                <button class="icon-button window-control" data-panel-close="query" type="button" aria-label="Close query panel">×</button>
+              </div>
+            </div>
           </div>
+          <div class="window-body">
 
           <article class="query-context-card surface-card" id="queryContextCard">
             <div class="form-grid query-selector-grid">
@@ -408,9 +498,14 @@
               </div>
             </form>
           </div>
+          </div>
         </section>
-      </main>
-      <button class="floating-report-button glass" id="openReportModalButton" type="button" aria-label="Open report form">+</button>
+          </div>
+        </main>
+      </div>
+      <button class="primary-button floating-report-button" id="openReportModalButton" type="button" aria-label="Open report form" title="Create a report">
+        <span aria-hidden="true">+</span>
+      </button>
       <footer class="app-footer">
         <p class="brand-footer" data-i18n="brand.footer">For Shrewsbury international school riverside</p>
       </footer>
@@ -585,6 +680,22 @@
         </div>
         <p class="status-message" id="confirmMessage"></p>
       </form>
+    </dialog>
+
+    <dialog class="claim-dialog glass image-preview-dialog" id="imagePreviewDialog">
+      <div class="claim-form image-preview-shell">
+        <div class="section-heading compact">
+          <div>
+            <p class="eyebrow">Preview</p>
+            <h3 id="imagePreviewTitle">Image preview</h3>
+          </div>
+          <button class="icon-button" id="closeImagePreviewDialog" type="button" aria-label="Close image preview">×</button>
+        </div>
+        <p class="dialog-subtitle" id="imagePreviewCaption">Preview image</p>
+        <div class="image-preview-frame">
+          <img id="imagePreviewImage" alt="">
+        </div>
+      </div>
     </dialog>
 
     <div class="tutorial-overlay is-hidden" id="tutorialOverlay" aria-hidden="true">
