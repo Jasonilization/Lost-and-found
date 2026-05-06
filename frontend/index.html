@@ -31,7 +31,16 @@
           </label>
           <label>
             <span data-i18n="auth.password">Password</span>
-            <input id="authPassword" type="password" minlength="6" autocomplete="current-password" required>
+            <div class="password-field">
+              <input id="authPassword" type="password" minlength="6" autocomplete="current-password" required>
+              <button class="password-toggle" id="authPasswordToggle" type="button" aria-label="Show password" data-i18n-aria-label="auth.showPassword">
+                <svg class="password-toggle-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"></path>
+                  <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.7"></circle>
+                  <path class="password-toggle-slash" d="M4 20 20 4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.9"></path>
+                </svg>
+              </button>
+            </div>
           </label>
           <div class="register-only is-hidden" id="registerFields">
             <label>

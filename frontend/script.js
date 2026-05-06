@@ -66,6 +66,8 @@ const translations = {
     "auth.register": "Register",
     "auth.username": "Username",
     "auth.password": "Password",
+    "auth.showPassword": "Show password",
+    "auth.hidePassword": "Hide password",
     "auth.initials": "Initials",
     "auth.classOf": "Class of",
     "topbar.eyebrow": "Local campus desk",
@@ -192,6 +194,8 @@ const translations = {
     "auth.register": "注册",
     "auth.username": "用户名",
     "auth.password": "密码",
+    "auth.showPassword": "显示密码",
+    "auth.hidePassword": "隐藏密码",
     "auth.initials": "姓名缩写",
     "auth.classOf": "毕业年份",
     "topbar.eyebrow": "校园服务台",
@@ -387,6 +391,8 @@ const translationEnhancements = {
     "auth.register": "สมัครสมาชิก",
     "auth.username": "ชื่อผู้ใช้",
     "auth.password": "รหัสผ่าน",
+    "auth.showPassword": "แสดงรหัสผ่าน",
+    "auth.hidePassword": "ซ่อนรหัสผ่าน",
     "auth.initials": "ชื่อย่อ",
     "auth.classOf": "รุ่นจบ",
     "topbar.eyebrow": "จุดบริการภายในโรงเรียน",
@@ -681,6 +687,7 @@ const appShell = document.querySelector("#appShell");
 const authForm = document.querySelector("#authForm");
 const authUsername = document.querySelector("#authUsername");
 const authPassword = document.querySelector("#authPassword");
+const authPasswordToggle = document.querySelector("#authPasswordToggle");
 const authInitials = document.querySelector("#authInitials");
 const authClassOf = document.querySelector("#authClassOf");
 const registerFields = document.querySelector("#registerFields");
@@ -2180,6 +2187,18 @@ function closeReportModal() {
   resetReportModalState();
 }
 
+function setAuthPasswordVisibility(visible) {
+  if (!authPassword) return;
+  const isVisible = Boolean(visible);
+  authPassword.type = isVisible ? "text" : "password";
+  if (authPasswordToggle) {
+    authPasswordToggle.classList.toggle("is-visible", isVisible);
+    const labelKey = isVisible ? "auth.hidePassword" : "auth.showPassword";
+    authPasswordToggle.setAttribute("aria-label", t(labelKey));
+    authPasswordToggle.setAttribute("title", t(labelKey));
+  }
+}
+
 function setAuthView(view) {
   state.authView = view;
   authSubmitLabel.textContent = t(view === "login" ? "auth.login" : "auth.register");
@@ -2187,6 +2206,7 @@ function setAuthView(view) {
   registerTab.classList.toggle("is-active", view === "register");
   registerFields.classList.toggle("is-hidden", view !== "register");
   authPassword.setAttribute("autocomplete", view === "login" ? "current-password" : "new-password");
+  setAuthPasswordVisibility(false);
 }
 
 function currentUserCanAdmin() {

@@ -529,3 +529,117 @@ Tags: book, illustration, fantasy
 "description": "An open umbrella is visible among folded items on a shelf inside a cabinet.",
 "tags": ["umbrellas", "shelf", "storage", "cabinet"]
 }
+2026-05-06 12:30:11,603 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-06 12:30:11,603 INFO [LLaVA] debug request started for item claim-preview:1
+2026-05-06 12:30:11,603 INFO [LLaVA] debug image file bytes: 31915
+2026-05-06 12:30:11,603 INFO [LLaVA] debug image base64 length: 42556
+2026-05-06 12:30:11,603 INFO [LLaVA] debug request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [42556], 'stream': False}
+2026-05-06 12:30:11,603 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [42556], 'stream': False}
+2026-05-06 12:30:24,908 INFO [LLaVA RAW] {
+  "description": "A colorful lunch bag with an astronaut and rocket design, visible inside a round photo.",
+  "tags": ["lunchbox", "rocket", "astronaut"]
+}
+2026-05-06 12:33:20,126 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-06 12:33:20,128 INFO [LLaVA] debug request started for item claim-preview:1
+2026-05-06 12:33:20,128 INFO [LLaVA] debug image file bytes: 10139
+2026-05-06 12:33:20,128 INFO [LLaVA] debug image base64 length: 13520
+2026-05-06 12:33:20,128 INFO [LLaVA] debug request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [13520], 'stream': False}
+2026-05-06 12:33:20,128 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [13520], 'stream': False}
+2026-05-06 12:33:31,091 INFO [LLaVA RAW] {
+"description": "A book cover with an illustration and text. The book title appears to be 'Dog Man.'",
+"tags": ["book", "graphic novel", "comics"]
+}
+2026-05-06 12:41:29,637 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-06 12:41:29,638 INFO [LLaVA] debug request started for item claim-preview:1
+2026-05-06 12:41:29,638 INFO [LLaVA] debug image file bytes: 67773
+2026-05-06 12:41:29,638 INFO [LLaVA] debug image base64 length: 90364
+2026-05-06 12:41:29,638 INFO [LLaVA] debug request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [90364], 'stream': False}
+2026-05-06 12:41:29,638 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [90364], 'stream': False}
+2026-05-06 12:41:42,628 INFO [LLaVA RAW] {
+  "description": "A pink plastic bin filled with various items in a room with shelves.",
+  "tags": ["storage", "organization", "container"]
+}
+2026-05-06 12:42:53,587 INFO [Upload] received image payload filename=Lost-and-Found-Folwell-Elementary.jpg content_type=image/jpeg base64_length=94196
+2026-05-06 12:42:53,589 INFO [Upload] decoded image bytes filename=Lost-and-Found-Folwell-Elementary.jpg bytes=70646
+2026-05-06 12:42:53,599 INFO [Upload] saved image filename=Lost-and-Found-Folwell-Elementary.jpg stored_name=33737e99c36e40e89679400c2017aef6.jpg bytes=95204 mime_type=image/jpeg path=/uploads/33737e99c36e40e89679400c2017aef6.jpg
+2026-05-06 12:42:53,608 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-06 12:42:53,609 INFO [LLaVA] tagging started for item room-item-1
+2026-05-06 12:42:53,609 INFO [LLaVA] image file bytes: 95204
+2026-05-06 12:42:53,609 INFO [LLaVA] image base64 length: 126940
+2026-05-06 12:42:53,609 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'Perform both checks below on the same image in one pass.\nSafety prompt:\nIs this image appropriate for a school lost and found system?\nAnswer ONLY: SAFE or UNSAFE.\nTagging prompt:\nAnalyze this image of a lost item.\nReturn ONLY a list of 5-8 short tags.\nUse commas if possible.\nFocus on object type, color, brand, and distinctive features.\nIf possible, return JSON like {"moderation":"SAFE","tags":["tag1","tag2"]}.\nIf the image is inappropriate, reply with UNSAFE.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [126940], 'stream': False}
+2026-05-06 12:43:05,382 INFO [LLaVA RAW] {
+"moderation": "UNSAFE",
+"tags": ["school supplies", "organized storage", "clothes hanging on pegs", "basket with trash can", "bookshelf"]
+}
+2026-05-06 12:43:05,384 INFO [LLaVA] moderation result: UNSAFE
+2026-05-06 12:43:05,384 INFO [LLaVA TAGS] ['school', 'supplies', 'organized', 'storage', 'clothes', 'hanging', 'on', 'pegs']
+2026-05-06 12:43:10,562 INFO [Upload] received image payload filename=Lost-and-Found-Folwell-Elementary.jpg content_type=image/jpeg base64_length=94196
+2026-05-06 12:43:10,562 INFO [Upload] decoded image bytes filename=Lost-and-Found-Folwell-Elementary.jpg bytes=70646
+2026-05-06 12:43:10,569 INFO [Upload] saved image filename=Lost-and-Found-Folwell-Elementary.jpg stored_name=79646fdb7c974834a623a384207784e4.jpg bytes=95204 mime_type=image/jpeg path=/uploads/79646fdb7c974834a623a384207784e4.jpg
+2026-05-06 12:43:10,581 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-06 12:43:10,581 INFO [LLaVA] tagging started for item room-item-1
+2026-05-06 12:43:10,581 INFO [LLaVA] image file bytes: 95204
+2026-05-06 12:43:10,582 INFO [LLaVA] image base64 length: 126940
+2026-05-06 12:43:10,582 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'Perform both checks below on the same image in one pass.\nSafety prompt:\nIs this image appropriate for a school lost and found system?\nAnswer ONLY: SAFE or UNSAFE.\nTagging prompt:\nAnalyze this image of a lost item.\nReturn ONLY a list of 5-8 short tags.\nUse commas if possible.\nFocus on object type, color, brand, and distinctive features.\nIf possible, return JSON like {"moderation":"SAFE","tags":["tag1","tag2"]}.\nIf the image is inappropriate, reply with UNSAFE.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [126940], 'stream': False}
+2026-05-06 12:43:14,015 INFO [LLaVA RAW] ```json
+{
+  "moderation": "SAFE",
+  "tags": ["jackets", "sweaters", "shoes", "laundry basket", "lockers"]
+}
+```
+2026-05-06 12:43:14,015 INFO [LLaVA] moderation result: SAFE
+2026-05-06 12:43:14,015 INFO [LLaVA TAGS] ['jackets', 'sweaters', 'shoes', 'laundry', 'basket', 'lockers']
+2026-05-06 12:43:47,067 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-06 12:43:47,068 INFO [LLaVA] debug request started for item claim-preview:2
+2026-05-06 12:43:47,068 INFO [LLaVA] debug image file bytes: 13678
+2026-05-06 12:43:47,068 INFO [LLaVA] debug image base64 length: 18240
+2026-05-06 12:43:47,068 INFO [LLaVA] debug request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [18240], 'stream': False}
+2026-05-06 12:43:47,068 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [18240], 'stream': False}
+2026-05-06 12:43:57,363 INFO [LLaVA RAW] {
+  "description": "Close-up image of shoes with laces in a disorganized setting.",
+  "tags": ["footwear", "shoes", "laces", "indoor", "unclear"]
+}
+2026-05-06 14:49:53,147 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-06 14:49:53,147 INFO [LLaVA] debug request started for item claim-preview:2
+2026-05-06 14:49:53,147 INFO [LLaVA] debug image file bytes: 37406
+2026-05-06 14:49:53,147 INFO [LLaVA] debug image base64 length: 49876
+2026-05-06 14:49:53,147 INFO [LLaVA] debug request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [49876], 'stream': False}
+2026-05-06 14:49:53,147 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [49876], 'stream': False}
+2026-05-06 14:50:06,215 INFO [LLaVA RAW] ```json
+{
+  "description": "A group of colorful items hanging on a rack, possibly in a lost-and-found area.",
+  "tags": ["clothes", "rack", "colorful"]
+}
+```
+2026-05-06 14:51:45,940 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-06 14:51:45,942 INFO [LLaVA] debug request started for item claim-preview:2
+2026-05-06 14:51:45,942 INFO [LLaVA] debug image file bytes: 9625
+2026-05-06 14:51:45,942 INFO [LLaVA] debug image base64 length: 12836
+2026-05-06 14:51:45,942 INFO [LLaVA] debug request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [12836], 'stream': False}
+2026-05-06 14:51:45,942 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [12836], 'stream': False}
+2026-05-06 14:51:55,898 INFO [LLaVA RAW] {
+"description": "An image of what appears to be a blue object with some texture on the right and a darker shade at the top left corner, possibly a small plastic container or package.",
+"tags": ["plastic", "container", "blue"]
+}
+2026-05-06 15:04:24,497 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-06 15:04:24,498 INFO [LLaVA] debug request started for item claim-preview:2
+2026-05-06 15:04:24,498 INFO [LLaVA] debug image file bytes: 41190
+2026-05-06 15:04:24,498 INFO [LLaVA] debug image base64 length: 54920
+2026-05-06 15:04:24,498 INFO [LLaVA] debug request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [54920], 'stream': False}
+2026-05-06 15:04:24,498 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [54920], 'stream': False}
+2026-05-06 15:59:52,564 INFO [LLaVA RAW] ```json
+{
+  "description": "A view of hanging coats in colors like brown, blue, orange, red and purple",
+  "tags": ["coats", "rack", "colors"]
+}
+```
+2026-05-06 17:47:56,806 INFO Resolved Ollama image model alias llava -> llava:latest
+2026-05-06 17:47:56,807 INFO [LLaVA] debug request started for item claim-preview:2
+2026-05-06 17:47:56,807 INFO [LLaVA] debug image file bytes: 14817
+2026-05-06 17:47:56,807 INFO [LLaVA] debug image base64 length: 19756
+2026-05-06 17:47:56,807 INFO [LLaVA] debug request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [19756], 'stream': False}
+2026-05-06 17:47:56,807 INFO [LLaVA] request payload: {'model': 'llava:latest', 'prompt': 'You are looking only at a selected circular region from a lost-and-found image.\nDescribe only what is visible inside this selected area.\nReturn strict JSON with keys "description" and "tags".\nThe "description" must be short. The "tags" value must be a short list of 1 to 5 lowercase tags.\nIf the region is unclear, say that it is unclear instead of guessing.', 'has_images': True, 'images_count': 1, 'image_base64_lengths': [19756], 'stream': False}
+2026-05-06 17:48:09,661 INFO [LLaVA RAW] {
+  "description": "A blue plastic container in an indoor setting.",
+  "tags": ["blue", "container", "indoor"]
+}

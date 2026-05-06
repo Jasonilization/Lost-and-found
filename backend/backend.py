@@ -54,7 +54,7 @@ except ImportError:  # pragma: no cover - Unix-only runtime helper
 from backend.ai_assistant import AI_MODEL, analyze_claim_match, analyze_evidence, analyze_report_abuse, model_size_label, normalize_language
 from backend.ai_moderation import classify_user_input
 from backend.database import AIInspectionLog, AuditLog, Claim, ItemQuery, LostFoundItem, Notification, QueryMessage, ReturnedItemDispute, SessionLocal, User, UserSession, init_db
-from backend.moderation import validate_class_of, validate_initials, validate_text_input
+from backend.moderation import clean_text, validate_class_of, validate_initials, validate_text_input
 from backend.ollama_tagger import (
     build_search_text,
     debug_image_request,
@@ -187,6 +187,18 @@ CLAIM_PREVIEW_PROMPT = (
 )
 MAX_UPLOAD_SIZE = 5 * 1024 * 1024
 MAX_REQUEST_SIZE = 5 * 1024 * 1024
+SOFT_DELETE_UPLOAD_CLEANUP_DELAY_SECONDS = max(0, int(os.getenv("SOFT_DELETE_UPLOAD_CLEANUP_DELAY_SECONDS", "120")))
+CLAIM_MODERATION_BLOCK_HINTS = (
+    "abusive",
+    "gibberish",
+    "inappropriate",
+    "keyboard mash",
+    "nonsens",
+    "offensive",
+    "random characters",
+    "spam",
+    "threat",
+)
 UPLOAD_CHUNK_SIZE = 1024 * 1024
 RATE_LIMITS = {
     "chat": {"limit": 10, "window": timedelta(seconds=30)},
@@ -1004,16 +1016,72 @@ def decode_image_payload(image: Optional[ReportImagePayload]) -> Optional[str]:
     return saved["path"] if saved else None
 
 
+def resolve_upload_path(upload_path: Optional[str]) -> Optional[Path]:
+    raw_path = str(upload_path or "").strip()
+    if not raw_path.startswith("/uploads/"):
+        return None
+
+    absolute_path = (UPLOAD_DIR / raw_path[len("/uploads/"):]).resolve()
+    try:
+        absolute_path.relative_to(UPLOAD_DIR)
+    except ValueError:
+        report_logger.warning("Rejected upload cleanup outside uploads: %s", raw_path)
+        return None
+    return absolute_path
+
+
 def delete_uploaded_path(upload_path: Optional[str]) -> None:
-    if not upload_path or not str(upload_path).startswith("/uploads/"):
+    absolute_path = resolve_upload_path(upload_path)
+    if not absolute_path:
         return
 
-    absolute_path = BASE_DIR / str(upload_path).lstrip("/")
     try:
         if absolute_path.exists():
             absolute_path.unlink()
     except OSError:
-        report_logger.warning("Could not delete upload path after rejection: %s", upload_path, exc_info=True)
+        report_logger.warning("Could not delete upload path: %s", upload_path, exc_info=True)
+
+
+def item_upload_paths(item: LostFoundItem) -> list[str]:
+    paths: list[str] = []
+    for upload_path in [item.image_path, *item.evidence_images]:
+        normalized_path = str(upload_path or "").strip()
+        if normalized_path and normalized_path not in paths:
+            paths.append(normalized_path)
+    return paths
+
+
+def sync_item_upload_references(item: LostFoundItem) -> None:
+    existing_paths = [
+        upload_path
+        for upload_path in item_upload_paths(item)
+        if (resolved_path := resolve_upload_path(upload_path)) and resolved_path.exists()
+    ]
+    item.image_path = item.image_path if item.image_path in existing_paths else None
+    item.evidence_images = existing_paths
+
+
+def cleanup_deleted_item_uploads(item_id: int, *, delay_seconds: int = SOFT_DELETE_UPLOAD_CLEANUP_DELAY_SECONDS) -> None:
+    delay = max(0, int(delay_seconds or 0))
+    if delay:
+        time.sleep(delay)
+
+    db = SessionLocal()
+    try:
+        item = db.query(LostFoundItem).filter(LostFoundItem.id == item_id).first()
+        if not item or not item.deleted_at:
+            return
+
+        for upload_path in item_upload_paths(item):
+            delete_uploaded_path(upload_path)
+
+        sync_item_upload_references(item)
+        db.commit()
+    except Exception:
+        db.rollback()
+        report_logger.warning("Deferred upload cleanup failed for item_id=%s", item_id, exc_info=True)
+    finally:
+        db.close()
 
 
 def latest_uploaded_image_path() -> Optional[Path]:
@@ -1332,6 +1400,53 @@ def moderate_field(value: str, field_label: str, *, min_meaningful_chars: int, m
     if suspicious:
         raise HTTPException(status_code=400, detail=f"{field_label} looks invalid or too noisy.")
     return cleaned
+
+
+def minimally_validate_field(value: str, field_label: str, *, min_meaningful_chars: int, max_chars: int) -> str:
+    cleaned = clean_text(value)
+    if not cleaned:
+        raise HTTPException(status_code=400, detail=f"{field_label} is required.")
+    if len(cleaned) > max_chars:
+        raise HTTPException(status_code=400, detail=f"{field_label} must be {max_chars} characters or fewer.")
+    if len(re.findall(r"[A-Za-z0-9]", cleaned)) < min_meaningful_chars:
+        raise HTTPException(status_code=400, detail=f"{field_label} is too short.")
+    return cleaned
+
+
+def should_block_claim_moderation(decision: dict) -> bool:
+    if decision.get("allowed", False):
+        return False
+    reason = clean_text(str(decision.get("reason", ""))).lower()
+    return any(hint in reason for hint in CLAIM_MODERATION_BLOCK_HINTS)
+
+
+def moderate_claim_submission(
+    db: Session,
+    *,
+    current_user: Optional[User],
+    route: str,
+    input_text: str,
+) -> dict:
+    decision = classify_user_input(input_text)
+    blocked = should_block_claim_moderation(decision)
+    normalized_decision = dict(decision)
+    if not blocked:
+        normalized_decision["allowed"] = True
+        normalized_decision["reason"] = str(decision.get("reason", "")).strip() or "Accepted: claim input allowed unless clearly invalid."
+
+    log_ai_inspection(
+        db,
+        current_user=current_user,
+        route=route,
+        input_text=input_text,
+        decision=normalized_decision,
+        feature="moderation",
+        model_name=AI_MODEL,
+        model_size=model_size_label(AI_MODEL),
+        fallback_triggered=bool(decision.get("fallback_triggered")),
+        request_metadata={"route": route, "mode": "lenient-claim"},
+    )
+    return normalized_decision
 
 
 def ensure_submission_allowed(db: Session, current_user: User) -> None:
@@ -3067,21 +3182,25 @@ def claim_item(
     if existing_claim:
         raise HTTPException(status_code=409, detail="You already submitted a claim for this item.")
 
-    enforce_moderation(
+    moderation_decision = moderate_claim_submission(
         db,
         current_user=current_user,
         route=route,
         input_text=claim_input_text,
-        blocked_reason="Message rejected due to content policy.",
     )
+    if not moderation_decision.get("allowed", False):
+        log_blocked_attempt(
+            route=route,
+            current_user=current_user,
+            reason=str(moderation_decision.get("reason", "Message rejected due to content policy.")).strip() or "Message rejected due to content policy.",
+            content=claim_input_text,
+        )
+        raise HTTPException(status_code=400, detail="Message rejected due to content policy.")
 
-    claim_reason = moderate_field(payload.claim_reason, "Claim reason", min_meaningful_chars=6, max_chars=240)
-    item_description = moderate_field(payload.item_description, "Item description", min_meaningful_chars=6, max_chars=240)
-    lost_location = moderate_field(payload.lost_location, "Lost location", min_meaningful_chars=4, max_chars=120)
-    identifying_info = moderate_field(payload.identifying_info, "Identifying info", min_meaningful_chars=4, max_chars=240)
-
-    if len(re.findall(r"[a-z0-9']+", identifying_info.lower())) < 2:
-        raise HTTPException(status_code=400, detail="Add identifying details like color, brand, markings, or unique features.")
+    claim_reason = minimally_validate_field(payload.claim_reason, "Claim reason", min_meaningful_chars=3, max_chars=240)
+    item_description = minimally_validate_field(payload.item_description, "Item description", min_meaningful_chars=2, max_chars=240)
+    lost_location = minimally_validate_field(payload.lost_location, "Lost location", min_meaningful_chars=2, max_chars=120)
+    identifying_info = minimally_validate_field(payload.identifying_info, "Identifying info", min_meaningful_chars=2, max_chars=240)
 
     claim_match = analyze_claim_match(
         claim_reason=claim_reason,
@@ -3090,13 +3209,6 @@ def claim_item(
         identifying_info=identifying_info,
         item=serialize_item(item, get_item_reporter(db, item)),
     )
-    if int(claim_match.get("match_score", 0) or 0) < 25:
-        return reject_blocked_request(
-            route=route,
-            current_user=current_user,
-            reason="Claim rejected because the provided details do not match the reported item closely enough.",
-            content=claim_input_text,
-        )
     log_ai_package(
         db,
         current_user=current_user,
@@ -3376,6 +3488,7 @@ def admin_ai_inspection(
 @app.delete("/admin/items/{item_id}")
 def admin_delete_item(
     item_id: int,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(require_admin_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -3396,6 +3509,7 @@ def admin_delete_item(
         metadata={"soft_delete": True},
     )
     db.commit()
+    background_tasks.add_task(cleanup_deleted_item_uploads, item.id)
     log_admin_action(current_user, "delete-item", item=item, note=f"title={item.title}")
     return {"message": "Report deleted. You can undo this action shortly.", "item_id": item.id}
 
@@ -3412,6 +3526,7 @@ def admin_restore_item(
     before_state = snapshot_item(item)
     item.deleted_at = None
     item.deleted_by_user_id = None
+    sync_item_upload_references(item)
     create_audit_log(
         db,
         user_id=current_user.id,

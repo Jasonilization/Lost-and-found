@@ -698,6 +698,40 @@ textarea::placeholder {
   color: var(--text-muted);
 }
 
+.password-field {
+  position: relative;
+}
+
+.password-field input {
+  padding-right: 56px;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  transform: translateY(-50%);
+}
+
+.password-toggle-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.password-toggle-slash {
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.password-toggle.is-visible .password-toggle-slash {
+  opacity: 1;
+}
+
 textarea {
   resize: vertical;
 }
