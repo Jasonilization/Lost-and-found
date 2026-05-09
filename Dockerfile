@@ -8,7 +8,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     DATA_DIR=/app/data \
     DATABASE_PATH=/app/data/lost_found.db \
     UPLOAD_DIR=/app/uploads \
-    LOG_DIR=/app/logs
+    LOG_DIR=/app/logs \
+    OLLAMA_HOST=http://localhost:11434 \
+    OLLAMA_MODEL=llama3:8b \
+    OLLAMA_TEXT_MODEL=llama3:8b \
+    AI_CHAT_MODEL=llama3:8b
 
 WORKDIR /app
 

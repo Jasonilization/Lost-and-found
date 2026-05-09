@@ -13,8 +13,10 @@ from typing import Any, Optional
 
 import requests
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_TEXT_MODEL = os.getenv("OLLAMA_TEXT_MODEL", "llama3:8b")
+from backend.config import OLLAMA_HOST, OLLAMA_MODEL
+
+OLLAMA_URL = OLLAMA_HOST
+OLLAMA_TEXT_MODEL = os.getenv("OLLAMA_TEXT_MODEL", OLLAMA_MODEL).strip() or OLLAMA_MODEL
 OLLAMA_IMAGE_MODEL = os.getenv("OLLAMA_IMAGE_MODEL", "llava").strip() or "llava"
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "20"))
 OLLAMA_HEALTH_TIMEOUT = float(os.getenv("OLLAMA_HEALTH_TIMEOUT", "2"))
@@ -84,6 +86,42 @@ TAG_STOP_WORDS = {
     "this",
     "with",
 }
+GENERIC_IMAGE_TAGS = {
+    "campus",
+    "item",
+    "object",
+    "school",
+    "school item",
+    "school-item",
+    "lost item",
+    "lost-item",
+    "found item",
+    "found-item",
+    "unknown item",
+}
+MISSING_IMAGE_RESPONSE_PATTERN = re.compile(
+    r"\b(?:cannot|can't|unable|not able|do not|don't)\b.*\b(?:see|view|access|inspect|analy[sz]e)\b.*\bimage\b",
+    re.IGNORECASE,
+)
+DESCRIPTIVE_OBJECT_PATTERN = re.compile(
+    r"\b(?:black|blue|brown|gold|gray|green|grey|orange|pink|purple|red|silver|white|yellow)"
+    r"(?:\s+[a-z0-9-]+){0,2}\s+"
+    r"(?:bag|bottle|book|calculator|card|case|charger|glasses|headphones|hoodie|jacket|key|keys|laptop|notebook|phone|tablet|uniform|wallet|watch)\b",
+    re.IGNORECASE,
+)
+VISUAL_FEATURE_TAGS = (
+    "stickers",
+    "scratched case",
+    "scratch",
+    "scratched",
+    "dent",
+    "dented",
+    "scuffed",
+    "loop cap",
+    "plastic",
+    "metal",
+    "antique",
+)
 
 _LLAVA_STATE_LOCK = threading.Lock()
 _LLAVA_RUNTIME_STATE: dict[str, Any] = {
@@ -184,7 +222,8 @@ def image_to_base64(image_path: str) -> str:
 def ping_ollama() -> tuple[bool, float]:
     started = time.perf_counter()
     try:
-        requests.get(OLLAMA_URL, timeout=OLLAMA_HEALTH_TIMEOUT)
+        response = requests.get(OLLAMA_URL, timeout=OLLAMA_HEALTH_TIMEOUT)
+        response.raise_for_status()
     except requests.RequestException as exc:
         latency_ms = (time.perf_counter() - started) * 1000
         logger.info("Ollama health check failed: %s", exc)
@@ -198,26 +237,59 @@ def _ollama_root_available() -> bool:
     return available
 
 
+def _resolve_model_name(preferred_model: str, available_models: list[str]) -> str:
+    model = (preferred_model or "").strip()
+    if not model:
+        return ""
+    if model in available_models:
+        return model
+    if ":" not in model:
+        latest_alias = f"{model}:latest"
+        if latest_alias in available_models:
+            return latest_alias
+    for available_model in available_models:
+        if available_model.split(":", 1)[0] == model:
+            return available_model
+    return ""
+
+
 def get_ollama_status() -> dict:
     available, latency_ms = ping_ollama()
     if not available:
         return {
             "available": False,
-            "message": f"Ollama is not reachable at {OLLAMA_URL}. Start it with `ollama serve`.",
+            "host": OLLAMA_URL,
+            "message": f"Ollama is not reachable at {OLLAMA_URL}. Configure OLLAMA_HOST or start Ollama.",
             "error": "Health check failed.",
             "text_model": OLLAMA_TEXT_MODEL,
+            "text_ready": False,
             "image_model": "",
             "image_ready": False,
+            "models": [],
             "latency_ms": round(latency_ms, 2),
         }
 
+    models: list[str] = []
+    model_error = ""
+    try:
+        models = _list_ollama_models()
+    except requests.RequestException as exc:
+        model_error = str(exc)
+        logger.warning("Could not list Ollama models: %s", exc)
+
+    resolved_text_model = _resolve_model_name(OLLAMA_TEXT_MODEL, models)
+    resolved_image_model = _resolve_model_name(OLLAMA_IMAGE_MODEL, models)
+
     return {
         "available": True,
+        "host": OLLAMA_URL,
         "message": f"Ollama is reachable at {OLLAMA_URL}.",
-        "text_model": OLLAMA_TEXT_MODEL,
-        "text_ready": True,
-        "image_model": OLLAMA_IMAGE_MODEL,
-        "image_ready": True,
+        "text_model": resolved_text_model or OLLAMA_TEXT_MODEL,
+        "text_ready": bool(resolved_text_model),
+        "image_model": resolved_image_model or OLLAMA_IMAGE_MODEL,
+        "image_ready": bool(resolved_image_model),
+        "models": models,
+        "error": model_error,
         "latency_ms": round(latency_ms, 2),
     }
 
@@ -245,19 +317,11 @@ def get_available_image_model() -> str:
         logger.warning("Could not list Ollama models for image tagging: %s", exc)
         return ""
 
-    if OLLAMA_IMAGE_MODEL in available_models:
-        return OLLAMA_IMAGE_MODEL
-
-    if ":" not in OLLAMA_IMAGE_MODEL:
-        latest_alias = f"{OLLAMA_IMAGE_MODEL}:latest"
-        if latest_alias in available_models:
-            logger.info("Resolved Ollama image model alias %s -> %s", OLLAMA_IMAGE_MODEL, latest_alias)
-            return latest_alias
-
-    for available_model in available_models:
-        if available_model.split(":", 1)[0] == OLLAMA_IMAGE_MODEL:
-            logger.info("Resolved Ollama image model alias %s -> %s", OLLAMA_IMAGE_MODEL, available_model)
-            return available_model
+    resolved_model = _resolve_model_name(OLLAMA_IMAGE_MODEL, available_models)
+    if resolved_model:
+        if resolved_model != OLLAMA_IMAGE_MODEL:
+            logger.info("Resolved Ollama image model alias %s -> %s", OLLAMA_IMAGE_MODEL, resolved_model)
+        return resolved_model
 
     logger.warning("No multimodal Ollama model available for image tagging. Checked: %s", OLLAMA_IMAGE_MODEL)
     return ""
@@ -269,6 +333,7 @@ def _normalize_tags(values: list[str]) -> list[str]:
         normalized = str(value).strip().lower()
         normalized = normalized.strip("`'\"[]{}()<>")
         normalized = re.sub(r"^[^a-z0-9]+|[^a-z0-9]+$", "", normalized)
+        normalized = re.sub(r"\s+", " ", normalized)
         if normalized and normalized not in cleaned:
             cleaned.append(normalized)
         if len(cleaned) >= MAX_TAGS:
@@ -284,9 +349,42 @@ def _coerce_json_text(content: str) -> str:
     return stripped.strip()
 
 
+def _extract_descriptive_tags(text: str) -> list[str]:
+    normalized_text = re.sub(r"\s+", " ", str(text or "").lower())
+    tags: list[str] = []
+
+    for match in DESCRIPTIVE_OBJECT_PATTERN.finditer(normalized_text):
+        tags.append(match.group(0))
+
+    for feature in VISUAL_FEATURE_TAGS:
+        if re.search(rf"\b{re.escape(feature)}\b", normalized_text):
+            tags.append(feature)
+
+    if not tags:
+        tags.extend(_extract_keyword_tags(normalized_text))
+
+    return _normalize_tags(tags)
+
+
 def _split_raw_tag_text(text: str) -> list[str]:
-    parts = re.split(r"[\s,]+", text)
-    return _normalize_tags(parts)
+    if re.search(r"[,;\n]", text):
+        return _normalize_tags(re.split(r"[,;\n]+", text))
+    return _extract_descriptive_tags(text)
+
+
+def _validate_image_tags(tags: list[str]) -> tuple[list[str], str, list[str], str]:
+    cleaned = _normalize_tags(tags)
+    useful_tags = [
+        tag for tag in cleaned
+        if tag not in GENERIC_IMAGE_TAGS
+        and " ".join(part for part in re.split(r"[-\s]+", tag) if part) not in GENERIC_IMAGE_TAGS
+    ]
+
+    if cleaned and not useful_tags:
+        return [], "Image tags were too generic to use.", [], "invalid"
+    if useful_tags and len(useful_tags) < 3:
+        return useful_tags, "", ["Image tags were shorter than preferred and were kept with low confidence."], "low"
+    return useful_tags, "", [], "normal"
 
 
 def _parse_tag_response(content: str) -> list[str]:
@@ -302,19 +400,13 @@ def _parse_tag_response(content: str) -> list[str]:
     if isinstance(parsed, dict):
         raw_tags = parsed.get("tags", [])
         if isinstance(raw_tags, list):
-            flattened: list[str] = []
-            for value in raw_tags:
-                flattened.extend(_split_raw_tag_text(str(value)))
-            return _normalize_tags(flattened)
+            return _normalize_tags([str(value) for value in raw_tags])
         if isinstance(raw_tags, str):
             return _split_raw_tag_text(raw_tags)
         return _split_raw_tag_text(stripped)
 
     if isinstance(parsed, list):
-        flattened = []
-        for value in parsed:
-            flattened.extend(_split_raw_tag_text(str(value)))
-        return _normalize_tags(flattened)
+        return _normalize_tags([str(value) for value in parsed])
 
     if isinstance(parsed, str):
         return _split_raw_tag_text(parsed)
@@ -400,12 +492,17 @@ def _parse_inspection_response(content: str) -> dict[str, Any]:
     stripped = _coerce_json_text(content)
     if not stripped:
         raise ValueError("Missing image inspection response.")
+    if MISSING_IMAGE_RESPONSE_PATTERN.search(stripped):
+        raise ValueError("Image model did not inspect the uploaded image.")
 
     moderation = _parse_moderation(stripped)
-    tags = _parse_tag_response(stripped)
+    tags, validation_error, validation_warnings, validation_strength = _validate_image_tags(_parse_tag_response(stripped))
     return {
         "moderation": moderation,
         "tags": tags[:MAX_TAGS],
+        "tag_validation_error": validation_error,
+        "tag_validation_warnings": validation_warnings,
+        "validation_strength": validation_strength,
         "raw": stripped,
     }
 

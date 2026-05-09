@@ -71,12 +71,16 @@ UPLOAD_DIR=./uploads
 LOG_DIR=./logs
 ADMIN_USERNAME=
 ADMIN_PASSWORD=
-OLLAMA_URL=http://localhost:11434
+OLLAMA_HOST=http://localhost:11434
+OLLAMA_MODEL=llama3:8b
 OLLAMA_TEXT_MODEL=llama3:8b
+OLLAMA_IMAGE_MODEL=llava
 AI_CHAT_MODEL=llama3:8b
 ```
 
 If `ADMIN_USERNAME` and `ADMIN_PASSWORD` are set and no admin exists yet, the backend will bootstrap the first admin account on startup.
+
+For LAN or external Ollama servers, set `OLLAMA_HOST` to the reachable server URL, such as `http://192.168.1.20:11434`. For Docker on a host-running Ollama, set it to the host address reachable from the container. The app detects downloaded models through Ollama's HTTP API instead of local model paths.
 
 ## Docker Run
 
@@ -168,7 +172,7 @@ If Ollama is not running:
 
 - the app should still boot
 - AI tagging and AI chat features may fall back or be limited
-- start Ollama with `ollama serve` if you want local model features
+- set `OLLAMA_HOST` for LAN/external servers, or start local Ollama with `ollama serve`
 
 If uploaded images do not appear:
 

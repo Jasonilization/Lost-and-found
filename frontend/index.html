@@ -44,6 +44,19 @@
           </label>
           <div class="register-only is-hidden" id="registerFields">
             <label>
+              <span>Confirm password</span>
+              <div class="password-field">
+                <input id="authConfirmPassword" type="password" minlength="6" autocomplete="new-password">
+                <button class="password-toggle" id="authConfirmPasswordToggle" type="button" aria-label="Show password" data-i18n-aria-label="auth.showPassword">
+                  <svg class="password-toggle-icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"></path>
+                    <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.7"></circle>
+                    <path class="password-toggle-slash" d="M4 20 20 4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.9"></path>
+                  </svg>
+                </button>
+              </div>
+            </label>
+            <label>
               <span data-i18n="auth.initials">Initials</span>
               <input id="authInitials" type="text" placeholder="jason.h" autocomplete="off">
             </label>
@@ -71,6 +84,15 @@
           </div>
         </div>
         <div class="app-topbar-end">
+          <label class="nav-mode-select-wrap">
+            <span>Nav</span>
+            <select id="sidebarModeSelect" aria-label="Navigation layout">
+              <option value="left">Left</option>
+              <option value="top">Top</option>
+              <option value="bottom">Bottom</option>
+              <option value="minimal">Minimal</option>
+            </select>
+          </label>
           <button class="theme-toggle glass" id="theme-toggle" type="button" aria-label="Use light mode" title="Toggle theme">
             <span class="theme-toggle-dot" id="theme-icon" aria-hidden="true"></span>
           </button>
@@ -121,14 +143,14 @@
               </label>
             </div>
             <div class="topbar-actions sidebar-nav-group">
-              <button class="ghost-button" id="showReportsButton" type="button" data-i18n="nav.reports">Reports</button>
-              <button class="ghost-button" id="showRoomButton" type="button">Lost &amp; Found Room</button>
-              <button class="ghost-button" id="showReturnedButton" type="button">Recently Returned</button>
-              <button class="ghost-button" id="showQueryButton" type="button" data-i18n="nav.query">Query</button>
-              <button class="ghost-button" id="showClaimsButton" type="button" data-i18n="nav.claims">My Claims</button>
-              <button class="ghost-button" id="showAccountButton" type="button" data-i18n="nav.account">Account</button>
-              <button class="ghost-button is-hidden" id="showAdminButton" type="button" data-i18n="nav.admin">Admin Panel</button>
-              <button class="ghost-button danger-button" id="logoutButton" type="button" data-i18n="nav.logout">Logout</button>
+              <button class="ghost-button" id="showReportsButton" type="button" data-nav-icon="R" data-i18n="nav.reports">Reports</button>
+              <button class="ghost-button" id="showRoomButton" type="button" data-nav-icon="L">Lost &amp; Found Room</button>
+              <button class="ghost-button" id="showReturnedButton" type="button" data-nav-icon="V">Recently Returned</button>
+              <button class="ghost-button" id="showQueryButton" type="button" data-nav-icon="Q" data-i18n="nav.query">Query</button>
+              <button class="ghost-button" id="showClaimsButton" type="button" data-nav-icon="C" data-i18n="nav.claims">My Claims</button>
+              <button class="ghost-button" id="showAccountButton" type="button" data-nav-icon="A" data-i18n="nav.account">Account</button>
+              <button class="ghost-button is-hidden" id="showAdminButton" type="button" data-nav-icon="!" data-i18n="nav.admin">Admin Panel</button>
+              <button class="ghost-button danger-button" id="logoutButton" type="button" data-nav-icon="×" data-i18n="nav.logout">Logout</button>
             </div>
           </div>
         </header>
@@ -422,6 +444,14 @@
                 <p class="admin-monitor-value" id="adminMonitorStatus">--</p>
               </article>
               <article class="admin-monitor-card surface-card">
+                <p class="eyebrow">Ollama</p>
+                <p class="admin-monitor-value" id="adminOllamaStatus">--</p>
+              </article>
+              <article class="admin-monitor-card surface-card">
+                <p class="eyebrow">Models</p>
+                <p class="admin-monitor-value" id="adminOllamaModels">--</p>
+              </article>
+              <article class="admin-monitor-card surface-card">
                 <p class="eyebrow" data-i18n="admin.monitorUptime">Uptime</p>
                 <p class="admin-monitor-value" id="adminMonitorUptime">--</p>
               </article>
@@ -462,11 +492,18 @@
               </div>
             </div>
             <div class="query-context-head">
+              <button class="query-context-image" id="queryItemImageButton" type="button" aria-label="Preview query item image">
+                <img id="queryItemImage" alt="">
+                <span id="queryItemImageFallback">No image</span>
+              </button>
               <div>
                 <h4 id="queryItemTitle" data-i18n="query.selectAnItem">Select an item</h4>
                 <p class="item-summary" id="queryItemMeta" data-i18n="query.selectOrGeneral">Select a report or use general inquiry mode.</p>
               </div>
               <span class="status-badge is-lost" id="queryItemStatus">Open</span>
+            </div>
+            <div class="card-actions is-hidden" id="queryAdminActions">
+              <button class="ghost-button danger-button card-button" id="queryClearThreadButton" type="button">Clear item chat</button>
             </div>
             <p class="item-description" id="queryItemDescription"></p>
             <div class="tag-row" id="queryItemTags"></div>

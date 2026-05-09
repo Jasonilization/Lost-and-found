@@ -22,6 +22,7 @@ from difflib import SequenceMatcher
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, Header, HTTPException, Request, UploadFile
@@ -54,7 +55,7 @@ except ImportError:  # pragma: no cover - Unix-only runtime helper
 from backend.ai_assistant import AI_MODEL, analyze_claim_match, analyze_evidence, analyze_report_abuse, model_size_label, normalize_language
 from backend.ai_moderation import classify_user_input
 from backend.database import AIInspectionLog, AuditLog, Claim, ItemQuery, LostFoundItem, Notification, QueryMessage, ReturnedItemDispute, SessionLocal, User, UserSession, init_db
-from backend.moderation import clean_text, validate_class_of, validate_initials, validate_text_input
+from backend.moderation import BLOCKED_WORDS, clean_text, validate_class_of, validate_initials, validate_text_input
 from backend.ollama_tagger import (
     build_search_text,
     debug_image_request,
@@ -96,6 +97,21 @@ BOOTSTRAP_ADMIN_ENV_KEYS = (
 )
 
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
+
+@app.on_event("startup")
+def check_optional_ollama_on_startup() -> None:
+    try:
+        status = get_ollama_status()
+    except Exception as exc:  # pragma: no cover - startup safety guard
+        logging.getLogger("ollama_tagger").warning("Ollama startup check failed: %s", exc)
+        return
+    logging.getLogger("ollama_tagger").info(
+        "Ollama startup status: available=%s host=%s models=%s",
+        status.get("available"),
+        status.get("host"),
+        status.get("models", []),
+    )
 
 claims_logger = logging.getLogger("claims")
 if not claims_logger.handlers:
@@ -205,6 +221,7 @@ RATE_LIMITS = {
     "report": {"limit": 5, "window": timedelta(minutes=1)},
     "claim": {"limit": 3, "window": timedelta(minutes=1)},
 }
+CLAIM_MATCH_MIN_SCORE = 35
 GENERAL_UPLOAD_TYPES = {
     ".png": {"mime_types": {"image/png"}, "kind": "png"},
     ".jpg": {"mime_types": {"image/jpeg"}, "kind": "jpeg"},
@@ -1102,6 +1119,18 @@ def user_identity(user: Optional[User]) -> str:
     return user.username
 
 
+def safe_user_avatar_url(user: Optional[User]) -> str:
+    avatar_path = str(user.avatar_path if user else "").strip()
+    if not avatar_path:
+        return ""
+    if avatar_path.startswith(("http://", "https://")):
+        return avatar_path
+    resolved_path = resolve_upload_path(avatar_path)
+    if not resolved_path or not resolved_path.exists():
+        return ""
+    return avatar_path
+
+
 def build_input_text(*parts: Optional[str]) -> str:
     return " ".join(str(part or "").strip() for part in parts if str(part or "").strip()).strip()
 
@@ -1296,8 +1325,8 @@ def analyze_item_region(item: LostFoundItem, selection: CircleSelectionPayload) 
     if not item.image_path:
         raise HTTPException(status_code=400, detail="This item does not have an image to inspect.")
 
-    source_path = BASE_DIR / item.image_path.lstrip("/")
-    if not source_path.exists():
+    source_path = resolve_upload_path(item.image_path)
+    if not source_path or not source_path.exists():
         raise HTTPException(status_code=404, detail="The stored image for this item is missing.")
 
     normalized = validate_circle_selection(selection)
@@ -1408,7 +1437,7 @@ def minimally_validate_field(value: str, field_label: str, *, min_meaningful_cha
         raise HTTPException(status_code=400, detail=f"{field_label} is required.")
     if len(cleaned) > max_chars:
         raise HTTPException(status_code=400, detail=f"{field_label} must be {max_chars} characters or fewer.")
-    if len(re.findall(r"[A-Za-z0-9]", cleaned)) < min_meaningful_chars:
+    if len(re.findall(r"[^\W_]", cleaned, re.UNICODE)) < min_meaningful_chars:
         raise HTTPException(status_code=400, detail=f"{field_label} is too short.")
     return cleaned
 
@@ -1490,6 +1519,81 @@ def cleanup_query_attachment(attachment: Optional[dict]) -> None:
     if not attachment:
         return
     delete_uploaded_path(attachment.get("path"))
+
+
+QUERY_GIBBERISH_PATTERNS = (
+    re.compile(r"(.)\1{7,}", re.IGNORECASE),
+    re.compile(r"^[^\w]*$", re.UNICODE),
+    re.compile(r"\b(?:skibidi|gyatt|fanum|brainrot|sussy)\b", re.IGNORECASE),
+    re.compile(r"https?://|www\.", re.IGNORECASE),
+)
+
+
+def obvious_bad_query_reason(value: str) -> str:
+    cleaned = clean_text(value)
+    lowered_words = set(re.findall(r"[a-z']+", cleaned.lower()))
+    if lowered_words & BLOCKED_WORDS:
+        return "Message rejected due to inappropriate content."
+    if any(pattern.search(cleaned) for pattern in QUERY_GIBBERISH_PATTERNS):
+        return "Message rejected because it looks like spam or gibberish."
+    tokens = re.findall(r"\w+", cleaned, re.UNICODE)
+    if len(tokens) >= 5 and len(set(token.lower() for token in tokens)) <= 1:
+        return "Message rejected because it looks repetitive."
+    return ""
+
+
+def enforce_lenient_query_moderation(
+    db: Session,
+    *,
+    current_user: User,
+    route: str,
+    input_text: str,
+) -> dict:
+    reason = obvious_bad_query_reason(input_text)
+    if reason:
+        log_blocked_attempt(route=route, current_user=current_user, reason=reason, content=input_text)
+        raise HTTPException(status_code=400, detail=reason)
+
+    decision = classify_user_input(input_text)
+    model_reason = str(decision.get("reason", "")).lower()
+    model_block_is_obvious = (
+        not decision.get("allowed", False)
+        and any(keyword in model_reason for keyword in ("blocked", "spam", "gibberish", "offensive", "inappropriate", "threat", "abusive"))
+    )
+    if model_block_is_obvious:
+        log_blocked_attempt(
+            route=route,
+            current_user=current_user,
+            reason=str(decision.get("reason", "Message rejected due to content policy.")),
+            content=input_text,
+        )
+        raise HTTPException(status_code=400, detail="Message rejected due to content policy.")
+
+    if not decision.get("allowed", False):
+        try:
+            confidence = min(float(decision.get("confidence", 0.0) or 0.0), 0.5)
+        except (TypeError, ValueError):
+            confidence = 0.5
+        decision = {
+            **decision,
+            "allowed": True,
+            "reason": "Allowed by lenient query policy.",
+            "confidence": confidence,
+        }
+
+    log_ai_inspection(
+        db,
+        current_user=current_user,
+        route=route,
+        input_text=input_text,
+        decision=decision,
+        feature="moderation",
+        model_name=AI_MODEL,
+        model_size=model_size_label(AI_MODEL),
+        fallback_triggered=bool(decision.get("fallback_triggered")),
+        request_metadata={"route": route, "mode": "lenient-query"},
+    )
+    return decision
 
 
 def build_reporter_summary(db: Session, current_user: User, *, title: str) -> dict:
@@ -1598,7 +1702,7 @@ def serialize_item(item: LostFoundItem, reporter: Optional[User]) -> dict:
         "report_type": item.report_type,
         "reporter_name": item.reporter_name,
         "reporter_identity": user_identity(reporter),
-        "reporter_avatar_url": reporter.avatar_path if reporter and reporter.avatar_path else "",
+        "reporter_avatar_url": safe_user_avatar_url(reporter),
         "student_id": item.student_id,
         "contact_info": item.contact_info,
         "title": item.title,
@@ -1679,7 +1783,7 @@ def serialize_user(user: User) -> dict:
         "class_of": user.class_of,
         "identity": user_identity(user),
         "is_admin": bool(user.is_admin),
-        "avatar_url": user.avatar_path or "",
+        "avatar_url": safe_user_avatar_url(user),
         "preferred_language": normalize_language(user.preferred_language),
         "created_at": user.created_at.isoformat() if user.created_at else None,
     }
@@ -1733,7 +1837,7 @@ def serialize_admin_user(db: Session, user: User) -> dict:
         "class_of": user.class_of,
         "identity": user_identity(user),
         "is_admin": bool(user.is_admin),
-        "avatar_url": user.avatar_path or "",
+        "avatar_url": safe_user_avatar_url(user),
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "trust_score": int(trust["score"]),
         "trust_factors": trust["factors"],
@@ -1761,7 +1865,7 @@ def serialize_query(query: QueryMessage, author: Optional[User]) -> dict:
         "user_id": query.user_id,
         "role": role,
         "user_identity": "System" if role == "system" else user_identity(author),
-        "avatar_url": "" if role == "system" else (author.avatar_path if author and author.avatar_path else ""),
+        "avatar_url": "" if role == "system" else safe_user_avatar_url(author),
         "message": query.message,
         "chat_mode": "message",
         "language": normalize_language(query.language),
@@ -1813,11 +1917,16 @@ def fetch_claim_or_404(db: Session, claim_id: int) -> Claim:
     return claim
 
 
-def get_query_messages_for_scope(db: Session, *, user_id: int, item_id: Optional[int]) -> list[QueryMessage]:
-    query = db.query(QueryMessage).filter(
-        QueryMessage.user_id == user_id,
-        QueryMessage.role != "system",
-    )
+def get_query_messages_for_scope(
+    db: Session,
+    *,
+    user_id: int,
+    item_id: Optional[int],
+    include_all_users: bool = False,
+) -> list[QueryMessage]:
+    query = db.query(QueryMessage).filter(QueryMessage.role != "system")
+    if not include_all_users:
+        query = query.filter(QueryMessage.user_id == user_id)
     if item_id is None:
         query = query.filter(QueryMessage.item_id.is_(None))
     else:
@@ -2383,10 +2492,17 @@ def _wait_for_ollama_availability(target_available: bool, *, timeout_seconds: fl
     return latest_status
 
 
+def _ollama_host_is_local(ollama_status: dict[str, Any]) -> bool:
+    parsed = urlparse(str(ollama_status.get("host") or ""))
+    hostname = (parsed.hostname or "").lower()
+    return hostname in {"", "localhost", "127.0.0.1", "::1", "0.0.0.0"}
+
+
 def _serialize_admin_health(ollama_status: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     current_status = ollama_status or get_ollama_status()
     return {
         "status": "running" if current_status.get("available") else "stopped",
+        "ollama": current_status,
         "uptime_seconds": _get_uptime_seconds(),
     }
 
@@ -2400,7 +2516,8 @@ def health() -> dict:
         "backend": "ok",
         "database": database_status,
         "ollama": "ok" if ollama_status.get("available") else "down",
-        "ai_model": "llava",
+        "ollama_details": ollama_status,
+        "ai_model": ollama_status.get("text_model") or "unconfigured",
         "uptime_seconds": _get_uptime_seconds(),
     }
 
@@ -2419,6 +2536,15 @@ def admin_start_ollama(current_user: User = Depends(require_admin_user)) -> dict
         return {
             **_serialize_admin_health(current_status),
             "message": "Ollama is already running.",
+            "started": False,
+        }
+
+    if not _ollama_host_is_local(current_status):
+        log_admin_action(current_user, "ollama_start", note="remote_host_configured")
+        return {
+            **_serialize_admin_health(current_status),
+            "status": "remote",
+            "message": f"Ollama is configured at {current_status.get('host')}. Start or fix that server directly.",
             "started": False,
         }
 
@@ -2476,6 +2602,15 @@ def admin_start_ollama(current_user: User = Depends(require_admin_user)) -> dict
 @app.post("/admin/ollama/stop")
 def admin_stop_ollama(current_user: User = Depends(require_admin_user)) -> dict[str, Any]:
     current_status = get_ollama_status()
+    if not _ollama_host_is_local(current_status):
+        log_admin_action(current_user, "ollama_stop", note="remote_host_configured")
+        return {
+            **_serialize_admin_health(current_status),
+            "status": "remote",
+            "message": f"Ollama is configured at {current_status.get('host')}. Stop that server directly if needed.",
+            "stopped": False,
+        }
+
     pids = _ollama_service_pids()
     if not current_status.get("available") and not pids:
         log_admin_action(current_user, "ollama_stop", note="already_stopped")
@@ -2656,14 +2791,26 @@ def upload_profile_image(
 ) -> dict:
     image = ReportImagePayload(filename=payload.filename, content_type=payload.content_type, data=payload.data)
     avatar_path = decode_image_payload(image)
-    if current_user.avatar_path and current_user.avatar_path.startswith("/uploads/"):
-        old_path = BASE_DIR / current_user.avatar_path.lstrip("/")
-        if old_path.exists():
-            old_path.unlink()
-    current_user.avatar_path = avatar_path
-    db.commit()
-    db.refresh(current_user)
-    return {"message": "Profile image updated.", "user": serialize_user(current_user)}
+    if not avatar_path:
+        raise HTTPException(status_code=400, detail="Profile image is required.")
+    old_avatar_path = current_user.avatar_path
+    try:
+        current_user.avatar_path = avatar_path
+        db.commit()
+        db.refresh(current_user)
+    except Exception:
+        db.rollback()
+        delete_uploaded_path(avatar_path)
+        raise
+
+    if old_avatar_path and old_avatar_path != avatar_path:
+        delete_uploaded_path(old_avatar_path)
+
+    return {
+        "message": "Profile image updated.",
+        "user": serialize_user(current_user),
+        "avatar_version": int(time.time() * 1000),
+    }
 
 
 @app.get("/filters")
@@ -2746,7 +2893,9 @@ def admin_upload_room_items(
         ai_result = None
         try:
             if image_path:
-                image_file = BASE_DIR / image_path.lstrip("/")
+                image_file = resolve_upload_path(image_path)
+                if not image_file or not image_file.exists():
+                    raise HTTPException(status_code=404, detail="The stored image for this room item is missing.")
                 inspection = inspect_image_upload(str(image_file), item_label=cleaned_label or f"room-item-{index}")
                 if inspection.get("moderation") != "SAFE":
                     delete_uploaded_path(image_path)
@@ -2903,11 +3052,14 @@ async def report_item(
 
     try:
         if image_path:
-            image_file = BASE_DIR / image_path.lstrip("/")
+            image_file = resolve_upload_path(image_path)
+            image_file_for_inspection = image_file if image_file else (BASE_DIR / image_path.lstrip("/"))
             try:
-                inspection = inspect_image_upload(str(image_file), item_label=title or reporter_name or "upload")
+                inspection = inspect_image_upload(str(image_file_for_inspection), item_label=title or reporter_name or "upload")
             except Exception as exc:
                 report_logger.warning("[LLaVA] hard failure for item %s: %s", title or "upload", exc)
+                if image_file and not image_file.exists():
+                    image_path = None
                 ai_result = generate_text_tag_result(
                     title=title,
                     description=description,
@@ -2923,14 +3075,26 @@ async def report_item(
                         detail="Image rejected as unsafe for the school lost and found system.",
                     )
 
-                ai_result = {
-                    "summary": "[LLaVA] using raw output",
-                    "category": category,
-                    "color": color,
-                    "tags": inspection.get("tags", []),
-                    "tag_source": "llava-image",
-                }
-                report_logger.info("[LLaVA] using raw output")
+                inspection_tags = inspection.get("tags", [])
+                if not inspection_tags:
+                    ai_result = generate_text_tag_result(
+                        title=title,
+                        description=description,
+                        location=location,
+                        category=category,
+                        color=color,
+                    )
+                    ai_result["tag_source"] = "text-fallback-after-llava-failure"
+                else:
+                    weak_image_tags = inspection.get("validation_strength") == "low" or bool(inspection.get("tag_validation_warnings"))
+                    ai_result = {
+                        "summary": "LLaVA image tags (low confidence)" if weak_image_tags else "[LLaVA] using raw output",
+                        "category": category,
+                        "color": color,
+                        "tags": inspection_tags,
+                        "tag_source": "llava-image-weak" if weak_image_tags else "llava-image",
+                    }
+                    report_logger.info("[LLaVA] using raw output")
 
         if not ai_result:
             try:
@@ -3209,6 +3373,18 @@ def claim_item(
         identifying_info=identifying_info,
         item=serialize_item(item, get_item_reporter(db, item)),
     )
+    match_score = int(claim_match.get("match_score", 0) or 0)
+    match_reasoning = str(claim_match.get("reasoning", "")).strip()
+    if match_score < CLAIM_MATCH_MIN_SCORE:
+        db.commit()
+        return JSONResponse(
+            status_code=400,
+            content={
+                "detail": "Claim details do not match this report closely enough.",
+                "match_score": match_score,
+                "reasoning": match_reasoning,
+            },
+        )
     log_ai_package(
         db,
         current_user=current_user,
@@ -3225,8 +3401,8 @@ def claim_item(
         item_description=item_description,
         lost_location=lost_location,
         identifying_info=identifying_info,
-        match_score=int(claim_match.get("match_score", 0) or 0),
-        match_reasoning=str(claim_match.get("reasoning", "")).strip(),
+        match_score=match_score,
+        match_reasoning=match_reasoning,
         visual_selection_json=json.dumps(payload.visual_selection or {}),
         visual_summary=str(payload.visual_summary or "").strip()[:240],
         visual_tags_json=json.dumps([
@@ -3251,6 +3427,7 @@ def claim_item(
     )
     notify_claim_match(db, item=item, claim=claim, claimant=current_user)
     notify_claim_submitted(db, item=item, claim=claim, claimant=current_user)
+    db.commit()
 
     apply_abuse_analysis(db, current_user=current_user, item=item)
 
@@ -3485,12 +3662,11 @@ def admin_ai_inspection(
     }
 
 
-@app.delete("/admin/items/{item_id}")
 def admin_delete_item(
     item_id: int,
-    background_tasks: BackgroundTasks,
-    current_user: User = Depends(require_admin_user),
-    db: Session = Depends(get_db),
+    background_tasks: Optional[BackgroundTasks] = None,
+    current_user: User = None,
+    db: Session = None,
 ) -> dict:
     item = fetch_item_or_404(db, item_id)
     before_state = snapshot_item(item)
@@ -3509,9 +3685,20 @@ def admin_delete_item(
         metadata={"soft_delete": True},
     )
     db.commit()
-    background_tasks.add_task(cleanup_deleted_item_uploads, item.id)
+    if background_tasks:
+        background_tasks.add_task(cleanup_deleted_item_uploads, item.id)
     log_admin_action(current_user, "delete-item", item=item, note=f"title={item.title}")
     return {"message": "Report deleted. You can undo this action shortly.", "item_id": item.id}
+
+
+@app.delete("/admin/items/{item_id}")
+def admin_delete_item_endpoint(
+    item_id: int,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    return admin_delete_item(item_id, background_tasks=background_tasks, current_user=current_user, db=db)
 
 
 @app.post("/admin/items/{item_id}/restore")
@@ -3599,6 +3786,75 @@ def admin_delete_claim(
     db.commit()
     log_admin_action(current_user, "delete-claim", claim=claim, note=f"claim_status={claim.status}")
     return {"message": "Claim deleted."}
+
+
+@app.delete("/admin/query-messages/{message_id}")
+def admin_delete_query_message(
+    message_id: int,
+    current_user: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    message = db.query(QueryMessage).filter(QueryMessage.id == message_id).first()
+    if not message:
+        raise HTTPException(status_code=404, detail="Query message not found.")
+
+    author = db.query(User).filter(User.id == message.user_id).first()
+    before_state = serialize_query(message, author)
+    attachment_path = message.attachment_path
+    db.delete(message)
+    create_audit_log(
+        db,
+        user_id=current_user.id,
+        action_type="query_message_deleted",
+        entity_type="query_message",
+        entity_id=message_id,
+        before_state=before_state,
+        after_state=None,
+        metadata={"item_id": before_state.get("item_id"), "message_user_id": before_state.get("user_id")},
+    )
+    db.commit()
+    delete_uploaded_path(attachment_path)
+    log_admin_action(current_user, "delete-query-message", note=f"message_id={message_id}")
+    return {"message": "Query message deleted.", "message_id": message_id}
+
+
+@app.delete("/admin/items/{item_id}/query-thread")
+def admin_clear_item_query_thread(
+    item_id: int,
+    current_user: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    item = fetch_item_or_404(db, item_id)
+    messages = (
+        db.query(QueryMessage)
+        .filter(QueryMessage.item_id == item.id)
+        .order_by(QueryMessage.created_at.asc(), QueryMessage.id.asc())
+        .all()
+    )
+    if not messages:
+        return {"message": "No query messages to clear.", "item_id": item.id, "deleted_count": 0}
+
+    authors = get_user_map(db, [message.user_id for message in messages])
+    before_state = [serialize_query(message, authors.get(message.user_id)) for message in messages]
+    attachment_paths = [message.attachment_path for message in messages if message.attachment_path]
+    deleted_count = len(messages)
+    for message in messages:
+        db.delete(message)
+    create_audit_log(
+        db,
+        user_id=current_user.id,
+        action_type="query_thread_cleared",
+        entity_type="item",
+        entity_id=item.id,
+        before_state=before_state,
+        after_state=[],
+        metadata={"item_id": item.id, "deleted_count": deleted_count},
+    )
+    db.commit()
+    for attachment_path in attachment_paths:
+        delete_uploaded_path(attachment_path)
+    log_admin_action(current_user, "clear-query-thread", item=item, note=f"deleted_count={deleted_count}")
+    return {"message": "Item query thread cleared.", "item_id": item.id, "deleted_count": deleted_count}
 
 
 @app.post("/admin/claims/{claim_id}/approve")
@@ -3900,14 +4156,13 @@ async def create_general_query(
     route = "/query"
     try:
         normalized_language = resolve_query_preferences(current_user, language=payload.language)
-        enforce_moderation(
+        enforce_lenient_query_moderation(
             db,
             current_user=current_user,
             route=route,
             input_text=payload.message,
-            blocked_reason="Message rejected due to content policy.",
         )
-        message = moderate_field(payload.message, "Query message", min_meaningful_chars=6, max_chars=220)
+        message = minimally_validate_field(payload.message, "Query message", min_meaningful_chars=1, max_chars=220)
         user_query = QueryMessage(
             item_id=None,
             user_id=current_user.id,
@@ -3946,7 +4201,12 @@ def list_queries(
     normalized_language = resolve_query_preferences(current_user, language=language)
     db.commit()
     fetch_item_or_404(db, item_id)
-    queries = get_query_messages_for_scope(db, user_id=current_user.id, item_id=item_id)
+    queries = get_query_messages_for_scope(
+        db,
+        user_id=current_user.id,
+        item_id=item_id,
+        include_all_users=current_user.is_admin,
+    )
     return {
         "queries": serialize_query_list(db, queries),
         "response": {"message": ""},
@@ -3967,15 +4227,14 @@ async def create_query(
     route = f"/items/{item_id}/query"
     try:
         normalized_language = resolve_query_preferences(current_user, language=payload.language)
-        enforce_moderation(
+        enforce_lenient_query_moderation(
             db,
             current_user=current_user,
             route=route,
             input_text=payload.message,
-            blocked_reason="Message rejected due to content policy.",
         )
         item = fetch_item_or_404(db, item_id)
-        message = moderate_field(payload.message, "Query message", min_meaningful_chars=6, max_chars=220)
+        message = minimally_validate_field(payload.message, "Query message", min_meaningful_chars=1, max_chars=220)
         user_query = QueryMessage(
             item_id=item_id,
             user_id=current_user.id,
@@ -3997,7 +4256,12 @@ async def create_query(
         cleanup_query_attachment(attachment)
         raise
 
-    queries = get_query_messages_for_scope(db, user_id=current_user.id, item_id=item_id)
+    queries = get_query_messages_for_scope(
+        db,
+        user_id=current_user.id,
+        item_id=item_id,
+        include_all_users=current_user.is_admin,
+    )
     return {
         "queries": serialize_query_list(db, queries),
         "response": {"message": build_query_response(item)},

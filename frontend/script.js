@@ -1,18 +1,15 @@
-const API_PORT = "8000";
-const API_PROTOCOL = window.location.protocol === "https:" ? "https:" : "http:";
-const API_BASE = window.location.hostname
-  ? window.location.port === API_PORT
-    ? `${window.location.protocol}//${window.location.hostname}:${API_PORT}`
-    : `${API_PROTOCOL}//${window.location.hostname}:${API_PORT}`
-  : "";
+const API_BASE = window.location.origin || "";
 const SESSION_STORAGE_KEY = "lostfound_session";
 const THEME_STORAGE_KEY = "theme";
 const CURRENT_ITEM_STORAGE_KEY = "lostfound_current_item";
 const LANGUAGE_STORAGE_KEY = "lostfound_language";
+const SIDEBAR_MODE_STORAGE_KEY = "lostfound_sidebar_mode";
+const SIDEBAR_WIDTH_STORAGE_KEY = "lostfound_sidebar_width";
 const TUTORIAL_STORAGE_KEY = "lostfound_tutorial_seen";
 const INITIALS_PATTERN = /^[a-z]+(?:\.[a-z]+)+$/;
 const THEME_MODES = ["dark", "light"];
 const SUPPORTED_LANGUAGES = ["en", "zh-CN", "th"];
+const SIDEBAR_MODES = ["left", "top", "bottom", "minimal"];
 const CHAT_UPLOAD_LIMIT_BYTES = 5 * 1024 * 1024;
 const CHAT_ALLOWED_FILE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".pdf", ".txt"];
 const CHAT_ALLOWED_FILE_MIME_TYPES = [
@@ -42,6 +39,23 @@ const GLOBAL_BACKGROUND_URL = "/uploads/background.png";
 const TUTORIAL_CARD_MARGIN = 16;
 const TUTORIAL_VIEWPORT_PADDING = 12;
 const UI_DEBUG_PREFIX = "[LostFound UI]";
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MAX_WIDTH = 420;
+const SIDEBAR_DEFAULT_WIDTH = 280;
+const SIDEBAR_COLLAPSED_WIDTH = 76;
+const MODAL_CLOSE_ANIMATION_MS = 180;
+const HAPTIC_THROTTLE_MS = 180;
+const HAPTIC_PATTERNS = {
+  light: 8,
+  open: 10,
+  success: [12, 28, 16],
+  notification: 12,
+};
+const savedSidebarMode = localStorage.getItem(SIDEBAR_MODE_STORAGE_KEY);
+const savedSidebarWidth = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY) || "");
+const initialSidebarWidth = Number.isFinite(savedSidebarWidth)
+  ? Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(savedSidebarWidth)))
+  : SIDEBAR_DEFAULT_WIDTH;
 
 const translations = {
   en: {
@@ -638,6 +652,7 @@ const state = {
   filters: fallbackFilters,
   selectedFile: null,
   selectedQueryFile: null,
+  profilePreviewUrl: "",
   previewUrls: new Map(),
   searchCache: new Map(),
   queryCache: new Map(),
@@ -651,6 +666,9 @@ const state = {
   querySuggestions: [],
   queryRequestToken: null,
   language: localStorage.getItem(LANGUAGE_STORAGE_KEY) || "en",
+  sidebarMode: SIDEBAR_MODES.includes(savedSidebarMode)
+    ? savedSidebarMode
+    : "left",
   tutorialActive: false,
   tutorialStepIndex: 0,
   tutorialDismissedForSession: false,
@@ -669,10 +687,13 @@ const state = {
   activeRoomPreviewItem: null,
   roomPreviewAnalysis: null,
   roomPreviewDrag: null,
+  pendingLayoutResize: null,
+  layoutResizeFrame: 0,
+  lastHapticAt: 0,
   panelState: {},
   activeLayoutResize: null,
   layoutSizes: {
-    sidebarWidth: 280,
+    sidebarWidth: initialSidebarWidth,
     secondaryHeight: 320,
   },
   progressTimers: {
@@ -688,6 +709,8 @@ const authForm = document.querySelector("#authForm");
 const authUsername = document.querySelector("#authUsername");
 const authPassword = document.querySelector("#authPassword");
 const authPasswordToggle = document.querySelector("#authPasswordToggle");
+const authConfirmPassword = document.querySelector("#authConfirmPassword");
+const authConfirmPasswordToggle = document.querySelector("#authConfirmPasswordToggle");
 const authInitials = document.querySelector("#authInitials");
 const authClassOf = document.querySelector("#authClassOf");
 const registerFields = document.querySelector("#registerFields");
@@ -714,6 +737,7 @@ let secondaryStack = document.querySelector("#secondaryStack");
 const sidebarCollapseButton = document.querySelector("#sidebarCollapseButton");
 const themeToggleButton = document.querySelector("#theme-toggle");
 const themeIcon = document.querySelector("#theme-icon");
+const sidebarModeSelect = document.querySelector("#sidebarModeSelect");
 const languageSelect = document.querySelector("#languageSelect");
 const logoutButton = document.querySelector("#logoutButton");
 const accountName = document.querySelector("#accountName");
@@ -826,6 +850,8 @@ const adminAuditList = document.querySelector("#adminAuditList");
 const adminInspectionList = document.querySelector("#adminInspectionList");
 const adminMonitorUptime = document.querySelector("#adminMonitorUptime");
 const adminMonitorStatus = document.querySelector("#adminMonitorStatus");
+const adminOllamaStatus = document.querySelector("#adminOllamaStatus");
+const adminOllamaModels = document.querySelector("#adminOllamaModels");
 const adminMonitorUpdated = document.querySelector("#adminMonitorUpdated");
 const adminMonitorWarning = document.querySelector("#adminMonitorWarning");
 
@@ -838,6 +864,9 @@ const queryItemMeta = document.querySelector("#queryItemMeta");
 const queryItemStatus = document.querySelector("#queryItemStatus");
 const queryItemDescription = document.querySelector("#queryItemDescription");
 const queryItemTags = document.querySelector("#queryItemTags");
+const queryItemImageButton = document.querySelector("#queryItemImageButton");
+const queryItemImage = document.querySelector("#queryItemImage");
+const queryItemImageFallback = document.querySelector("#queryItemImageFallback");
 const queryItemContextLabel = document.querySelector("#queryItemContextLabel");
 const queryMessages = document.querySelector("#queryMessages");
 const queryForm = document.querySelector("#queryForm");
@@ -857,6 +886,8 @@ const queryProgressValue = document.querySelector("#queryProgressValue");
 const queryWarningCard = document.querySelector("#queryWarningCard");
 const queryEmptyState = document.querySelector("#queryEmptyState");
 const querySuggestions = document.querySelector("#querySuggestions");
+const queryAdminActions = document.querySelector("#queryAdminActions");
+const queryClearThreadButton = document.querySelector("#queryClearThreadButton");
 
 const claimDialog = document.querySelector("#claimDialog");
 const roomClaimPreviewDialog = document.querySelector("#roomClaimPreviewDialog");
@@ -1118,12 +1149,41 @@ function ensureLayoutStructure() {
 
 const secondaryPanelNames = ["room", "returned", "claims", "account", "admin", "query"];
 const LAYOUT_BREAKPOINT = 900;
-const SIDEBAR_EXPANDED_MIN_WIDTH = 220;
-const SIDEBAR_COLLAPSED_WIDTH = 170;
-const SIDEBAR_MAX_WIDTH = 420;
 const REPORTS_MIN_HEIGHT = 260;
 const SECONDARY_MIN_HEIGHT = 220;
 const SPLITTER_SIZE = 14;
+
+function currentSidebarMode() {
+  return SIDEBAR_MODES.includes(state.sidebarMode) ? state.sidebarMode : "left";
+}
+
+function sidebarParticipatesInSideLayout() {
+  return isDesktopWindowLayout() && ["left", "minimal"].includes(currentSidebarMode());
+}
+
+function applySidebarMode() {
+  const mode = currentSidebarMode();
+  if (appShell) {
+    appShell.dataset.sidebarMode = mode;
+  }
+  if (workspaceLayout) {
+    workspaceLayout.dataset.sidebarMode = mode;
+  }
+  document.body.dataset.sidebarMode = mode;
+  if (sidebarModeSelect) {
+    sidebarModeSelect.value = mode;
+  }
+}
+
+function setSidebarMode(mode) {
+  state.sidebarMode = SIDEBAR_MODES.includes(mode) ? mode : "left";
+  localStorage.setItem(SIDEBAR_MODE_STORAGE_KEY, state.sidebarMode);
+  const sidebarState = ensurePanelState("sidebar");
+  sidebarState.closed = false;
+  sidebarState.collapsed = state.sidebarMode === "minimal";
+  applyPanelLayout("sidebar");
+  syncWorkspaceLayout();
+}
 
 function defaultSecondaryPanelName() {
   if (currentUserCanAdmin() && panelElements.admin) return "admin";
@@ -1143,6 +1203,10 @@ function renderDefaultLayout() {
 
   workspaceLayout.classList.add("workspace-layout");
   workspaceLayout.style.display = "flex";
+  sidebarSplitter?.setAttribute("aria-valuemin", String(SIDEBAR_MIN_WIDTH));
+  sidebarSplitter?.setAttribute("aria-valuemax", String(SIDEBAR_MAX_WIDTH));
+  sidebarSplitter?.setAttribute("aria-valuenow", String(state.layoutSizes.sidebarWidth));
+  applySidebarMode();
 
   syncAllPanels(Object.keys(state.panelState).length === 0);
   openPanel("sidebar");
@@ -1191,25 +1255,14 @@ function currentSecondaryPanelName() {
 }
 
 function clampLayoutSizes() {
-  const sidebarState = ensurePanelState("sidebar");
-  const layoutRect = workspaceLayout?.getBoundingClientRect();
   const workspaceRect = windowWorkspace?.getBoundingClientRect();
-  const sidebarMin = sidebarState.collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_MIN_WIDTH;
-  const sidebarMax = Math.max(
-    sidebarMin,
-    Math.min(
+  if (currentSidebarMode() !== "minimal") {
+    state.layoutSizes.sidebarWidth = clampValue(
+      Math.round(state.layoutSizes.sidebarWidth || SIDEBAR_DEFAULT_WIDTH),
+      SIDEBAR_MIN_WIDTH,
       SIDEBAR_MAX_WIDTH,
-      Math.round((layoutRect?.width || window.innerWidth) - 360),
-    ),
-  );
-  const nextSidebarWidth = sidebarState.collapsed
-    ? SIDEBAR_COLLAPSED_WIDTH
-    : clampValue(
-      Math.round(state.layoutSizes.sidebarWidth || 280),
-      sidebarMin,
-      sidebarMax,
     );
-  state.layoutSizes.sidebarWidth = nextSidebarWidth;
+  }
 
   const secondaryMax = Math.max(
     SECONDARY_MIN_HEIGHT,
@@ -1242,6 +1295,7 @@ function syncWorkspaceLayout() {
   clampLayoutSizes();
 
   const sidebarState = ensurePanelState("sidebar");
+  const sidebarMode = currentSidebarMode();
   const reportsState = ensurePanelState("reports");
   const secondaryName = currentSecondaryPanelName();
   const secondaryPanel = secondaryName ? panelElements[secondaryName] : null;
@@ -1256,9 +1310,16 @@ function syncWorkspaceLayout() {
     && !secondaryState.minimized;
 
   appShell?.classList.toggle("has-open-sidebar", sidebarVisible);
+  applySidebarMode();
+  sidebarPanel?.classList.toggle("is-top-mode", sidebarMode === "top");
+  sidebarPanel?.classList.toggle("is-bottom-mode", sidebarMode === "bottom");
+  sidebarPanel?.classList.toggle("is-minimal-mode", sidebarMode === "minimal");
+  sidebarState.collapsed = sidebarMode === "minimal" ? true : Boolean(sidebarState.collapsed && sidebarMode === "left");
+  applyPanelLayout("sidebar");
   sidebarPanel?.classList.toggle("is-hidden", !sidebarVisible);
   sidebarLauncherButton?.classList.toggle("is-hidden", sidebarVisible);
-  sidebarSplitter?.classList.toggle("is-hidden", !sidebarVisible || !isDesktopWindowLayout());
+  const canResizeSidebar = sidebarVisible && sidebarMode === "left" && isDesktopWindowLayout();
+  sidebarSplitter?.classList.toggle("is-hidden", !canResizeSidebar);
   contentSplitter?.classList.toggle("is-hidden", !canResizeContent);
   reportsSection?.classList.toggle("is-hidden", !reportsVisible);
   secondaryStack?.classList.toggle("is-hidden", !secondaryVisible);
@@ -1273,9 +1334,10 @@ function syncWorkspaceLayout() {
     panel?.classList.toggle("is-hidden", !isVisible);
   });
 
-  if (sidebarVisible && isDesktopWindowLayout()) {
-    const sidebarWidth = sidebarState.collapsed ? SIDEBAR_COLLAPSED_WIDTH : state.layoutSizes.sidebarWidth;
+  if (sidebarVisible && sidebarParticipatesInSideLayout()) {
+    const sidebarWidth = sidebarMode === "minimal" ? SIDEBAR_COLLAPSED_WIDTH : state.layoutSizes.sidebarWidth;
     workspaceLayout.style.setProperty("--sidebar-width", `${sidebarWidth}px`);
+    sidebarSplitter?.setAttribute("aria-valuenow", String(sidebarWidth));
   } else {
     workspaceLayout.style.removeProperty("--sidebar-width");
   }
@@ -1340,20 +1402,22 @@ function togglePanelMinimize(name) {
 }
 
 function toggleSidebarCollapse() {
-  const panelState = ensurePanelState("sidebar");
   if (!isDesktopWindowLayout()) {
     closePanel("sidebar");
     return;
   }
-  panelState.collapsed = !panelState.collapsed;
-  applyPanelLayout("sidebar");
-  syncWorkspaceLayout();
+  setSidebarMode(currentSidebarMode() === "minimal" ? "left" : "minimal");
 }
 
 function beginLayoutResize(event) {
   if (!isDesktopWindowLayout() || event.button !== 0) return;
   const resizeType = event.currentTarget.dataset.layoutResize || "";
   if (!resizeType) return;
+  state.pendingLayoutResize = null;
+  if (state.layoutResizeFrame) {
+    window.cancelAnimationFrame(state.layoutResizeFrame);
+    state.layoutResizeFrame = 0;
+  }
   state.activeLayoutResize = {
     type: resizeType,
     startX: event.clientX,
@@ -1362,27 +1426,18 @@ function beginLayoutResize(event) {
     startSecondaryHeight: state.layoutSizes.secondaryHeight,
   };
   document.body.classList.add("is-resizing-layout");
+  triggerHaptic("light");
   event.preventDefault();
 }
 
-function updateLayoutResize(clientX, clientY) {
+function applyLayoutResize(clientX, clientY) {
   if (!state.activeLayoutResize || !isDesktopWindowLayout()) return;
   const interaction = state.activeLayoutResize;
   if (interaction.type === "sidebar") {
-    const sidebarState = ensurePanelState("sidebar");
-    const layoutRect = workspaceLayout?.getBoundingClientRect();
-    const minWidth = sidebarState.collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_MIN_WIDTH;
-    const maxWidth = Math.max(
-      minWidth,
-      Math.min(
-        SIDEBAR_MAX_WIDTH,
-        Math.round((layoutRect?.width || window.innerWidth) - 360),
-      ),
-    );
     state.layoutSizes.sidebarWidth = clampValue(
       Math.round(interaction.startSidebarWidth + (clientX - interaction.startX)),
-      minWidth,
-      maxWidth,
+      SIDEBAR_MIN_WIDTH,
+      SIDEBAR_MAX_WIDTH,
     );
   }
 
@@ -1402,8 +1457,34 @@ function updateLayoutResize(clientX, clientY) {
   syncWorkspaceLayout();
 }
 
+function updateLayoutResize(clientX, clientY) {
+  if (!state.activeLayoutResize || !isDesktopWindowLayout()) return;
+  state.pendingLayoutResize = { clientX, clientY };
+  if (state.layoutResizeFrame) return;
+
+  state.layoutResizeFrame = window.requestAnimationFrame(() => {
+    state.layoutResizeFrame = 0;
+    const pendingResize = state.pendingLayoutResize;
+    state.pendingLayoutResize = null;
+    if (pendingResize) {
+      applyLayoutResize(pendingResize.clientX, pendingResize.clientY);
+    }
+  });
+}
+
 function endLayoutResize() {
   if (!state.activeLayoutResize) return;
+  if (state.layoutResizeFrame) {
+    window.cancelAnimationFrame(state.layoutResizeFrame);
+    state.layoutResizeFrame = 0;
+  }
+  if (state.pendingLayoutResize) {
+    applyLayoutResize(state.pendingLayoutResize.clientX, state.pendingLayoutResize.clientY);
+    state.pendingLayoutResize = null;
+  }
+  if (state.activeLayoutResize.type === "sidebar") {
+    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(state.layoutSizes.sidebarWidth));
+  }
   state.activeLayoutResize = null;
   document.body.classList.remove("is-resizing-layout");
 }
@@ -1498,6 +1579,21 @@ function setButtonLoading(button, isLoading) {
   button.classList.toggle("is-loading", isLoading);
 }
 
+function triggerHaptic(kind = "light") {
+  const vibrate = window.navigator?.vibrate;
+  if (typeof vibrate !== "function") return;
+
+  const now = Date.now();
+  if (now - state.lastHapticAt < HAPTIC_THROTTLE_MS) return;
+  state.lastHapticAt = now;
+
+  try {
+    vibrate.call(window.navigator, HAPTIC_PATTERNS[kind] || HAPTIC_PATTERNS.light);
+  } catch (error) {
+    logClientError("haptic feedback unavailable", error, { kind });
+  }
+}
+
 function setLoadingLine(element, isLoading) {
   element.classList.toggle("is-active", isLoading);
 }
@@ -1579,6 +1675,16 @@ function formatDateTime(value) {
 function emptyAdminMonitor() {
   return {
     status: "unknown",
+    ollama: {
+      available: false,
+      host: "",
+      message: "Waiting for Ollama connection test...",
+      text_model: "",
+      text_ready: false,
+      image_model: "",
+      image_ready: false,
+      models: [],
+    },
     uptime_seconds: null,
     fetched_at: null,
   };
@@ -2148,6 +2254,27 @@ function showAppShell() {
   });
 }
 
+function closeDialogWithAnimation(dialog, afterClose) {
+  if (!dialog) return;
+  if (!dialog.open) {
+    if (typeof afterClose === "function") afterClose();
+    return;
+  }
+
+  dialog.classList.add("is-closing");
+  const closeToken = `${Date.now()}-${Math.random()}`;
+  dialog.dataset.closeToken = closeToken;
+  window.setTimeout(() => {
+    if (dialog.dataset.closeToken !== closeToken) return;
+    delete dialog.dataset.closeToken;
+    dialog.classList.remove("is-closing");
+    if (dialog.open) {
+      dialog.close();
+    }
+    if (typeof afterClose === "function") afterClose();
+  }, MODAL_CLOSE_ANIMATION_MS);
+}
+
 function resetReportModalState() {
   form?.reset();
   state.selectedFile = null;
@@ -2172,7 +2299,9 @@ function resetReportModalState() {
 function openReportModal() {
   if (!reportDialog) return;
   reportDialog.classList.remove("is-closing");
+  delete reportDialog.dataset.closeToken;
   reportDialog.showModal();
+  triggerHaptic("open");
   setWarningCard(reportWarningCard, "");
   window.setTimeout(() => {
     titleInput?.focus();
@@ -2182,21 +2311,30 @@ function openReportModal() {
 function closeReportModal() {
   if (!reportDialog) return;
   if (reportDialog.open) {
-    reportDialog.close();
+    closeDialogWithAnimation(reportDialog);
+    return;
   }
   resetReportModalState();
 }
 
-function setAuthPasswordVisibility(visible) {
-  if (!authPassword) return;
+function setPasswordFieldVisibility(input, toggle, visible) {
+  if (!input) return;
   const isVisible = Boolean(visible);
-  authPassword.type = isVisible ? "text" : "password";
-  if (authPasswordToggle) {
-    authPasswordToggle.classList.toggle("is-visible", isVisible);
+  input.type = isVisible ? "text" : "password";
+  if (toggle) {
+    toggle.classList.toggle("is-visible", isVisible);
     const labelKey = isVisible ? "auth.hidePassword" : "auth.showPassword";
-    authPasswordToggle.setAttribute("aria-label", t(labelKey));
-    authPasswordToggle.setAttribute("title", t(labelKey));
+    toggle.setAttribute("aria-label", t(labelKey));
+    toggle.setAttribute("title", t(labelKey));
   }
+}
+
+function setAuthPasswordVisibility(visible) {
+  setPasswordFieldVisibility(authPassword, authPasswordToggle, visible);
+}
+
+function setAuthConfirmPasswordVisibility(visible) {
+  setPasswordFieldVisibility(authConfirmPassword, authConfirmPasswordToggle, visible);
 }
 
 function setAuthView(view) {
@@ -2206,7 +2344,13 @@ function setAuthView(view) {
   registerTab.classList.toggle("is-active", view === "register");
   registerFields.classList.toggle("is-hidden", view !== "register");
   authPassword.setAttribute("autocomplete", view === "login" ? "current-password" : "new-password");
+  if (authConfirmPassword) {
+    authConfirmPassword.required = view === "register";
+    authConfirmPassword.disabled = view !== "register";
+    authConfirmPassword.value = "";
+  }
   setAuthPasswordVisibility(false);
+  setAuthConfirmPasswordVisibility(false);
 }
 
 function currentUserCanAdmin() {
@@ -2670,8 +2814,28 @@ function normalizeImageUrl(path) {
   return "";
 }
 
+function cacheBustImageUrl(source, version = Date.now()) {
+  if (!source || /^(data:|blob:)/.test(source)) return source || "";
+  const versionValue = String(version || Date.now());
+  try {
+    const url = new URL(source, window.location.href);
+    url.searchParams.set("v", versionValue);
+    return url.toString();
+  } catch (error) {
+    const [base, hash = ""] = source.split("#");
+    const separator = base.includes("?") ? "&" : "?";
+    return `${base}${separator}v=${encodeURIComponent(versionValue)}${hash ? `#${hash}` : ""}`;
+  }
+}
+
 function resolveImageUrl(item) {
   return normalizeImageUrl(item?.image_url || item?.image_path);
+}
+
+function isPreviewableAttachment(attachment) {
+  const type = String(attachment?.content_type || "").toLowerCase();
+  const name = String(attachment?.name || attachment?.url || "").toLowerCase();
+  return type.startsWith("image/") || /\.(png|jpe?g|webp|gif)(?:$|\?)/i.test(name);
 }
 
 function openImagePreview(source, title = "Image preview", caption = "") {
@@ -2681,13 +2845,17 @@ function openImagePreview(source, title = "Image preview", caption = "") {
   imagePreviewImage.src = source;
   imagePreviewImage.alt = title || "Preview image";
   if (imagePreviewDialog.open) return;
+  imagePreviewDialog.classList.remove("is-closing");
+  delete imagePreviewDialog.dataset.closeToken;
   imagePreviewDialog.showModal();
+  triggerHaptic("open");
 }
 
 function closeImagePreview() {
   if (!imagePreviewDialog?.open) return;
-  imagePreviewDialog.close();
-  imagePreviewImage.removeAttribute("src");
+  closeDialogWithAnimation(imagePreviewDialog, () => {
+    imagePreviewImage.removeAttribute("src");
+  });
 }
 
 function findKnownItemById(itemId) {
@@ -2758,9 +2926,134 @@ function createThumbnailButton(source, { title = "Preview image", caption = "" }
   image.className = "panel-thumbnail";
   image.src = source;
   image.alt = title;
+  image.loading = "lazy";
+  image.decoding = "async";
+  image.addEventListener("error", () => button.remove(), { once: true });
   button.append(image);
   button.addEventListener("click", () => openImagePreview(source, title, caption));
   return button;
+}
+
+function createAttachmentPreview(attachment) {
+  const source = normalizeImageUrl(attachment?.url || "");
+  return isPreviewableAttachment(attachment) ? createThumbnailButton(source, {
+    title: attachment?.name || "Attachment preview",
+    caption: attachment?.name || "",
+  }) : null;
+}
+
+function applyFreshUser(user, version = Date.now()) {
+  if (!user?.avatar_url) return user;
+  return {
+    ...user,
+    avatar_url: cacheBustImageUrl(normalizeImageUrl(user.avatar_url), version),
+  };
+}
+
+function renderCurrentAccountChip() {
+  if (!state.user) return;
+  accountName.textContent = userDisplayName(state.user);
+  accountMeta.textContent = currentUserCanAdmin()
+    ? langText({ en: "Admin access", "zh-CN": "管理员权限", th: "สิทธิ์ผู้ดูแล" })
+    : `@${state.user.username}`;
+}
+
+function revokeProfilePreviewUrl() {
+  if (!state.profilePreviewUrl) return;
+  URL.revokeObjectURL(state.profilePreviewUrl);
+  state.profilePreviewUrl = "";
+}
+
+function accountAvatarSource() {
+  return state.profilePreviewUrl || state.user?.avatar_url || "";
+}
+
+function selectProfileImage(file) {
+  revokeProfilePreviewUrl();
+
+  if (!file) {
+    setMessage(profileImageMessage, "");
+    renderAccount();
+    return;
+  }
+
+  const validationMessage = validateReportImageFile(file);
+  if (validationMessage) {
+    if (profileImageInput) profileImageInput.value = "";
+    setMessage(profileImageMessage, validationMessage, true);
+    renderAccount();
+    return;
+  }
+
+  state.profilePreviewUrl = URL.createObjectURL(file);
+  applyAvatar(accountAvatar, state.profilePreviewUrl, userAvatarLabel(state.user));
+  setMessage(profileImageMessage, langText({
+    en: `Preview ready: ${file.name} (${formatFileSize(file.size)}).`,
+    "zh-CN": `预览已就绪：${file.name}（${formatFileSize(file.size)}）。`,
+    th: `แสดงตัวอย่างแล้ว: ${file.name} (${formatFileSize(file.size)})`,
+  }));
+  triggerHaptic("light");
+}
+
+function markImageUnavailable(container, image, fallback) {
+  container?.classList.remove("has-image");
+  if (container) container.style.cursor = "";
+  image?.removeAttribute("src");
+  fallback?.classList.remove("is-hidden");
+}
+
+function renderQueryContextImage(item) {
+  if (!queryItemImageButton || !queryItemImage || !queryItemImageFallback) return;
+  const source = item ? (state.previewUrls.get(item.id) || resolveImageUrl(item)) : "";
+  queryItemImageButton.disabled = !canPreviewImage(source);
+  queryItemImageButton.onclick = null;
+  if (!canPreviewImage(source)) {
+    queryItemImageFallback.textContent = item ? "No image" : "General";
+    markImageUnavailable(queryItemImageButton, queryItemImage, queryItemImageFallback);
+    return;
+  }
+
+  queryItemImageFallback.classList.add("is-hidden");
+  queryItemImageButton.classList.add("has-image");
+  queryItemImage.loading = "lazy";
+  queryItemImage.decoding = "async";
+  queryItemImage.alt = item.title || "Query item";
+  queryItemImage.onerror = () => markImageUnavailable(queryItemImageButton, queryItemImage, queryItemImageFallback);
+  queryItemImage.src = source;
+  queryItemImageButton.onclick = () => openImagePreview(source, item.title || "Query item", item.description || "");
+}
+
+function syncQueryAdminActions() {
+  const visible = currentUserCanAdmin() && Boolean(state.currentQueryItem?.id);
+  queryAdminActions?.classList.toggle("is-hidden", !visible);
+  if (queryClearThreadButton) {
+    queryClearThreadButton.disabled = !visible;
+  }
+}
+
+function queryThreadKey(itemId) {
+  return itemId ? `item:${itemId}` : "general";
+}
+
+function invalidateQueryThread(itemId) {
+  state.queryCache.delete(queryThreadKey(itemId));
+}
+
+function relatedItemForNotification(notification) {
+  return findKnownItemById(notification?.related_item_id);
+}
+
+function appendNotificationPreview(notification, itemElement) {
+  const item = relatedItemForNotification(notification);
+  const source = resolveImageUrl(item);
+  const thumbnail = createThumbnailButton(source, {
+    title: item?.title || notification.title || "Notification image",
+    caption: item?.description || notification.message || "",
+  });
+  if (thumbnail) {
+    thumbnail.classList.add("notification-preview");
+    itemElement.append(thumbnail);
+  }
 }
 
 function createDetailsToggle(detailRegion) {
@@ -2818,6 +3111,13 @@ function validateRegisterFields() {
 
   const initials = authInitials.value.trim();
   const classOf = Number(authClassOf.value);
+  if (authConfirmPassword && authPassword.value !== authConfirmPassword.value) {
+    return langText({
+      en: "Passwords do not match.",
+      "zh-CN": "两次输入的密码不一致。",
+      th: "รหัสผ่านไม่ตรงกัน",
+    });
+  }
 
   if (!INITIALS_PATTERN.test(initials)) {
     return langText({
@@ -2953,13 +3253,24 @@ function initialsFromText(value, fallback = "LF") {
 
 function applyAvatar(element, imageUrl, fallbackText) {
   element.textContent = fallbackText;
-  if (imageUrl) {
-    element.style.backgroundImage = `url("${imageUrl}")`;
+  element.style.backgroundImage = "";
+  element.style.color = "";
+  const source = normalizeImageUrl(imageUrl);
+  element.dataset.avatarSource = source;
+  if (!source) return;
+
+  const probe = new Image();
+  probe.onload = () => {
+    if (element.dataset.avatarSource !== source) return;
+    element.style.backgroundImage = `url("${source}")`;
     element.style.color = "transparent";
-  } else {
+  };
+  probe.onerror = () => {
+    if (element.dataset.avatarSource !== source) return;
     element.style.backgroundImage = "";
     element.style.color = "";
-  }
+  };
+  probe.src = source;
 }
 
 function createMiniAvatar(label, imageUrl = "") {
@@ -3189,6 +3500,7 @@ function renderNotifications(notifications = state.notifications) {
     button.addEventListener("click", async () => {
       try {
         await apiFetch(`/notifications/${notification.id}/read`, { method: "POST" });
+        triggerHaptic("light");
         await loadNotifications();
       } catch (error) {
         logClientError("mark notification read failed", error, { notificationId: notification.id });
@@ -3205,6 +3517,7 @@ function renderNotifications(notifications = state.notifications) {
     meta.textContent = formatDateTime(notification.created_at);
 
     item.append(head, body, meta);
+    appendNotificationPreview(notification, item);
     notificationList.append(item);
   });
 }
@@ -3292,6 +3605,15 @@ function renderRoomItems(items) {
     if (canPreviewImage(preview)) {
       image.src = preview;
       image.alt = item.title || "Room item";
+      image.loading = "lazy";
+      image.decoding = "async";
+      image.addEventListener("error", () => {
+        image.remove();
+        const placeholder = document.createElement("div");
+        placeholder.className = "image-placeholder";
+        placeholder.textContent = "Image unavailable";
+        imageWrap.append(placeholder);
+      }, { once: true });
       imageWrap.append(image);
     } else {
       const placeholder = document.createElement("div");
@@ -3381,6 +3703,9 @@ function renderReturnedItems(items) {
       image.className = "returned-card-image";
       image.src = preview;
       image.alt = item.title || "Returned item";
+      image.loading = "lazy";
+      image.decoding = "async";
+      image.addEventListener("error", () => image.remove(), { once: true });
       image.style.cursor = "zoom-in";
       image.addEventListener("click", () => {
         openImagePreview(preview, item.title || "Returned item", item.description || "");
@@ -3695,6 +4020,15 @@ function renderClaims(claims) {
     const status = card.querySelector(".status-badge");
     const reason = card.querySelector(".claim-history-reason");
     const info = card.querySelector(".info-list");
+    const preview = resolveImageUrl(claim.item);
+    const thumbnail = createThumbnailButton(preview, {
+      title: claim.item?.title || "Claim item preview",
+      caption: claim.item_description || "",
+    });
+    if (thumbnail) {
+      thumbnail.classList.add("claim-history-preview");
+      card.querySelector(".claim-history-card")?.prepend(thumbnail);
+    }
 
     title.textContent = claim.item?.title || langText({ en: "Unavailable item", "zh-CN": "不可用物品", th: "สิ่งของไม่พร้อมใช้งาน" });
     meta.textContent = langText({
@@ -3720,7 +4054,7 @@ function renderClaims(claims) {
 function renderAccount() {
   if (!state.user) return;
 
-  applyAvatar(accountAvatar, state.user.avatar_url || "", userAvatarLabel(state.user));
+  applyAvatar(accountAvatar, accountAvatarSource(), userAvatarLabel(state.user));
   accountPageName.textContent = userDisplayName(state.user);
   accountPageIdentity.textContent = `@${state.user.username}`;
   accountAdminBadge.classList.toggle("is-hidden", !currentUserCanAdmin());
@@ -3734,9 +4068,21 @@ function renderAccount() {
 
 function renderAdminMonitor(monitor = state.adminMonitor || emptyAdminMonitor()) {
   const uptime = Number.isFinite(Number(monitor.uptime_seconds)) ? formatDuration(monitor.uptime_seconds) : "--";
+  const ollama = monitor.ollama || emptyAdminMonitor().ollama;
+  const models = Array.isArray(ollama.models) ? ollama.models : [];
 
   adminMonitorUptime.textContent = uptime;
   adminMonitorStatus.textContent = formatMonitorStatus(monitor.status);
+  if (adminOllamaStatus) {
+    adminOllamaStatus.textContent = ollama.available
+      ? `Connected (${ollama.host || "configured host"})`
+      : `Disconnected${ollama.host ? ` (${ollama.host})` : ""}`;
+  }
+  if (adminOllamaModels) {
+    adminOllamaModels.textContent = models.length
+      ? models.join(", ")
+      : (ollama.available ? "No downloaded models detected" : "Unavailable");
+  }
 
   if (monitor.fetched_at) {
     adminMonitorUpdated.textContent = langText({
@@ -3748,7 +4094,10 @@ function renderAdminMonitor(monitor = state.adminMonitor || emptyAdminMonitor())
     adminMonitorUpdated.textContent = t("admin.monitorWaiting");
   }
 
-  setWarningCard(adminMonitorWarning, "");
+  const warningMessage = ollama.available
+    ? (ollama.text_ready ? "" : `Ollama is connected, but model "${ollama.text_model || "unconfigured"}" was not detected.`)
+    : (ollama.message || "Ollama is disconnected. AI features will use safe fallbacks where available.");
+  setWarningCard(adminMonitorWarning, warningMessage);
 }
 
 function resetAdminMonitor() {
@@ -4067,7 +4416,16 @@ function renderAdminItems(items) {
     roomButton.textContent = langText({ en: "Move to room", "zh-CN": "移到招领室", th: "ย้ายไปห้องของหาย" });
     roomButton.addEventListener("click", () => handleAdminMoveToRoom(item));
 
-    actions.append(approveButton, rejectButton, incompleteButton, allowButton, flagButton, clearButton, roomButton, deleteButton);
+    const clearChatButton = document.createElement("button");
+    clearChatButton.className = "ghost-button card-button danger-button";
+    clearChatButton.type = "button";
+    clearChatButton.textContent = langText({ en: "Clear chat", "zh-CN": "清空聊天", th: "ล้างแชต" });
+    clearChatButton.addEventListener("click", () => {
+      state.currentQueryItem = item;
+      clearCurrentQueryThread();
+    });
+
+    actions.append(approveButton, rejectButton, incompleteButton, allowButton, flagButton, clearButton, roomButton, clearChatButton, deleteButton);
 
     const preview = state.previewUrls.get(item.id) || resolveImageUrl(item);
     const thumbnail = createThumbnailButton(preview, {
@@ -4435,6 +4793,7 @@ function showUndoToast(message, onUndo) {
   state.undoState = typeof onUndo === "function" ? onUndo : null;
   undoToastText.textContent = message;
   undoToast.classList.remove("is-hidden");
+  triggerHaptic("notification");
   state.undoTimer = window.setTimeout(hideUndoToast, 9000);
 }
 
@@ -4444,7 +4803,7 @@ function closeConfirmModal() {
   confirmNotesInput.value = "";
   confirmNotesWrap.classList.add("is-hidden");
   if (confirmDialog.open) {
-    confirmDialog.close();
+    closeDialogWithAnimation(confirmDialog);
   }
 }
 
@@ -4468,7 +4827,10 @@ function openConfirmModal({
   confirmNotesInput.value = notesValue || "";
   confirmNotesWrap.classList.toggle("is-hidden", !requireNotes && !notesLabel);
   setMessage(confirmMessage, "");
+  confirmDialog.classList.remove("is-closing");
+  delete confirmDialog.dataset.closeToken;
   confirmDialog.showModal();
+  triggerHaptic("open");
 }
 
 async function handleAdminClaimDecision(claimId, action, button) {
@@ -4713,6 +5075,8 @@ function clearQueryState() {
   setMessage(queryMessage, "");
   setLoadingLine(queryLoading, false);
   hideProgress("query");
+  renderQueryContextImage(null);
+  syncQueryAdminActions();
 }
 
 function updateQueryEmptyState() {
@@ -4762,6 +5126,8 @@ function renderQuerySelectionState() {
   });
   queryItemStatus.textContent = langText({ en: "General", "zh-CN": "一般", th: "ทั่วไป" });
   queryItemStatus.className = "status-badge is-lost";
+  renderQueryContextImage(null);
+  syncQueryAdminActions();
   queryItemContextLabel.textContent = langText({ en: "General conversation", "zh-CN": "一般对话", th: "บทสนทนาทั่วไป" });
   queryEmptyState.textContent = t("query.emptyGeneral");
   queryEmptyState.classList.remove("is-hidden");
@@ -4884,6 +5250,76 @@ function renderQuerySuggestions(suggestions = [], item = null, messages = state.
   querySuggestions.classList.remove("is-hidden");
 }
 
+function deleteQueryMessage(messageId) {
+  openConfirmModal({
+    title: langText({ en: "Delete message", "zh-CN": "删除消息", th: "ลบข้อความ" }),
+    body: langText({
+      en: `Delete message #${messageId}?`,
+      "zh-CN": `删除消息 #${messageId}？`,
+      th: `ลบข้อความ #${messageId} ใช่หรือไม่`,
+    }),
+    confirmLabel: t("common.confirm"),
+    onConfirm: async () => {
+      try {
+        const data = await apiFetch(`/admin/query-messages/${messageId}`, { method: "DELETE" });
+        closeConfirmModal();
+        setMessage(queryMessage, data.message || "Message deleted.");
+        const itemId = state.currentQueryItem?.id || null;
+        invalidateQueryThread(itemId);
+        await loadQueryPage(itemId);
+        if (currentUserCanAdmin()) {
+          await loadAdminData();
+        }
+      } catch (error) {
+        setMessage(confirmMessage, error.message, true);
+        logClientError("deleting query message failed", error, { messageId });
+      }
+    },
+  });
+}
+
+function clearCurrentQueryThread() {
+  const item = state.currentQueryItem;
+  if (!currentUserCanAdmin() || !item?.id) return;
+  openConfirmModal({
+    title: langText({ en: "Clear item chat", "zh-CN": "清空物品聊天", th: "ล้างแชตรายการ" }),
+    body: langText({
+      en: `Clear all query messages for "${item.title || `item #${item.id}`}"?`,
+      "zh-CN": `清空“${item.title || `物品 #${item.id}`}”的全部咨询消息？`,
+      th: `ล้างข้อความทั้งหมดสำหรับ "${item.title || `รายการ #${item.id}`}" ใช่หรือไม่`,
+    }),
+    confirmLabel: t("common.confirm"),
+    onConfirm: async () => {
+      try {
+        const data = await apiFetch(`/admin/items/${item.id}/query-thread`, { method: "DELETE" });
+        closeConfirmModal();
+        setMessage(queryMessage, data.message || "Item chat cleared.");
+        invalidateQueryThread(item.id);
+        await loadQueryPage(item.id);
+        if (currentUserCanAdmin()) {
+          await loadAdminData();
+        }
+      } catch (error) {
+        setMessage(confirmMessage, error.message, true);
+        logClientError("clearing query thread failed", error, { itemId: item.id });
+      }
+    },
+  });
+}
+
+function appendQueryAdminControls(bubble, entry) {
+  if (!currentUserCanAdmin() || !entry?.id) return;
+  const actions = document.createElement("div");
+  actions.className = "query-message-actions";
+  const deleteButton = document.createElement("button");
+  deleteButton.className = "ghost-button small-button danger-button";
+  deleteButton.type = "button";
+  deleteButton.textContent = langText({ en: "Delete", "zh-CN": "删除", th: "ลบ" });
+  deleteButton.addEventListener("click", () => deleteQueryMessage(entry.id));
+  actions.append(deleteButton);
+  bubble.append(actions);
+}
+
 function renderQueryContext(item) {
   if (!item) {
     renderQuerySelectionState();
@@ -4895,6 +5331,8 @@ function renderQueryContext(item) {
 
   setCurrentQueryItem(item);
   queryItemSelect.value = String(item.id);
+  renderQueryContextImage(item);
+  syncQueryAdminActions();
 
   queryItemTitle.textContent = item.title;
   queryItemMeta.textContent = `${localizeValue(item.category)} • ${localizeValue(item.location)} • ${formatDateTime(item.created_at)}`;
@@ -4947,8 +5385,14 @@ function renderQueryMessages(messages) {
       attachment.rel = "noopener noreferrer";
       attachment.textContent = `${entry.attachment.name || "Attachment"} • ${formatFileSize(entry.attachment.size || 0)}`;
       bubble.append(attachment);
+      const preview = createAttachmentPreview(entry.attachment);
+      if (preview) {
+        preview.classList.add("query-attachment-preview");
+        bubble.append(preview);
+      }
     }
 
+    appendQueryAdminControls(bubble, entry);
     queryMessages.append(bubble);
   });
 
@@ -5030,11 +5474,11 @@ async function submitQuery(event) {
     setWarningCard(queryWarningCard, fileValidationMessage);
     return;
   }
-  if (value.length < 6) {
+  if (!value) {
     const shortMessage = langText({
-      en: "Message must be at least 6 characters.",
-      "zh-CN": "消息至少需要 6 个字符。",
-      th: "ข้อความต้องยาวอย่างน้อย 6 ตัวอักษร",
+      en: "Type a message first.",
+      "zh-CN": "请先输入消息。",
+      th: "กรุณาพิมพ์ข้อความก่อน",
     });
     setMessage(queryMessage, shortMessage, true);
     setWarningCard(queryWarningCard, shortMessage);
@@ -5085,6 +5529,7 @@ async function submitQuery(event) {
     renderQuerySuggestions(data.suggestions || [], state.currentQueryItem, state.queryMessages);
     await completeProgress("query");
     setMessage(queryMessage, langText({ en: "Message sent successfully.", "zh-CN": "消息已发送成功。", th: "ส่งข้อความเรียบร้อยแล้ว" }));
+    triggerHaptic("success");
     await loadItems();
   } catch (error) {
     resetProgress("query");
@@ -5134,7 +5579,7 @@ async function submitAuth(event) {
       body: JSON.stringify(payload),
     });
     persistSession(data.token);
-    state.user = data.user;
+    state.user = applyFreshUser(data.user);
     setLanguage(state.user?.preferred_language || state.language);
     authForm.reset();
     setMessage(authMessage, state.authView === "login"
@@ -5157,7 +5602,7 @@ async function restoreSession() {
 
   try {
     const data = await apiFetch("/session");
-    state.user = data.user;
+    state.user = applyFreshUser(data.user);
     setLanguage(state.user?.preferred_language || state.language);
     await enterAuthenticatedApp();
   } catch (error) {
@@ -5169,10 +5614,7 @@ async function restoreSession() {
 
 async function enterAuthenticatedApp() {
   showAppShell();
-  accountName.textContent = userDisplayName(state.user);
-  accountMeta.textContent = currentUserCanAdmin()
-    ? langText({ en: "Admin access", "zh-CN": "管理员权限", th: "สิทธิ์ผู้ดูแล" })
-    : `@${state.user.username}`;
+  renderCurrentAccountChip();
   showAdminButton.classList.toggle("is-hidden", !currentUserCanAdmin());
   roomAdminPanel.classList.toggle("is-hidden", !currentUserCanAdmin());
   prefillReporter();
@@ -5289,9 +5731,15 @@ async function submitReport(event) {
 }
 
 async function uploadProfileImage() {
-  const file = profileImageInput.files?.[0];
+  const file = profileImageInput?.files?.[0];
   if (!file) {
     setMessage(profileImageMessage, langText({ en: "Choose an image first.", "zh-CN": "请先选择图片。", th: "กรุณาเลือกรูปภาพก่อน" }), true);
+    return;
+  }
+
+  const validationMessage = validateReportImageFile(file);
+  if (validationMessage) {
+    setMessage(profileImageMessage, validationMessage, true);
     return;
   }
 
@@ -5299,6 +5747,10 @@ async function uploadProfileImage() {
   setProgress("profile", 0, progressCopy("profileCompress"), true);
   setMessage(profileImageMessage, langText({ en: "Uploading profile image...", "zh-CN": "正在上传头像...", th: "กำลังอัปโหลดรูปโปรไฟล์..." }));
   try {
+    if (!state.profilePreviewUrl) {
+      state.profilePreviewUrl = URL.createObjectURL(file);
+      applyAvatar(accountAvatar, state.profilePreviewUrl, userAvatarLabel(state.user));
+    }
     const uploadFile = await prepareUploadFile(file, "profile", {
       compress: progressCopy("profileCompress"),
       prepare: progressCopy("profileUpload"),
@@ -5316,18 +5768,25 @@ async function uploadProfileImage() {
       onUploadProgress: (progressEvent) => updateUploadProgress("profile", progressEvent, progressCopy("profileUpload")),
       onUploadComplete: () => startProcessingProgress("profile", progressCopy("profileProcess")),
     });
-    state.user = data.user || state.user;
+    state.user = applyFreshUser(data.user || state.user, data.avatar_version || Date.now());
+    revokeProfilePreviewUrl();
     renderAccount();
-    accountName.textContent = userDisplayName(state.user);
-    accountMeta.textContent = currentUserCanAdmin()
-      ? langText({ en: "Admin access", "zh-CN": "管理员权限", th: "สิทธิ์ผู้ดูแล" })
-      : `@${state.user.username}`;
+    renderCurrentAccountChip();
     await completeProgress("profile");
     setMessage(profileImageMessage, data.message || langText({ en: "Profile image updated.", "zh-CN": "头像已更新。", th: "อัปเดตรูปโปรไฟล์แล้ว" }));
-    await Promise.all([loadItems(), currentUserCanAdmin() ? loadAdminData() : Promise.resolve()]);
+    triggerHaptic("success");
+    invalidateSearchCache();
+    state.queryCache.clear();
+    await Promise.all([
+      loadItems(),
+      loadNotifications(),
+      currentUserCanAdmin() ? loadAdminData() : Promise.resolve(),
+      state.currentView === "query" ? loadQueryPage(state.currentQueryItem?.id || null) : Promise.resolve(),
+    ]);
     if (currentUserCanAdmin() && state.currentView === "admin") {
       await loadAdminMonitor();
     }
+    if (profileImageInput) profileImageInput.value = "";
   } catch (error) {
     resetProgress("profile");
     setMessage(profileImageMessage, error.message, true);
@@ -5438,7 +5897,7 @@ function closeRoomClaimPreview() {
   state.activeRoomPreviewItem = null;
   resetRoomPreviewState();
   if (roomClaimPreviewDialog.open) {
-    roomClaimPreviewDialog.close();
+    closeDialogWithAnimation(roomClaimPreviewDialog);
   }
 }
 
@@ -5456,7 +5915,10 @@ function openRoomClaimPreview(item) {
   roomPreviewImage.src = resolveImageUrl(item);
   roomPreviewImage.alt = item.title || "Room item";
   resetRoomPreviewState();
+  roomClaimPreviewDialog.classList.remove("is-closing");
+  delete roomClaimPreviewDialog.dataset.closeToken;
   roomClaimPreviewDialog.showModal();
+  triggerHaptic("open");
 }
 
 function updateRoomPreviewPointer(clientX, clientY, mode) {
@@ -5575,14 +6037,17 @@ function openClaimDialog(item, previewAnalysis = null) {
     claimDescriptionInput.value = previewAnalysis.description || item.title || "";
     claimIdentifyingInput.value = (previewAnalysis.tags || []).join(", ");
   }
+  claimDialog.classList.remove("is-closing");
+  delete claimDialog.dataset.closeToken;
   claimDialog.showModal();
+  triggerHaptic("open");
 }
 
 function closeClaimModal() {
   state.activeClaimItem = null;
   state.roomPreviewAnalysis = null;
   if (claimDialog.open) {
-    claimDialog.close();
+    closeDialogWithAnimation(claimDialog);
   }
 }
 
@@ -5621,6 +6086,7 @@ async function submitClaim(event) {
       "zh-CN": "你的认领已发送审核，核查完成后我们会通知你。",
       th: "ส่งคำขอของคุณไปตรวจสอบแล้ว เราจะแจ้งให้ทราบเมื่อมีการตรวจสอบเสร็จสิ้น",
     }));
+    triggerHaptic("success");
     invalidateSearchCache();
     await Promise.all([loadClaims(), loadNotifications(), loadReturnedItems(), loadStatsSummary()]);
     window.setTimeout(closeClaimModal, 450);
@@ -5649,6 +6115,7 @@ async function markItemClaimed(itemId, button) {
       loadStatsSummary(),
       currentUserCanAdmin() ? loadAdminData() : Promise.resolve(),
     ]);
+    triggerHaptic("success");
   } catch (error) {
     setMessage(uploadMessage, error.message, true);
     logClientError("marking item claimed failed", error, { itemId });
@@ -5696,6 +6163,11 @@ function logout() {
   stopAdminMonitorPolling();
   stopNotificationPolling();
   resetPreviewUrls();
+  revokeProfilePreviewUrl();
+  if (state.layoutResizeFrame) {
+    window.cancelAnimationFrame(state.layoutResizeFrame);
+    state.layoutResizeFrame = 0;
+  }
   state.searchCache.clear();
   state.queryCache.clear();
   state.items = [];
@@ -5719,8 +6191,9 @@ function logout() {
   state.tutorialDismissedForSession = false;
   state.panelState = {};
   state.activeLayoutResize = null;
+  state.pendingLayoutResize = null;
   state.layoutSizes = {
-    sidebarWidth: 280,
+    sidebarWidth: initialSidebarWidth,
     secondaryHeight: 320,
   };
   gallery.replaceChildren();
@@ -5769,6 +6242,8 @@ function bindEvents() {
     [authForm, "submit", submitAuth, "auth form submit"],
     [loginTab, "click", () => setAuthView("login"), "login tab"],
     [registerTab, "click", () => setAuthView("register"), "register tab"],
+    [authPasswordToggle, "click", () => setAuthPasswordVisibility(authPassword?.type === "password"), "password visibility"],
+    [authConfirmPasswordToggle, "click", () => setAuthConfirmPasswordVisibility(authConfirmPassword?.type === "password"), "confirm password visibility"],
     [showReportsButton, "click", () => navigateTo("reports"), "reports nav"],
     [showRoomButton, "click", () => navigateTo("room"), "room nav"],
     [showReturnedButton, "click", () => navigateTo("returned"), "returned nav"],
@@ -5778,6 +6253,7 @@ function bindEvents() {
     [showAdminButton, "click", () => navigateTo("admin"), "admin nav"],
     [sidebarLauncherButton, "click", () => openPanel("sidebar"), "sidebar launcher"],
     [sidebarCollapseButton, "click", toggleSidebarCollapse, "sidebar collapse"],
+    [sidebarModeSelect, "change", () => setSidebarMode(sidebarModeSelect.value), "sidebar mode"],
     [queryBackButton, "click", () => navigateTo("reports"), "query back"],
     [themeToggleButton, "click", toggleThemeMode, "theme toggle"],
     [openReportModalButton, "click", openReportModal, "open report modal"],
@@ -5807,6 +6283,7 @@ function bindEvents() {
     [queryForm, "submit", submitQuery, "query form submit"],
     [queryFileInput, "change", () => selectQueryFile(queryFileInput?.files?.[0] || null), "query file input"],
     [queryFileRemoveButton, "click", clearSelectedQueryFile, "clear query file"],
+    [queryClearThreadButton, "click", clearCurrentQueryThread, "clear query thread"],
     [claimForm, "submit", submitClaim, "claim form submit"],
     [cancelClaimButton, "click", closeClaimModal, "cancel claim"],
     [closeClaimDialog, "click", closeClaimModal, "close claim dialog"],
@@ -5820,6 +6297,7 @@ function bindEvents() {
     [closeConfirmDialog, "click", closeConfirmModal, "close confirm dialog"],
     [closeImagePreviewDialog, "click", closeImagePreview, "close image preview"],
     [undoToastClose, "click", hideUndoToast, "close undo toast"],
+    [profileImageInput, "change", () => selectProfileImage(profileImageInput?.files?.[0] || null), "profile image input"],
     [profileImageButton, "click", uploadProfileImage, "upload profile image"],
     [tutorialBackButton, "click", () => { void rewindTutorial(); }, "tutorial back"],
     [tutorialNextButton, "click", () => { void advanceTutorial(); }, "tutorial next"],
@@ -5843,7 +6321,7 @@ function bindEvents() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ language: state.language }),
         });
-        state.user = data.user || state.user;
+        state.user = applyFreshUser(data.user || state.user);
       } catch (error) {
         logClientError("saving language preference failed", error);
       }
@@ -5876,6 +6354,18 @@ function bindEvents() {
     closeReportModal();
   }, { label: "report dialog cancel" });
   bindListener(reportDialog, "close", resetReportModalState, { label: "report dialog close reset" });
+  bindListener(claimDialog, "cancel", (event) => {
+    event.preventDefault();
+    closeClaimModal();
+  }, { label: "claim dialog cancel" });
+  bindListener(confirmDialog, "cancel", (event) => {
+    event.preventDefault();
+    closeConfirmModal();
+  }, { label: "confirm dialog cancel" });
+  bindListener(roomClaimPreviewDialog, "cancel", (event) => {
+    event.preventDefault();
+    closeRoomClaimPreview();
+  }, { label: "room preview dialog cancel" });
 
   bindListener(notificationButton, "click", async () => {
     if (!notificationDropdown) {
@@ -5886,6 +6376,7 @@ function bindEvents() {
     notificationDropdown.classList.toggle("is-hidden", !willOpen);
     notificationButton?.setAttribute("aria-expanded", willOpen ? "true" : "false");
     if (willOpen) {
+      triggerHaptic("open");
       await loadNotifications();
     }
   }, { label: "notification toggle" });

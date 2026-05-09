@@ -24,6 +24,16 @@ set -a
 source "$ENV_FILE"
 set +a
 
+export OLLAMA_HOST="${OLLAMA_HOST:-${OLLAMA_URL:-http://localhost:11434}}"
+case "$OLLAMA_HOST" in
+  http://*|https://*) ;;
+  *) export OLLAMA_HOST="http://${OLLAMA_HOST}" ;;
+esac
+export OLLAMA_HOST="${OLLAMA_HOST%/}"
+export OLLAMA_MODEL="${OLLAMA_MODEL:-${OLLAMA_TEXT_MODEL:-llama3:8b}}"
+export OLLAMA_TEXT_MODEL="${OLLAMA_TEXT_MODEL:-$OLLAMA_MODEL}"
+export AI_CHAT_MODEL="${AI_CHAT_MODEL:-$OLLAMA_MODEL}"
+
 mkdir -p "${UPLOAD_DIR:-./uploads}" "${LOG_DIR:-./logs}" "${DATA_DIR:-./data}"
 
 if [[ ! -x "$VENV_PYTHON" ]]; then

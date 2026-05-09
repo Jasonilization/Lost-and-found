@@ -23,6 +23,11 @@ if [[ ! -x "$VENV_PYTHON" || ! -f "$VENV_ACTIVATE" ]]; then
   "$PYTHON_BIN" -m venv "$VENV_DIR"
 fi
 
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "[start] Creating .env from .env.example"
+  cp .env.example "$ENV_FILE"
+fi
+
 if [[ -f "$ENV_FILE" ]]; then
   echo "[start] Loading environment from .env"
   set -a
@@ -43,18 +48,25 @@ python3 -m ensurepip --upgrade >/dev/null 2>&1 || true
 echo "[start] Installing requirements"
 PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install -r requirements.txt
 
-export OLLAMA_TEXT_MODEL="${OLLAMA_TEXT_MODEL:-llama3:8b}"
-export AI_CHAT_MODEL="${AI_CHAT_MODEL:-llama3:8b}"
+export OLLAMA_HOST="${OLLAMA_HOST:-${OLLAMA_URL:-http://localhost:11434}}"
+case "$OLLAMA_HOST" in
+  http://*|https://*) ;;
+  *) export OLLAMA_HOST="http://${OLLAMA_HOST}" ;;
+esac
+export OLLAMA_HOST="${OLLAMA_HOST%/}"
+export OLLAMA_MODEL="${OLLAMA_MODEL:-${OLLAMA_TEXT_MODEL:-llama3:8b}}"
+export OLLAMA_TEXT_MODEL="${OLLAMA_TEXT_MODEL:-$OLLAMA_MODEL}"
+export AI_CHAT_MODEL="${AI_CHAT_MODEL:-$OLLAMA_MODEL}"
 export HOST="${HOST:-0.0.0.0}"
 export PORT="${PORT:-8000}"
 echo "[start] AI model: $AI_CHAT_MODEL"
 
-if curl -sS -m 2 http://localhost:11434 >/dev/null 2>&1; then
-  echo "[start] Ollama is reachable at http://localhost:11434"
+if curl -sS -m 2 "$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
+  echo "[start] Ollama is reachable at $OLLAMA_HOST"
 else
-  echo "[start] Warning: Ollama is not reachable at http://localhost:11434"
+  echo "[start] Warning: Ollama is not reachable at $OLLAMA_HOST"
   echo "[start]          AI tagging will fall back to local keyword tags."
-  echo "[start]          To enable Ollama later, run: ollama serve"
+  echo "[start]          Set OLLAMA_HOST for LAN/external Ollama, or run: ollama serve"
 fi
 
 echo "[start] Backend URL: http://${HOST}:${PORT}"

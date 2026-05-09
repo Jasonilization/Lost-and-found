@@ -8,10 +8,11 @@ from typing import Any, Optional
 
 import requests
 
+from backend.config import OLLAMA_MODEL
 from backend.ollama_tagger import OLLAMA_TEXT_MODEL, OLLAMA_TIMEOUT, OLLAMA_URL
 
 AI_PROVIDER = os.getenv("AI_PROVIDER", "ollama").strip().lower()
-AI_MODEL = os.getenv("AI_CHAT_MODEL", os.getenv("OLLAMA_CHAT_MODEL", OLLAMA_TEXT_MODEL or "llama3:8b")).strip() or "llama3:8b"
+AI_MODEL = os.getenv("AI_CHAT_MODEL", os.getenv("OLLAMA_CHAT_MODEL", OLLAMA_TEXT_MODEL or OLLAMA_MODEL)).strip() or OLLAMA_MODEL
 AI_TIMEOUT = float(os.getenv("AI_CHAT_TIMEOUT", str(max(OLLAMA_TIMEOUT, 20.0))))
 AI_API_URL = os.getenv("AI_API_URL", "").strip()
 AI_API_KEY = os.getenv("AI_API_KEY", "").strip()

@@ -160,6 +160,7 @@ class BlockingFlowTests(unittest.TestCase):
             payload,
             {
                 "status": "running",
+                "ollama": {"available": True},
                 "uptime_seconds": 120,
             },
         )

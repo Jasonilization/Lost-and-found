@@ -24,6 +24,23 @@ $uploadDir = if ($env:UPLOAD_DIR) { $env:UPLOAD_DIR } else { ".\uploads" }
 $logDir = if ($env:LOG_DIR) { $env:LOG_DIR } else { ".\logs" }
 $dataDir = if ($env:DATA_DIR) { $env:DATA_DIR } else { ".\data" }
 
+if (-not $env:OLLAMA_HOST) {
+  $env:OLLAMA_HOST = if ($env:OLLAMA_URL) { $env:OLLAMA_URL } else { "http://localhost:11434" }
+}
+if ($env:OLLAMA_HOST -notmatch '^https?://') {
+  $env:OLLAMA_HOST = "http://$($env:OLLAMA_HOST)"
+}
+$env:OLLAMA_HOST = $env:OLLAMA_HOST.TrimEnd("/")
+if (-not $env:OLLAMA_MODEL) {
+  $env:OLLAMA_MODEL = if ($env:OLLAMA_TEXT_MODEL) { $env:OLLAMA_TEXT_MODEL } else { "llama3:8b" }
+}
+if (-not $env:OLLAMA_TEXT_MODEL) {
+  $env:OLLAMA_TEXT_MODEL = $env:OLLAMA_MODEL
+}
+if (-not $env:AI_CHAT_MODEL) {
+  $env:AI_CHAT_MODEL = $env:OLLAMA_MODEL
+}
+
 New-Item -ItemType Directory -Force -Path $uploadDir | Out-Null
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
