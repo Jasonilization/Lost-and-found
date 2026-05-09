@@ -68,9 +68,9 @@
   --control-height-compact: 38px;
   --panel-gap: 16px;
   --panel-padding: 16px;
-  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --ease-spring: cubic-bezier(0.18, 0.88, 0.32, 1.08);
-  --motion-fast: 160ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0.2, 1);
+  --ease-spring: var(--ease-standard);
+  --motion-fast: 150ms;
   --motion-medium: 220ms;
 }
 
@@ -229,17 +229,28 @@
 }
 
 html {
+  max-width: 100%;
   scroll-behavior: smooth;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
+  max-width: 100%;
   overflow-x: hidden;
   color: var(--text-primary);
   background-color: var(--surface-page);
   font-family: inherit;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  -webkit-tap-highlight-color: transparent;
+}
+
+img,
+video,
+canvas {
+  max-width: 100%;
 }
 
 body.background-missing {
@@ -390,6 +401,8 @@ button {
   border: none;
   border-radius: 10px;
   opacity: 1;
+  touch-action: manipulation;
+  user-select: none;
 }
 
 button:hover {
@@ -827,6 +840,7 @@ button,
 .floating-report-button {
   border: 1px solid var(--line-strong) !important;
   padding: 8px 14px;
+  min-height: var(--control-height-compact);
   border-radius: 10px;
   color: var(--text-primary) !important;
   background: var(--surface-soft-strong) !important;
@@ -841,6 +855,7 @@ button,
     box-shadow var(--motion-fast) ease,
     opacity var(--motion-fast) ease;
   will-change: transform;
+  touch-action: manipulation;
 }
 
 button:hover,
@@ -1073,6 +1088,15 @@ textarea:focus {
   gap: 10px;
 }
 
+.notification-title-line {
+  min-width: 0;
+}
+
+.notification-title-line strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .notification-meta {
   color: var(--text-muted);
   font-size: 0.8rem;
@@ -1080,19 +1104,40 @@ textarea:focus {
 
 .account-chip {
   display: grid;
-  gap: 4px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
   padding: 10px 12px;
   border-radius: var(--radius-md);
   background: var(--surface-card);
 }
 
+.account-chip-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.account-chip-avatar {
+  width: 36px;
+  height: 36px;
+}
+
 .account-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 1rem;
   font-weight: 800;
   color: var(--text-strong);
 }
 
 .account-meta {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text-muted);
   font-size: 0.9rem;
 }
@@ -1378,7 +1423,7 @@ textarea:focus {
 .query-bubble:hover,
 .account-hero:hover,
 .detail-card:hover {
-  transform: translateY(-2px);
+  transform: translateY(-1px);
 }
 
 .primary-button:active,
@@ -1891,7 +1936,7 @@ textarea:focus {
 .query-context-image.has-image:hover {
   border-color: var(--line-accent);
   box-shadow: var(--shadow-card);
-  transform: translateY(-1px) scale(1.01);
+  transform: translateY(-1px);
 }
 
 .query-context-image:disabled {
@@ -2024,7 +2069,7 @@ textarea:focus {
   min-width: min(300px, calc(100vw - 24px));
   min-height: 200px;
   max-width: calc(100vw - 24px);
-  max-height: calc(100vh - 24px);
+  max-height: calc(100dvh - 24px);
   border: var(--line-width) solid var(--line-color);
   border-radius: 26px;
   padding: 0;
@@ -2039,7 +2084,7 @@ textarea:focus {
 }
 
 .claim-dialog[open] {
-  animation: dialogFade 220ms ease both;
+  animation: dialogFade var(--motion-medium) var(--ease-standard) both;
 }
 
 .claim-dialog.is-closing {
@@ -2048,7 +2093,7 @@ textarea:focus {
 
 .claim-dialog::backdrop {
   background: var(--surface-backdrop);
-  animation: backdropFade 220ms ease both;
+  animation: backdropFade var(--motion-medium) var(--ease-standard) both;
 }
 
 body.tutorial-open {
@@ -2100,7 +2145,7 @@ body.tutorial-open {
   min-width: min(300px, calc(100vw - 32px));
   min-height: 200px;
   max-width: calc(100vw - 32px);
-  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
   overflow: auto;
   resize: none;
   display: grid;
@@ -2110,7 +2155,7 @@ body.tutorial-open {
   background: var(--surface-panel-fallback);
   background: var(--surface-card-strong);
   box-shadow: var(--shadow-page);
-  animation: modalPop 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: modalPop var(--motion-medium) var(--ease-standard) both;
   transition:
     top 180ms ease,
     left 180ms ease,
@@ -2182,7 +2227,7 @@ body.tutorial-open {
 }
 
 .claim-dialog[open] .claim-form {
-  animation: modalPop 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: modalPop var(--motion-medium) var(--ease-standard) both;
 }
 
 .claim-dialog.is-closing .claim-form,
@@ -2403,7 +2448,7 @@ body.tutorial-open {
 @keyframes rise {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(8px);
   }
 }
 
@@ -2422,14 +2467,14 @@ body.tutorial-open {
 @keyframes modalPop {
   from {
     opacity: 0;
-    transform: translateY(16px) scale(0.96);
+    transform: translateY(10px);
   }
 }
 
 @keyframes modalClose {
   to {
     opacity: 0;
-    transform: translateY(10px) scale(0.98);
+    transform: translateY(8px);
   }
 }
 
@@ -2442,15 +2487,14 @@ body.tutorial-open {
 @keyframes dropdownIn {
   from {
     opacity: 0;
-    transform: translateY(-6px) scale(0.98);
-    filter: blur(2px);
+    transform: translateY(-4px);
   }
 }
 
 @keyframes toastIn {
   from {
     opacity: 0;
-    transform: translateY(12px) scale(0.98);
+    transform: translateY(8px);
   }
 }
 
@@ -2471,8 +2515,7 @@ body.tutorial-open {
 @keyframes imageFadeIn {
   from {
     opacity: 0;
-    transform: scale(1.01);
-    filter: blur(2px);
+    transform: translateY(2px);
   }
 }
 
@@ -2638,6 +2681,10 @@ body.is-resizing-layout .secondary-stack {
   align-items: center;
   gap: 12px;
   min-width: 0;
+}
+
+.mobile-notification-slot {
+  display: none;
 }
 
 .nav-mode-select-wrap {
@@ -3326,6 +3373,8 @@ body.is-resizing-layout .layout-divider::before {
   .app-shell {
     gap: 12px;
     padding: 16px 16px 56px;
+    width: 100%;
+    overflow-x: clip;
   }
 
   .app-topbar {
@@ -3334,6 +3383,54 @@ body.is-resizing-layout .layout-divider::before {
 
   .app-topbar-end {
     gap: 8px;
+  }
+
+  .mobile-notification-slot {
+    display: block;
+    flex: 0 0 auto;
+  }
+
+  .mobile-notification-slot .notification-wrap {
+    position: relative;
+    display: block;
+  }
+
+  .mobile-notification-slot .notification-button {
+    width: var(--control-height-compact);
+    min-width: var(--control-height-compact);
+    height: var(--control-height-compact);
+    min-height: var(--control-height-compact);
+    padding: 0;
+    font-size: 0;
+    border-radius: 999px;
+  }
+
+  .mobile-notification-slot .notification-button::before {
+    content: "N";
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    font-size: 0.76rem;
+    font-weight: 900;
+  }
+
+  .mobile-notification-slot .notification-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+  }
+
+  .mobile-notification-slot .notification-dropdown {
+    position: fixed;
+    left: max(10px, env(safe-area-inset-left));
+    right: max(10px, env(safe-area-inset-right));
+    top: calc(62px + env(safe-area-inset-top));
+    z-index: 60;
+    width: auto;
+    max-height: min(460px, calc(100dvh - 148px - env(safe-area-inset-top)));
+    overflow: auto;
+    box-shadow: var(--shadow-page);
   }
 
   .nav-mode-select-wrap span {
@@ -3484,5 +3581,331 @@ body.is-resizing-layout .layout-divider::before {
 
   .panel-media-row {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 599px) {
+  :root {
+    --panel-gap: 12px;
+    --panel-padding: 12px;
+    --control-height: 44px;
+    --control-height-compact: 42px;
+    --glass-blur: 2px;
+    --glass-blur-strong: 2px;
+    --glass-blur-soft: 0;
+    --shadow-page: 0 14px 30px rgba(0, 0, 0, 0.24);
+    --shadow-card: 0 10px 20px rgba(0, 0, 0, 0.2);
+    --motion-medium: 180ms;
+  }
+
+  body {
+    width: 100%;
+    min-width: 0;
+    overscroll-behavior-y: contain;
+  }
+
+  .auth-screen {
+    padding: 12px;
+  }
+
+  .auth-card,
+  .claim-form {
+    padding: 18px;
+  }
+
+  .app-shell {
+    padding:
+      max(10px, env(safe-area-inset-top))
+      max(10px, env(safe-area-inset-right))
+      calc(148px + env(safe-area-inset-bottom))
+      max(10px, env(safe-area-inset-left));
+  }
+
+  .app-topbar {
+    position: sticky;
+    top: max(8px, env(safe-area-inset-top));
+    z-index: 38;
+    align-items: center;
+    gap: 8px;
+    border-radius: 18px;
+  }
+
+  .app-topbar-copy .eyebrow,
+  .nav-mode-select-wrap {
+    display: none;
+  }
+
+  .app-topbar-title {
+    max-width: 58vw;
+    font-size: 0.86rem;
+  }
+
+  .workspace-layout {
+    gap: 12px;
+    min-height: 0;
+  }
+
+  .sidebar-window,
+  .sidebar-window.is-collapsed,
+  .workspace-layout[data-sidebar-mode="bottom"] .sidebar-window {
+    position: fixed;
+    left: max(8px, env(safe-area-inset-left));
+    right: max(8px, env(safe-area-inset-right));
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    z-index: 42;
+    width: auto;
+    max-width: none;
+    max-height: min(136px, calc(100dvh - 96px));
+    border-radius: 20px;
+    overflow: hidden;
+  }
+
+  .sidebar-body {
+    display: grid;
+    gap: 8px;
+    padding: 8px;
+    overflow: visible;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .topbar-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
+    gap: 6px;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .sidebar-nav-group .ghost-button,
+  .sidebar-nav-group .danger-button,
+  .workspace-layout[data-sidebar-mode="minimal"] .sidebar-nav-group .ghost-button,
+  .workspace-layout[data-sidebar-mode="minimal"] .sidebar-nav-group .danger-button {
+    justify-content: center;
+    width: auto;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0;
+    overflow: hidden;
+    font-size: 0;
+    border-radius: 14px;
+  }
+
+  .sidebar-nav-group .ghost-button::before,
+  .sidebar-nav-group .danger-button::before,
+  .workspace-layout[data-sidebar-mode="minimal"] .sidebar-nav-group .ghost-button::before,
+  .workspace-layout[data-sidebar-mode="minimal"] .sidebar-nav-group .danger-button::before {
+    content: attr(data-nav-icon);
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    font-size: 0.82rem;
+    font-weight: 800;
+  }
+
+  .main-content,
+  .secondary-stack {
+    gap: 12px;
+    width: 100%;
+  }
+
+  .window-panel {
+    width: 100%;
+    max-width: 100%;
+    overflow: visible;
+    transform: none;
+  }
+
+  .window-header {
+    align-items: stretch;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .window-header-actions,
+  .window-controls,
+  .form-actions,
+  .card-actions,
+  .query-upload-row {
+    width: 100%;
+  }
+
+  .window-controls {
+    display: none;
+  }
+
+  .window-header-actions > .ghost-button,
+  .form-actions > *,
+  .query-upload-row > * {
+    min-width: 0;
+  }
+
+  .window-body {
+    max-height: none;
+    overflow: visible;
+    padding: 0 12px 12px;
+  }
+
+  .gallery,
+  .claims-list,
+  .room-gallery,
+  .returned-list,
+  .admin-claims-list,
+  .admin-monitor-grid,
+  .form-grid,
+  .filters,
+  .account-page-grid {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .admin-table-wrap,
+  .query-page-messages,
+  .notification-list {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .account-hero,
+  .detail-card,
+  .query-context-card,
+  .admin-audit-section,
+  .admin-monitor-card,
+  .admin-claim-card,
+  .item-card,
+  .claim-history-card {
+    padding: 16px;
+  }
+
+  .account-hero {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .account-avatar {
+    width: 84px;
+    height: 84px;
+  }
+
+  .query-context-head {
+    grid-template-columns: 64px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .query-context-image {
+    width: 64px;
+  }
+
+  .query-page-shell {
+    min-height: calc(100dvh - 220px);
+    margin-top: 8px;
+  }
+
+  .query-page-messages {
+    min-height: 240px;
+    max-height: calc(100dvh - 340px);
+    padding: 8px;
+    scroll-padding-bottom: 180px;
+  }
+
+  .query-page-form {
+    position: sticky;
+    bottom: calc(144px + env(safe-area-inset-bottom));
+    z-index: 36;
+    margin: 0 -4px -4px;
+    padding: 10px;
+    border: 1px solid var(--line-color);
+    border-radius: 18px;
+    background: var(--surface-card-strong);
+    box-shadow: var(--shadow-page);
+  }
+
+  .query-page-form textarea {
+    min-height: 84px;
+    max-height: 34dvh;
+    resize: none;
+  }
+
+  .query-upload-row {
+    gap: 8px;
+  }
+
+  .query-file-pill {
+    width: 100%;
+    justify-content: space-between;
+    border-radius: 14px;
+  }
+
+  .query-file-pill span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .query-attachment-preview,
+  .claim-history-preview,
+  .notification-preview {
+    width: min(124px, 100%);
+  }
+
+  .claim-dialog {
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    border-radius: 20px;
+  }
+
+  .tutorial-overlay {
+    padding: 8px;
+  }
+
+  .tutorial-card {
+    width: calc(100vw - 16px);
+    min-width: 0;
+    max-width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+    padding: 18px;
+    border-radius: 20px;
+  }
+
+  .tutorial-actions {
+    justify-content: stretch;
+  }
+
+  .tutorial-actions > * {
+    flex: 1 1 auto;
+  }
+
+  .floating-report-button {
+    right: 16px;
+    bottom: calc(152px + env(safe-area-inset-bottom));
+    width: 56px;
+    min-width: 56px;
+    height: 56px;
+  }
+
+  .undo-toast {
+    left: max(10px, env(safe-area-inset-left));
+    right: max(10px, env(safe-area-inset-right));
+    bottom: calc(148px + env(safe-area-inset-bottom));
+    width: auto;
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+@media (hover: none) {
+  .primary-button:hover,
+  .ghost-button:hover,
+  .icon-button:hover,
+  .tab-button:hover,
+  .item-card:hover,
+  .claim-history-card:hover,
+  .query-bubble:hover,
+  .account-hero:hover,
+  .detail-card:hover,
+  .account-avatar:hover,
+  .panel-thumbnail-button:hover,
+  .query-context-image.has-image:hover {
+    transform: none;
   }
 }

@@ -93,6 +93,7 @@
               <option value="minimal">Minimal</option>
             </select>
           </label>
+          <div class="mobile-notification-slot" id="mobileNotificationSlot" aria-live="polite"></div>
           <button class="theme-toggle glass" id="theme-toggle" type="button" aria-label="Use light mode" title="Toggle theme">
             <span class="theme-toggle-dot" id="theme-icon" aria-hidden="true"></span>
           </button>
@@ -118,8 +119,11 @@
             </div>
             <div class="sidebar-utility-stack">
               <div class="account-chip surface-card">
-                <p class="account-name" id="accountName"></p>
-                <p class="account-meta" id="accountMeta"></p>
+                <span class="mini-avatar account-chip-avatar" id="accountChipAvatar" aria-hidden="true">LF</span>
+                <span class="account-chip-copy">
+                  <span class="account-name" id="accountName"></span>
+                  <span class="account-meta" id="accountMeta"></span>
+                </span>
               </div>
               <div class="notification-wrap">
                 <button class="ghost-button notification-button" id="notificationButton" type="button" aria-haspopup="true" aria-expanded="false">

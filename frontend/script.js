@@ -44,12 +44,15 @@ const SIDEBAR_MAX_WIDTH = 420;
 const SIDEBAR_DEFAULT_WIDTH = 280;
 const SIDEBAR_COLLAPSED_WIDTH = 76;
 const MODAL_CLOSE_ANIMATION_MS = 180;
-const HAPTIC_THROTTLE_MS = 180;
+const HAPTIC_THROTTLE_MS = 140;
 const HAPTIC_PATTERNS = {
+  press: 6,
   light: 8,
+  selection: 7,
   open: 10,
-  success: [12, 28, 16],
-  notification: 12,
+  close: 8,
+  success: [10, 24, 14],
+  notification: [10, 34, 10],
 };
 const savedSidebarMode = localStorage.getItem(SIDEBAR_MODE_STORAGE_KEY);
 const savedSidebarWidth = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY) || "");
@@ -641,6 +644,7 @@ const state = {
   roomItems: [],
   returnedItems: [],
   notifications: [],
+  notificationsLoadedOnce: false,
   unreadNotifications: 0,
   claims: [],
   adminUsers: [],
@@ -656,6 +660,7 @@ const state = {
   previewUrls: new Map(),
   searchCache: new Map(),
   queryCache: new Map(),
+  avatarVersion: Date.now(),
   searchTimer: null,
   activeClaimItem: null,
   currentView: "reports",
@@ -689,6 +694,7 @@ const state = {
   roomPreviewDrag: null,
   pendingLayoutResize: null,
   layoutResizeFrame: 0,
+  layoutSyncFrame: 0,
   lastHapticAt: 0,
   panelState: {},
   activeLayoutResize: null,
@@ -742,10 +748,19 @@ const languageSelect = document.querySelector("#languageSelect");
 const logoutButton = document.querySelector("#logoutButton");
 const accountName = document.querySelector("#accountName");
 const accountMeta = document.querySelector("#accountMeta");
+const accountChipAvatar = document.querySelector("#accountChipAvatar");
 const notificationButton = document.querySelector("#notificationButton");
 const notificationBadge = document.querySelector("#notificationBadge");
 const notificationDropdown = document.querySelector("#notificationDropdown");
 const notificationList = document.querySelector("#notificationList");
+const notificationWrap = notificationButton?.closest(".notification-wrap") || null;
+const notificationHome = notificationWrap
+  ? {
+      parent: notificationWrap.parentNode,
+      nextSibling: notificationWrap.nextSibling,
+    }
+  : null;
+const mobileNotificationSlot = document.querySelector("#mobileNotificationSlot");
 const weeklyReturnedCount = document.querySelector("#weeklyReturnedCount");
 let reportsSection = document.querySelector("#reportsSection");
 let reportsPanel = document.querySelector("#reportsPanel");
@@ -1149,9 +1164,16 @@ function ensureLayoutStructure() {
 
 const secondaryPanelNames = ["room", "returned", "claims", "account", "admin", "query"];
 const LAYOUT_BREAKPOINT = 900;
+const PHONE_LAYOUT_BREAKPOINT = 600;
 const REPORTS_MIN_HEIGHT = 260;
 const SECONDARY_MIN_HEIGHT = 220;
 const SPLITTER_SIZE = 14;
+
+function currentResponsiveMode() {
+  if (window.innerWidth < PHONE_LAYOUT_BREAKPOINT) return "mobile";
+  if (window.innerWidth < LAYOUT_BREAKPOINT) return "tablet";
+  return "desktop";
+}
 
 function currentSidebarMode() {
   return SIDEBAR_MODES.includes(state.sidebarMode) ? state.sidebarMode : "left";
@@ -1231,6 +1253,30 @@ function isDesktopWindowLayout() {
   return window.innerWidth >= LAYOUT_BREAKPOINT;
 }
 
+function isPhoneWindowLayout() {
+  return currentResponsiveMode() === "mobile";
+}
+
+function isTabletWindowLayout() {
+  return currentResponsiveMode() === "tablet";
+}
+
+function syncResponsiveNavigationSlots(mode = currentResponsiveMode()) {
+  if (!notificationWrap || !notificationHome?.parent || !mobileNotificationSlot) return;
+
+  const shouldUseTopbarSlot = mode !== "desktop";
+  if (shouldUseTopbarSlot) {
+    if (notificationWrap.parentNode !== mobileNotificationSlot) {
+      mobileNotificationSlot.append(notificationWrap);
+    }
+    return;
+  }
+
+  if (notificationWrap.parentNode !== notificationHome.parent) {
+    notificationHome.parent.insertBefore(notificationWrap, notificationHome.nextSibling);
+  }
+}
+
 function defaultPanelLayout(name) {
   return {
     closed: !["sidebar", "reports"].includes(name),
@@ -1300,9 +1346,24 @@ function syncWorkspaceLayout() {
   const secondaryName = currentSecondaryPanelName();
   const secondaryPanel = secondaryName ? panelElements[secondaryName] : null;
   const secondaryState = secondaryName ? ensurePanelState(secondaryName) : null;
-  const sidebarVisible = !sidebarState.closed;
-  const reportsVisible = !reportsState.closed;
-  const secondaryVisible = Boolean(secondaryPanel && secondaryState && !secondaryState.closed);
+  const responsiveMode = currentResponsiveMode();
+  const phoneLayout = responsiveMode === "mobile";
+  const tabletLayout = responsiveMode === "tablet";
+
+  if (phoneLayout) {
+    sidebarState.closed = false;
+    sidebarState.collapsed = false;
+    reportsState.minimized = false;
+    if (secondaryState) {
+      secondaryState.minimized = false;
+    }
+  }
+
+  const sidebarVisible = phoneLayout ? true : !sidebarState.closed;
+  const reportsVisible = phoneLayout ? state.currentView === "reports" : !reportsState.closed;
+  const secondaryVisible = phoneLayout
+    ? Boolean(secondaryPanel && secondaryName && state.currentView !== "reports")
+    : Boolean(secondaryPanel && secondaryState && !secondaryState.closed);
   const canResizeContent = isDesktopWindowLayout()
     && reportsVisible
     && secondaryVisible
@@ -1310,11 +1371,26 @@ function syncWorkspaceLayout() {
     && !secondaryState.minimized;
 
   appShell?.classList.toggle("has-open-sidebar", sidebarVisible);
+  appShell?.classList.toggle("is-phone-layout", phoneLayout);
+  appShell?.classList.toggle("is-tablet-layout", tabletLayout);
+  appShell?.classList.toggle("is-desktop-layout", responsiveMode === "desktop");
+  if (appShell) {
+    appShell.dataset.layoutMode = responsiveMode;
+  }
+  workspaceLayout.classList.toggle("is-phone-layout", phoneLayout);
+  workspaceLayout.classList.toggle("is-tablet-layout", tabletLayout);
+  workspaceLayout.classList.toggle("is-desktop-layout", responsiveMode === "desktop");
+  workspaceLayout.dataset.layoutMode = responsiveMode;
+  document.body.dataset.layoutMode = responsiveMode;
+  syncResponsiveNavigationSlots(responsiveMode);
   applySidebarMode();
   sidebarPanel?.classList.toggle("is-top-mode", sidebarMode === "top");
   sidebarPanel?.classList.toggle("is-bottom-mode", sidebarMode === "bottom");
   sidebarPanel?.classList.toggle("is-minimal-mode", sidebarMode === "minimal");
   sidebarState.collapsed = sidebarMode === "minimal" ? true : Boolean(sidebarState.collapsed && sidebarMode === "left");
+  if (phoneLayout) {
+    sidebarState.collapsed = false;
+  }
   applyPanelLayout("sidebar");
   sidebarPanel?.classList.toggle("is-hidden", !sidebarVisible);
   sidebarLauncherButton?.classList.toggle("is-hidden", sidebarVisible);
@@ -1325,8 +1401,8 @@ function syncWorkspaceLayout() {
   secondaryStack?.classList.toggle("is-hidden", !secondaryVisible);
   windowWorkspace.classList.toggle("has-secondary", secondaryVisible);
   windowWorkspace.classList.toggle("is-reports-hidden", !reportsVisible);
-  windowWorkspace.classList.toggle("is-reports-minimized", reportsState.minimized);
-  windowWorkspace.classList.toggle("is-secondary-minimized", Boolean(secondaryState?.minimized));
+  windowWorkspace.classList.toggle("is-reports-minimized", !phoneLayout && reportsState.minimized);
+  windowWorkspace.classList.toggle("is-secondary-minimized", !phoneLayout && Boolean(secondaryState?.minimized));
 
   secondaryPanelNames.forEach((name) => {
     const panel = panelElements[name];
@@ -1346,6 +1422,10 @@ function syncWorkspaceLayout() {
     secondaryStack?.style.setProperty("flex-basis", `${state.layoutSizes.secondaryHeight}px`);
   } else if (secondaryStack) {
     secondaryStack.style.removeProperty("flex-basis");
+  }
+
+  if (responsiveMode !== "desktop" && state.activeLayoutResize) {
+    endLayoutResize();
   }
 }
 
@@ -1426,7 +1506,6 @@ function beginLayoutResize(event) {
     startSecondaryHeight: state.layoutSizes.secondaryHeight,
   };
   document.body.classList.add("is-resizing-layout");
-  triggerHaptic("light");
   event.preventDefault();
 }
 
@@ -1487,6 +1566,17 @@ function endLayoutResize() {
   }
   state.activeLayoutResize = null;
   document.body.classList.remove("is-resizing-layout");
+}
+
+function scheduleLayoutSync() {
+  if (state.layoutSyncFrame) return;
+  state.layoutSyncFrame = window.requestAnimationFrame(() => {
+    state.layoutSyncFrame = 0;
+    syncAllPanels(false);
+    if (state.tutorialActive) {
+      scheduleTutorialSpotlightUpdate();
+    }
+  });
 }
 
 function bindWindowPanelEvents() {
@@ -1579,12 +1669,12 @@ function setButtonLoading(button, isLoading) {
   button.classList.toggle("is-loading", isLoading);
 }
 
-function triggerHaptic(kind = "light") {
+function triggerHaptic(kind = "light", { force = false } = {}) {
   const vibrate = window.navigator?.vibrate;
   if (typeof vibrate !== "function") return;
 
   const now = Date.now();
-  if (now - state.lastHapticAt < HAPTIC_THROTTLE_MS) return;
+  if (!force && now - state.lastHapticAt < HAPTIC_THROTTLE_MS) return;
   state.lastHapticAt = now;
 
   try {
@@ -1592,6 +1682,43 @@ function triggerHaptic(kind = "light") {
   } catch (error) {
     logClientError("haptic feedback unavailable", error, { kind });
   }
+}
+
+function hapticKindForControl(control, eventName = "click") {
+  const text = [
+    control?.id,
+    control?.getAttribute?.("aria-label"),
+    control?.getAttribute?.("title"),
+    control?.textContent,
+  ].filter(Boolean).join(" ").toLowerCase();
+
+  if (eventName === "submit") return "light";
+  if (eventName === "change") return "selection";
+  if (/\b(close|cancel|back|skip|logout|remove)\b/.test(text)) return "close";
+  if (/\b(nav|tab|reports|room|returned|query|claims|account|admin|language|select|theme)\b/.test(text)) return "selection";
+  if (/\b(open|preview|claim|details|notification|tutorial)\b/.test(text)) return "open";
+  if (/\b(upload|submit|send|save|confirm|approve|reject|delete|promote|demote|refresh|move|mark|start|stop)\b/.test(text)) return "light";
+  return "press";
+}
+
+function bindGlobalHapticFeedback() {
+  bindListener(document, "click", (event) => {
+    const control = event.target?.closest?.("button, label[for], .tab-button, .card-button, .notification-item");
+    if (!control || control.disabled || control.getAttribute("aria-disabled") === "true") return;
+    triggerHaptic(hapticKindForControl(control, "click"));
+  }, { label: "global click haptics", options: { capture: true, passive: true } });
+
+  bindListener(document, "change", (event) => {
+    const control = event.target?.closest?.("select, input[type='file'], input[type='checkbox'], input[type='radio']");
+    if (!control || control.disabled) return;
+    triggerHaptic(hapticKindForControl(control, "change"));
+  }, { label: "global change haptics", options: { capture: true, passive: true } });
+
+  bindListener(document, "submit", (event) => {
+    const formElement = event.target;
+    if (!(formElement instanceof HTMLFormElement)) return;
+    triggerHaptic(hapticKindForControl(formElement, "submit"));
+  }, { label: "global submit haptics", options: { capture: true } });
 }
 
 function setLoadingLine(element, isLoading) {
@@ -2261,6 +2388,7 @@ function closeDialogWithAnimation(dialog, afterClose) {
     return;
   }
 
+  triggerHaptic("close");
   dialog.classList.add("is-closing");
   const closeToken = `${Date.now()}-${Math.random()}`;
   dialog.dataset.closeToken = closeToken;
@@ -2754,10 +2882,12 @@ async function openTutorial() {
   tutorialOverlay.classList.remove("is-hidden");
   tutorialOverlay.setAttribute("aria-hidden", "false");
   document.body.classList.add("tutorial-open");
+  triggerHaptic("open");
   await syncTutorialStep();
 }
 
 function closeTutorial({ markSeen = false, rememberSession = true } = {}) {
+  const wasActive = state.tutorialActive;
   const shouldSkipTutorial = tutorialDontShowAgain.checked;
   state.tutorialActive = false;
   state.tutorialStepIndex = 0;
@@ -2766,6 +2896,9 @@ function closeTutorial({ markSeen = false, rememberSession = true } = {}) {
   tutorialDontShowAgain.checked = false;
   document.body.classList.remove("tutorial-open");
   clearTutorialHighlight();
+  if (wasActive) {
+    triggerHaptic("close");
+  }
 
   if (rememberSession) {
     state.tutorialDismissedForSession = true;
@@ -2794,12 +2927,14 @@ async function advanceTutorial() {
   }
 
   state.tutorialStepIndex += 1;
+  triggerHaptic("selection");
   await syncTutorialStep();
 }
 
 async function rewindTutorial() {
   if (!state.tutorialActive || state.tutorialStepIndex <= 0) return;
   state.tutorialStepIndex -= 1;
+  triggerHaptic("selection");
   await syncTutorialStep();
 }
 
@@ -2819,13 +2954,56 @@ function cacheBustImageUrl(source, version = Date.now()) {
   const versionValue = String(version || Date.now());
   try {
     const url = new URL(source, window.location.href);
-    url.searchParams.set("v", versionValue);
+    url.searchParams.delete("v");
+    url.searchParams.set("ts", versionValue);
     return url.toString();
   } catch (error) {
     const [base, hash = ""] = source.split("#");
     const separator = base.includes("?") ? "&" : "?";
-    return `${base}${separator}v=${encodeURIComponent(versionValue)}${hash ? `#${hash}` : ""}`;
+    return `${base}${separator}ts=${encodeURIComponent(versionValue)}${hash ? `#${hash}` : ""}`;
   }
+}
+
+function isUploadImageUrl(source) {
+  if (!source || /^(data:|blob:)/.test(source)) return false;
+  try {
+    const url = new URL(source, window.location.href);
+    return url.pathname.startsWith("/uploads/");
+  } catch {
+    return String(source).startsWith("/uploads/");
+  }
+}
+
+function normalizeAvatarUrl(source, version = state.avatarVersion || Date.now()) {
+  const normalizedSource = normalizeImageUrl(source);
+  if (!normalizedSource) return "";
+  if (!isUploadImageUrl(normalizedSource)) return normalizedSource;
+  try {
+    const url = new URL(normalizedSource, window.location.href);
+    if (url.searchParams.has("ts")) return url.toString();
+  } catch {
+    if (/\bts=/.test(normalizedSource)) return normalizedSource;
+  }
+  return cacheBustImageUrl(normalizedSource, version);
+}
+
+function probeImageUrl(source, timeoutMs = 5000) {
+  const normalizedSource = normalizeAvatarUrl(source);
+  if (!canPreviewImage(normalizedSource)) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const probe = new Image();
+    let done = false;
+    const finish = (result) => {
+      if (done) return;
+      done = true;
+      window.clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = window.setTimeout(() => finish(false), timeoutMs);
+    probe.onload = () => finish(true);
+    probe.onerror = () => finish(false);
+    probe.src = normalizedSource;
+  });
 }
 
 function resolveImageUrl(item) {
@@ -2943,15 +3121,17 @@ function createAttachmentPreview(attachment) {
 }
 
 function applyFreshUser(user, version = Date.now()) {
+  state.avatarVersion = Number(version || Date.now()) || Date.now();
   if (!user?.avatar_url) return user;
   return {
     ...user,
-    avatar_url: cacheBustImageUrl(normalizeImageUrl(user.avatar_url), version),
+    avatar_url: normalizeAvatarUrl(user.avatar_url, state.avatarVersion),
   };
 }
 
 function renderCurrentAccountChip() {
   if (!state.user) return;
+  applyAvatar(accountChipAvatar, accountAvatarSource(), userAvatarLabel(state.user));
   accountName.textContent = userDisplayName(state.user);
   accountMeta.textContent = currentUserCanAdmin()
     ? langText({ en: "Admin access", "zh-CN": "管理员权限", th: "สิทธิ์ผู้ดูแล" })
@@ -2987,12 +3167,12 @@ function selectProfileImage(file) {
 
   state.profilePreviewUrl = URL.createObjectURL(file);
   applyAvatar(accountAvatar, state.profilePreviewUrl, userAvatarLabel(state.user));
+  applyAvatar(accountChipAvatar, state.profilePreviewUrl, userAvatarLabel(state.user));
   setMessage(profileImageMessage, langText({
     en: `Preview ready: ${file.name} (${formatFileSize(file.size)}).`,
     "zh-CN": `预览已就绪：${file.name}（${formatFileSize(file.size)}）。`,
     th: `แสดงตัวอย่างแล้ว: ${file.name} (${formatFileSize(file.size)})`,
   }));
-  triggerHaptic("light");
 }
 
 function markImageUnavailable(container, image, fallback) {
@@ -3252,10 +3432,11 @@ function initialsFromText(value, fallback = "LF") {
 }
 
 function applyAvatar(element, imageUrl, fallbackText) {
+  if (!element) return;
   element.textContent = fallbackText;
   element.style.backgroundImage = "";
   element.style.color = "";
-  const source = normalizeImageUrl(imageUrl);
+  const source = normalizeAvatarUrl(imageUrl);
   element.dataset.avatarSource = source;
   if (!source) return;
 
@@ -3490,8 +3671,15 @@ function renderNotifications(notifications = state.notifications) {
 
     const head = document.createElement("div");
     head.className = "notification-item-head";
+    const relatedItem = relatedItemForNotification(notification);
+    const titleWrap = document.createElement("span");
+    titleWrap.className = "person-line notification-title-line";
+    if (relatedItem?.reporter_avatar_url) {
+      titleWrap.append(createMiniAvatar(relatedItem.reporter_identity || relatedItem.reporter_name || "Reporter", relatedItem.reporter_avatar_url));
+    }
     const title = document.createElement("strong");
     title.textContent = notification.title || t("notifications.title");
+    titleWrap.append(title);
     const button = document.createElement("button");
     button.className = "ghost-button small-button";
     button.type = "button";
@@ -3500,13 +3688,12 @@ function renderNotifications(notifications = state.notifications) {
     button.addEventListener("click", async () => {
       try {
         await apiFetch(`/notifications/${notification.id}/read`, { method: "POST" });
-        triggerHaptic("light");
         await loadNotifications();
       } catch (error) {
         logClientError("mark notification read failed", error, { notificationId: notification.id });
       }
     });
-    head.append(title, button);
+    head.append(titleWrap, button);
 
     const body = document.createElement("p");
     body.className = "item-description";
@@ -3526,8 +3713,13 @@ async function loadNotifications() {
   if (!state.user) return;
   try {
     const data = await apiFetch("/notifications");
+    const previousUnreadCount = Number(state.unreadNotifications || 0);
     state.notifications = data.notifications || [];
     state.unreadNotifications = data.unread_count || 0;
+    if (state.notificationsLoadedOnce && state.unreadNotifications > previousUnreadCount) {
+      triggerHaptic("notification");
+    }
+    state.notificationsLoadedOnce = true;
     renderNotifications(state.notifications);
   } catch (error) {
     logClientError("loading notifications failed", error);
@@ -4777,6 +4969,7 @@ async function loadAdminSurface() {
     return;
   }
   await Promise.all([loadAdminData(), loadAdminMonitor()]);
+  triggerHaptic("success");
 }
 
 function hideUndoToast() {
@@ -4854,6 +5047,7 @@ async function handleAdminClaimDecision(claimId, action, button) {
         const data = await apiFetch(`/admin/claims/${claimId}/${action}`, { method: "POST" });
         closeConfirmModal();
         setMessage(adminMessage, data.message || langText({ en: "Claim updated.", "zh-CN": "认领已更新。", th: "อัปเดตคำขอแล้ว" }));
+        triggerHaptic("success");
         showUndoToast(
           langText({ en: "Claim decision saved.", "zh-CN": "认领决定已保存。", th: "บันทึกผลคำขอแล้ว" }),
           async () => {
@@ -4887,6 +5081,7 @@ async function handleAdminDelete({ path, confirmationMessage, undoMessage = "", 
         const data = await apiFetch(path, { method: "DELETE" });
         closeConfirmModal();
         setMessage(adminMessage, data.message || langText({ en: "Deleted.", "zh-CN": "已删除。", th: "ลบแล้ว" }));
+        triggerHaptic("success");
         invalidateSearchCache();
         await refreshItemSurfaces({ includeAdmin: true, includeClaims: true, includeNotifications: true });
         if (onUndo) {
@@ -4921,6 +5116,7 @@ async function handleAdminUserRoleAction(user, action) {
         const data = await apiFetch(`/admin/users/${user.id}/${action}`, { method: "POST" });
         closeConfirmModal();
         setMessage(adminMessage, data.message || langText({ en: `User ${verb}d.`, "zh-CN": `用户已${action === "promote" ? "提升" : "降级"}。`, th: "อัปเดตสิทธิ์ผู้ใช้แล้ว" }));
+        triggerHaptic("success");
         await loadAdminData();
       } catch (error) {
         setMessage(adminMessage, error.message, true);
@@ -4952,6 +5148,7 @@ async function handleAdminItemReview(itemId, status) {
         });
         closeConfirmModal();
         setMessage(adminMessage, data.message || langText({ en: "Item review updated.", "zh-CN": "物品审核已更新。", th: "อัปเดตการตรวจสอบแล้ว" }));
+        triggerHaptic("success");
         invalidateSearchCache();
         await refreshItemSurfaces({ includeAdmin: true });
       } catch (error) {
@@ -4987,6 +5184,7 @@ async function handleAdminAbuseOverride(item, status) {
         });
         closeConfirmModal();
         setMessage(adminMessage, data.message || langText({ en: "Abuse override updated.", "zh-CN": "风险覆盖已更新。", th: "อัปเดตการแทนค่าแล้ว" }));
+        triggerHaptic("success");
         invalidateSearchCache();
         await refreshItemSurfaces({ includeAdmin: true, includeNotifications: true });
         showUndoToast(
@@ -5026,6 +5224,7 @@ async function handleAdminMoveToRoom(item) {
         const data = await apiFetch(`/admin/items/${item.id}/move-to-room`, { method: "POST" });
         closeConfirmModal();
         setMessage(adminMessage, data.message || langText({ en: "Report moved.", "zh-CN": "报告已移动。", th: "ย้ายรายงานแล้ว" }));
+        triggerHaptic("success");
         invalidateSearchCache();
         await refreshItemSurfaces({ includeAdmin: true, includeNotifications: true });
       } catch (error) {
@@ -5243,6 +5442,8 @@ function renderQuerySuggestions(suggestions = [], item = null, messages = state.
       queryInput.value = suggestion;
       queryInput.focus();
       queryInput.setSelectionRange(queryInput.value.length, queryInput.value.length);
+      triggerHaptic("selection");
+      ensureQueryComposerVisible();
     });
     querySuggestions.append(button);
   });
@@ -5318,6 +5519,26 @@ function appendQueryAdminControls(bubble, entry) {
   deleteButton.addEventListener("click", () => deleteQueryMessage(entry.id));
   actions.append(deleteButton);
   bubble.append(actions);
+}
+
+function scrollQueryMessagesToBottom({ smooth = false } = {}) {
+  if (!queryMessages) return;
+  window.requestAnimationFrame(() => {
+    const behavior = smooth && !window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "smooth" : "auto";
+    if (typeof queryMessages.scrollTo === "function") {
+      queryMessages.scrollTo({ top: queryMessages.scrollHeight, behavior });
+      return;
+    }
+    queryMessages.scrollTop = queryMessages.scrollHeight;
+  });
+}
+
+function ensureQueryComposerVisible() {
+  if (state.currentView !== "query") return;
+  window.requestAnimationFrame(() => {
+    queryForm?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    scrollQueryMessagesToBottom();
+  });
 }
 
 function renderQueryContext(item) {
@@ -5396,9 +5617,7 @@ function renderQueryMessages(messages) {
     queryMessages.append(bubble);
   });
 
-  window.requestAnimationFrame(() => {
-    queryMessages.scrollTop = queryMessages.scrollHeight;
-  });
+  scrollQueryMessagesToBottom();
 }
 
 function handleQueryItemSelection() {
@@ -5530,6 +5749,7 @@ async function submitQuery(event) {
     await completeProgress("query");
     setMessage(queryMessage, langText({ en: "Message sent successfully.", "zh-CN": "消息已发送成功。", th: "ส่งข้อความเรียบร้อยแล้ว" }));
     triggerHaptic("success");
+    ensureQueryComposerVisible();
     await loadItems();
   } catch (error) {
     resetProgress("query");
@@ -5710,6 +5930,7 @@ async function submitReport(event) {
       "zh-CN": "你的报告已发布。如果发现匹配项，我们会通知你。",
       th: "รายงานของคุณเผยแพร่แล้ว เราจะแจ้งให้ทราบหากพบสิ่งของที่ตรงกัน",
     }));
+    triggerHaptic("success");
     window.setTimeout(() => {
       closeReportModal();
     }, 700);
@@ -5768,7 +5989,20 @@ async function uploadProfileImage() {
       onUploadProgress: (progressEvent) => updateUploadProgress("profile", progressEvent, progressCopy("profileUpload")),
       onUploadComplete: () => startProcessingProgress("profile", progressCopy("profileProcess")),
     });
-    state.user = applyFreshUser(data.user || state.user, data.avatar_version || Date.now());
+    const avatarVersion = data.avatar_version || Date.now();
+    state.user = applyFreshUser(data.user || state.user, avatarVersion);
+    const sessionData = await apiFetch("/session");
+    state.user = applyFreshUser(sessionData.user || state.user, avatarVersion);
+    if (!state.user?.avatar_url) {
+      throw new Error("Upload completed, but the server did not return a profile image URL.");
+    }
+    const avatarLoaded = await probeImageUrl(state.user.avatar_url);
+    if (!avatarLoaded) {
+      logClientError("uploaded profile image could not be loaded", new Error("Avatar image failed to load"), {
+        avatarUrl: state.user.avatar_url,
+      });
+      throw new Error("Profile image saved, but the browser could not load it from the uploads route.");
+    }
     revokeProfilePreviewUrl();
     renderAccount();
     renderCurrentAccountChip();
@@ -5849,6 +6083,7 @@ async function uploadRoomItems() {
     roomUploadInput.value = "";
     roomLabelInput.value = "";
     setMessage(roomUploadMessage, data.message || "Item added to Lost & Found Room");
+    triggerHaptic("success");
     await refreshItemSurfaces({ includeAdmin: true, includeNotifications: true });
   } catch (error) {
     setMessage(roomUploadMessage, error.message, true);
@@ -5996,6 +6231,7 @@ async function analyzeRoomPreview() {
     roomPreviewResult.textContent = data.preview?.description || "Selected area analyzed.";
     renderTags(roomPreviewTags, data.preview?.tags || []);
     roomConfirmButton.disabled = !state.roomPreviewAnalysis;
+    triggerHaptic("success");
     setMessage(roomPreviewMessage, langText({
       en: "If this matches your item, confirm and continue to the claim form.",
       "zh-CN": "如果这和你的物品一致，请确认并继续填写认领表单。",
@@ -6174,6 +6410,7 @@ function logout() {
   state.roomItems = [];
   state.returnedItems = [];
   state.notifications = [];
+  state.notificationsLoadedOnce = false;
   state.unreadNotifications = 0;
   state.queryItems = [];
   state.claims = [];
@@ -6238,6 +6475,7 @@ function logout() {
 
 function bindEvents() {
   bindWindowPanelEvents();
+  bindGlobalHapticFeedback();
   [
     [authForm, "submit", submitAuth, "auth form submit"],
     [loginTab, "click", () => setAuthView("login"), "login tab"],
@@ -6376,7 +6614,6 @@ function bindEvents() {
     notificationDropdown.classList.toggle("is-hidden", !willOpen);
     notificationButton?.setAttribute("aria-expanded", willOpen ? "true" : "false");
     if (willOpen) {
-      triggerHaptic("open");
       await loadNotifications();
     }
   }, { label: "notification toggle" });
@@ -6394,6 +6631,8 @@ function bindEvents() {
       queryForm?.requestSubmit();
     }
   }, { label: "query submit shortcut" });
+  bindListener(queryInput, "focus", ensureQueryComposerVisible, { label: "query input focus" });
+  bindListener(queryInput, "input", ensureQueryComposerVisible, { label: "query input resize guard" });
 
   bindListener(window, "pointermove", handleRoomPreviewPointerMove, { label: "window room preview pointer move" });
   bindListener(window, "pointerup", handleRoomPreviewPointerUp, { label: "window room preview pointer up" });
@@ -6405,6 +6644,7 @@ function bindEvents() {
       setMessage(confirmMessage, langText({ en: "Please add notes before confirming.", "zh-CN": "请先填写备注。", th: "กรุณาเพิ่มบันทึกก่อนยืนยัน" }), true);
       return;
     }
+    triggerHaptic("light");
     await state.confirmState.onConfirm(notes);
   }, { label: "confirm form submit" });
 
@@ -6438,12 +6678,16 @@ function bindEvents() {
       void activateRoute(readRoute());
     }
   }, { label: "window hashchange" });
-  bindListener(window, "resize", () => {
-    syncAllPanels(false);
-    if (state.tutorialActive) {
-      scheduleTutorialSpotlightUpdate();
-    }
-  }, { label: "window resize" });
+  bindListener(window, "resize", scheduleLayoutSync, { label: "window resize" });
+  bindListener(window, "orientationchange", () => {
+    window.setTimeout(scheduleLayoutSync, 80);
+  }, { label: "window orientation change" });
+  if (window.visualViewport) {
+    bindListener(window.visualViewport, "resize", () => {
+      scheduleLayoutSync();
+      ensureQueryComposerVisible();
+    }, { label: "visual viewport resize" });
+  }
   bindListener(window, "scroll", () => {
     scheduleTutorialSpotlightUpdate();
   }, { label: "window scroll", options: { passive: true, capture: true } });

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import stat
 import unittest
 from unittest.mock import patch
 
@@ -263,6 +264,44 @@ class BlockingFlowTests(unittest.TestCase):
         self.assertEqual(saved["mime_type"], "text/plain")
         self.assertTrue(saved["path"].startswith("/uploads/"))
         self.created_upload_paths.append(saved["path"])
+
+    def test_profile_image_upload_saves_readable_avatar_path(self) -> None:
+        payload = backend_app.ProfileImagePayload(
+            filename="avatar.png",
+            content_type="image/png",
+            data=(
+                "data:image/png;base64,"
+                "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGPUqDjBwMDAxAAG"
+                "ABBqAWybqT0BAAAAAElFTkSuQmCC"
+            ),
+        )
+
+        result = backend_app.upload_profile_image(payload, current_user=self.user, db=self.db)
+        avatar_url = result["user"]["avatar_url"]
+        avatar_path = backend_app.resolve_upload_path(avatar_url)
+        self.assertIsNotNone(avatar_path)
+        self.created_upload_paths.append(avatar_url)
+
+        self.assertTrue(avatar_path.exists())
+        self.assertTrue(avatar_url.startswith("/uploads/"))
+        self.assertEqual(self.user.avatar_path, avatar_url)
+        mode = stat.S_IMODE(avatar_path.stat().st_mode)
+        self.assertTrue(mode & stat.S_IRGRP)
+        self.assertTrue(mode & stat.S_IROTH)
+
+        avatar_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        self.assertEqual(backend_app.safe_user_avatar_url(self.user), avatar_url)
+        repaired_mode = stat.S_IMODE(avatar_path.stat().st_mode)
+        self.assertTrue(repaired_mode & stat.S_IRGRP)
+        self.assertTrue(repaired_mode & stat.S_IROTH)
+
+    def test_missing_profile_avatar_serializes_as_empty_url(self) -> None:
+        self.user.avatar_path = "/uploads/missing-profile-avatar.jpg"
+        self.db.commit()
+
+        serialized = backend_app.serialize_user(self.user)
+
+        self.assertEqual(serialized["avatar_url"], "")
 
     def test_rate_limit_returns_retry_after_details(self) -> None:
         request = DummyRequest("/query")

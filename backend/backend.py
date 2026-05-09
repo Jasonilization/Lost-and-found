@@ -717,7 +717,19 @@ def safe_upload_path(extension: str) -> Path:
 
 
 def finalize_upload_permissions(destination: Path) -> None:
-    destination.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    # Uploads may be served by FastAPI or by nginx in production, so keep them
+    # readable outside the writer process while preserving owner write access.
+    destination.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+
+
+def ensure_upload_is_served_readable(upload_path: Path) -> None:
+    try:
+        current_mode = stat.S_IMODE(upload_path.stat().st_mode)
+        target_mode = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
+        if current_mode != target_mode:
+            upload_path.chmod(target_mode)
+    except OSError:
+        report_logger.warning("[Upload] could not update served permissions for %s", upload_path, exc_info=True)
 
 
 def validate_detected_mime(
@@ -1127,7 +1139,13 @@ def safe_user_avatar_url(user: Optional[User]) -> str:
         return avatar_path
     resolved_path = resolve_upload_path(avatar_path)
     if not resolved_path or not resolved_path.exists():
+        report_logger.warning(
+            "[Profile] avatar path unavailable user_id=%s avatar_path=%s",
+            getattr(user, "id", None),
+            avatar_path,
+        )
         return ""
+    ensure_upload_is_served_readable(resolved_path)
     return avatar_path
 
 
@@ -2793,6 +2811,15 @@ def upload_profile_image(
     avatar_path = decode_image_payload(image)
     if not avatar_path:
         raise HTTPException(status_code=400, detail="Profile image is required.")
+    avatar_file = resolve_upload_path(avatar_path)
+    if not avatar_file or not avatar_file.exists():
+        report_logger.error(
+            "[Profile] saved avatar missing after upload user_id=%s avatar_path=%s",
+            current_user.id,
+            avatar_path,
+        )
+        raise HTTPException(status_code=500, detail="Profile image upload did not save correctly.")
+    ensure_upload_is_served_readable(avatar_file)
     old_avatar_path = current_user.avatar_path
     try:
         current_user.avatar_path = avatar_path
@@ -2805,6 +2832,13 @@ def upload_profile_image(
 
     if old_avatar_path and old_avatar_path != avatar_path:
         delete_uploaded_path(old_avatar_path)
+
+    report_logger.info(
+        "[Profile] avatar updated user_id=%s avatar_path=%s bytes=%s",
+        current_user.id,
+        avatar_path,
+        avatar_file.stat().st_size if avatar_file.exists() else 0,
+    )
 
     return {
         "message": "Profile image updated.",
