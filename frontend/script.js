@@ -5,6 +5,7 @@ const CURRENT_ITEM_STORAGE_KEY = "lostfound_current_item";
 const LANGUAGE_STORAGE_KEY = "lostfound_language";
 const SIDEBAR_MODE_STORAGE_KEY = "lostfound_sidebar_mode";
 const SIDEBAR_WIDTH_STORAGE_KEY = "lostfound_sidebar_width";
+const ADVANCED_MODE_STORAGE_KEY = "lostfound_advanced_mode";
 const TUTORIAL_STORAGE_KEY = "lostfound_tutorial_seen";
 const INITIALS_PATTERN = /^[a-z]+(?:\.[a-z]+)+$/;
 const THEME_MODES = ["dark", "light"];
@@ -43,6 +44,7 @@ const SIDEBAR_MIN_WIDTH = 220;
 const SIDEBAR_MAX_WIDTH = 420;
 const SIDEBAR_DEFAULT_WIDTH = 280;
 const SIDEBAR_COLLAPSED_WIDTH = 76;
+const STABLE_SIDEBAR_WIDTH = SIDEBAR_DEFAULT_WIDTH;
 const MODAL_CLOSE_ANIMATION_MS = 180;
 const HAPTIC_THROTTLE_MS = 140;
 const HAPTIC_PATTERNS = {
@@ -96,10 +98,13 @@ const translations = {
     "theme.aurora": "Aurora",
     "theme.transparent": "Transparent",
     "nav.reports": "Reports",
+    "nav.room": "Lost & Found Room",
+    "nav.returned": "Recently Returned",
     "nav.query": "Query",
     "nav.claims": "My Claims",
     "nav.account": "Account",
     "nav.admin": "Admin Panel",
+    "nav.newWindow": "New window",
     "nav.logout": "Logout",
     "report.eyebrow": "New report",
     "report.title": "Upload a lost item",
@@ -224,10 +229,13 @@ const translations = {
     "theme.aurora": "极光",
     "theme.transparent": "透明",
     "nav.reports": "报告",
+    "nav.room": "失物招领室",
+    "nav.returned": "最近归还",
     "nav.query": "聊天",
     "nav.claims": "我的认领",
     "nav.account": "账号",
     "nav.admin": "管理面板",
+    "nav.newWindow": "新窗口",
     "nav.logout": "退出登录",
     "report.eyebrow": "新报告",
     "report.title": "上传失物报告",
@@ -421,10 +429,13 @@ const translationEnhancements = {
     "theme.aurora": "ออโรรา",
     "theme.transparent": "โปร่งใส",
     "nav.reports": "รายงาน",
+    "nav.room": "ห้องของหายและของพบ",
+    "nav.returned": "เพิ่งถูกรับคืน",
     "nav.query": "สนทนา",
     "nav.claims": "คำขอของฉัน",
     "nav.account": "บัญชี",
     "nav.admin": "แผงผู้ดูแล",
+    "nav.newWindow": "หน้าต่างใหม่",
     "nav.logout": "ออกจากระบบ",
     "report.eyebrow": "รายงานใหม่",
     "report.title": "ส่งรายงานของหาย",
@@ -674,6 +685,7 @@ const state = {
   sidebarMode: SIDEBAR_MODES.includes(savedSidebarMode)
     ? savedSidebarMode
     : "left",
+  advancedMode: localStorage.getItem(ADVANCED_MODE_STORAGE_KEY) === "true",
   tutorialActive: false,
   tutorialStepIndex: 0,
   tutorialDismissedForSession: false,
@@ -697,10 +709,15 @@ const state = {
   layoutSyncFrame: 0,
   lastHapticAt: 0,
   panelState: {},
+  autoMinimizedReports: false,
+  multitaskRequested: false,
+  multitaskActive: false,
+  activeClaimSuccessNotificationId: null,
   activeLayoutResize: null,
   layoutSizes: {
     sidebarWidth: initialSidebarWidth,
     secondaryHeight: 320,
+    secondaryWidth: 420,
   },
   progressTimers: {
     report: null,
@@ -727,12 +744,17 @@ const loginTab = document.querySelector("#loginTab");
 const registerTab = document.querySelector("#registerTab");
 
 const showReportsButton = document.querySelector("#showReportsButton");
+const showReportItemButton = document.querySelector("#showReportItemButton");
 const showRoomButton = document.querySelector("#showRoomButton");
 const showReturnedButton = document.querySelector("#showReturnedButton");
 const showQueryButton = document.querySelector("#showQueryButton");
 const showClaimsButton = document.querySelector("#showClaimsButton");
+const showNotificationsButton = document.querySelector("#showNotificationsButton");
 const showAccountButton = document.querySelector("#showAccountButton");
 const showAdminButton = document.querySelector("#showAdminButton");
+const newWindowButton = document.querySelector("#newWindowButton");
+const newWindowMenu = document.querySelector("#newWindowMenu");
+const newWindowMenuButtons = Array.from(document.querySelectorAll("[data-new-window-target]"));
 let workspaceLayout = document.querySelector("#workspace");
 let windowWorkspace = document.querySelector("#windowWorkspace");
 let sidebarLauncherButton = document.querySelector("#sidebarLauncherButton");
@@ -753,6 +775,10 @@ const notificationButton = document.querySelector("#notificationButton");
 const notificationBadge = document.querySelector("#notificationBadge");
 const notificationDropdown = document.querySelector("#notificationDropdown");
 const notificationList = document.querySelector("#notificationList");
+const notificationPageList = document.querySelector("#notificationPageList");
+const notificationPageCount = document.querySelector("#notificationPageCount");
+const notificationPageLoading = document.querySelector("#notificationPageLoading");
+const refreshNotificationsButton = document.querySelector("#refreshNotificationsButton");
 const notificationWrap = notificationButton?.closest(".notification-wrap") || null;
 const notificationHome = notificationWrap
   ? {
@@ -767,6 +793,7 @@ let reportsPanel = document.querySelector("#reportsPanel");
 let roomSection = document.querySelector("#roomSection");
 let returnedSection = document.querySelector("#returnedSection");
 let claimsSection = document.querySelector("#claimsSection");
+let notificationsSection = document.querySelector("#notificationsSection");
 let accountSection = document.querySelector("#accountSection");
 let adminSection = document.querySelector("#adminSection");
 let querySection = document.querySelector("#querySection");
@@ -834,6 +861,10 @@ const accountPageName = document.querySelector("#accountPageName");
 const accountPageIdentity = document.querySelector("#accountPageIdentity");
 const accountAdminBadge = document.querySelector("#accountAdminBadge");
 const accountInfoList = document.querySelector("#accountInfoList");
+const advancedModeToggle = document.querySelector("#advancedModeToggle");
+const advancedModeTitle = document.querySelector("#advancedModeTitle");
+const advancedModeStatus = document.querySelector("#advancedModeStatus");
+const accountLogoutButton = document.querySelector("#accountLogoutButton");
 const profileImageInput = document.querySelector("#profileImageInput");
 const profileImageButton = document.querySelector("#profileImageButton");
 const profileImageMessage = document.querySelector("#profileImageMessage");
@@ -928,6 +959,12 @@ const claimMessage = document.querySelector("#claimMessage");
 const claimSubmitButton = document.querySelector("#claimSubmitButton");
 const cancelClaimButton = document.querySelector("#cancelClaimButton");
 const closeClaimDialog = document.querySelector("#closeClaimDialog");
+const claimSuccessBanner = document.querySelector("#claimSuccessBanner");
+const claimSuccessEyebrow = document.querySelector("#claimSuccessEyebrow");
+const claimSuccessTitle = document.querySelector("#claimSuccessTitle");
+const claimSuccessMessage = document.querySelector("#claimSuccessMessage");
+const claimSuccessViewButton = document.querySelector("#claimSuccessViewButton");
+const claimSuccessDismissButton = document.querySelector("#claimSuccessDismissButton");
 const confirmDialog = document.querySelector("#confirmDialog");
 const confirmForm = document.querySelector("#confirmForm");
 const confirmTitle = document.querySelector("#confirmTitle");
@@ -996,6 +1033,7 @@ function refreshPanelElements() {
     room: roomSection,
     returned: returnedSection,
     claims: claimsSection,
+    notifications: notificationsSection,
     account: accountSection,
     admin: adminSection,
     query: querySection,
@@ -1015,6 +1053,7 @@ function cacheLayoutDomReferences() {
   roomSection = document.querySelector("#roomSection");
   returnedSection = document.querySelector("#returnedSection");
   claimsSection = document.querySelector("#claimsSection");
+  notificationsSection = document.querySelector("#notificationsSection");
   accountSection = document.querySelector("#accountSection");
   adminSection = document.querySelector("#adminSection");
   querySection = document.querySelector("#querySection");
@@ -1162,11 +1201,15 @@ function ensureLayoutStructure() {
   cacheLayoutDomReferences();
 }
 
-const secondaryPanelNames = ["room", "returned", "claims", "account", "admin", "query"];
+const secondaryPanelNames = ["room", "returned", "claims", "notifications", "account", "admin", "query"];
+const simpleModeSections = new Set(["reports", "room", "claims", "notifications", "account"]);
+const advancedModeSections = new Set(["returned", "query", "admin"]);
 const LAYOUT_BREAKPOINT = 900;
 const PHONE_LAYOUT_BREAKPOINT = 600;
 const REPORTS_MIN_HEIGHT = 260;
 const SECONDARY_MIN_HEIGHT = 220;
+const REPORTS_MIN_WIDTH = 360;
+const SECONDARY_MIN_WIDTH = 420;
 const SPLITTER_SIZE = 14;
 
 function currentResponsiveMode() {
@@ -1176,7 +1219,7 @@ function currentResponsiveMode() {
 }
 
 function currentSidebarMode() {
-  return SIDEBAR_MODES.includes(state.sidebarMode) ? state.sidebarMode : "left";
+  return "left";
 }
 
 function sidebarParticipatesInSideLayout() {
@@ -1198,22 +1241,13 @@ function applySidebarMode() {
 }
 
 function setSidebarMode(mode) {
-  state.sidebarMode = SIDEBAR_MODES.includes(mode) ? mode : "left";
+  state.sidebarMode = "left";
   localStorage.setItem(SIDEBAR_MODE_STORAGE_KEY, state.sidebarMode);
   const sidebarState = ensurePanelState("sidebar");
   sidebarState.closed = false;
-  sidebarState.collapsed = state.sidebarMode === "minimal";
+  sidebarState.collapsed = false;
   applyPanelLayout("sidebar");
   syncWorkspaceLayout();
-}
-
-function defaultSecondaryPanelName() {
-  if (currentUserCanAdmin() && panelElements.admin) return "admin";
-  if (panelElements.query) return "query";
-  if (panelElements.claims) return "claims";
-  if (panelElements.returned) return "returned";
-  if (panelElements.room) return "room";
-  return "reports";
 }
 
 function renderDefaultLayout() {
@@ -1225,6 +1259,7 @@ function renderDefaultLayout() {
 
   workspaceLayout.classList.add("workspace-layout");
   workspaceLayout.style.display = "flex";
+  state.layoutSizes.sidebarWidth = STABLE_SIDEBAR_WIDTH;
   sidebarSplitter?.setAttribute("aria-valuemin", String(SIDEBAR_MIN_WIDTH));
   sidebarSplitter?.setAttribute("aria-valuemax", String(SIDEBAR_MAX_WIDTH));
   sidebarSplitter?.setAttribute("aria-valuenow", String(state.layoutSizes.sidebarWidth));
@@ -1233,14 +1268,6 @@ function renderDefaultLayout() {
   syncAllPanels(Object.keys(state.panelState).length === 0);
   openPanel("sidebar");
   openPanel("reports");
-
-  if (!currentSecondaryPanelName()) {
-    const secondaryPanelName = defaultSecondaryPanelName();
-    if (secondaryPanelName !== "reports" && panelElements[secondaryPanelName]) {
-      state.currentView = secondaryPanelName;
-      openPanel(secondaryPanelName);
-    }
-  }
 
   syncWorkspaceLayout();
   logUiInfo("Rendered default layout", {
@@ -1275,6 +1302,104 @@ function syncResponsiveNavigationSlots(mode = currentResponsiveMode()) {
   if (notificationWrap.parentNode !== notificationHome.parent) {
     notificationHome.parent.insertBefore(notificationWrap, notificationHome.nextSibling);
   }
+}
+
+function sectionAvailableInCurrentMode(section) {
+  if (section === "admin") {
+    return state.advancedMode && currentUserCanAdmin();
+  }
+  if (simpleModeSections.has(section)) return true;
+  if (advancedModeSections.has(section)) return state.advancedMode;
+  return section === "reports";
+}
+
+function syncModeLabels() {
+  const setShortLabel = (button, value) => {
+    if (button) button.dataset.shortLabel = value;
+  };
+  if (state.advancedMode) {
+    showReportsButton.textContent = t("nav.reports");
+    showReportItemButton.textContent = langText({ en: "Report item", "zh-CN": "提交报告", th: "ส่งรายงาน" });
+    showRoomButton.textContent = t("nav.room");
+    showReportsButton.dataset.navIcon = "R";
+    showRoomButton.dataset.navIcon = "L";
+    showClaimsButton.textContent = t("nav.claims");
+    showNotificationsButton.textContent = t("notifications.title");
+    showAccountButton.textContent = t("nav.account");
+    setShortLabel(showReportsButton, t("nav.reports"));
+    setShortLabel(showReportItemButton, langText({ en: "Report", "zh-CN": "报告", th: "รายงาน" }));
+    setShortLabel(showRoomButton, langText({ en: "Room", "zh-CN": "招领室", th: "ห้อง" }));
+    setShortLabel(showClaimsButton, t("nav.claims"));
+    setShortLabel(showNotificationsButton, t("notifications.title"));
+    setShortLabel(showAccountButton, t("nav.account"));
+    if (advancedModeTitle) advancedModeTitle.textContent = langText({ en: "Advanced Mode", "zh-CN": "高级模式", th: "โหมดขั้นสูง" });
+    if (advancedModeStatus) advancedModeStatus.textContent = langText({ en: "On", "zh-CN": "已开启", th: "เปิด" });
+    return;
+  }
+
+  showReportsButton.textContent = langText({ en: "Claim item", "zh-CN": "认领物品", th: "รับของคืน" });
+  showReportItemButton.textContent = langText({ en: "Report", "zh-CN": "报告", th: "รายงาน" });
+  showRoomButton.textContent = langText({ en: "Lost & Found Room", "zh-CN": "失物招领室", th: "ห้องของหาย" });
+  showReportsButton.dataset.navIcon = "C";
+  showReportItemButton.dataset.navIcon = "+";
+  showRoomButton.dataset.navIcon = "L";
+  showClaimsButton.textContent = langText({ en: "Claims", "zh-CN": "认领", th: "คำขอ" });
+  showNotificationsButton.textContent = t("notifications.title");
+  showAccountButton.textContent = langText({ en: "Profile", "zh-CN": "个人资料", th: "โปรไฟล์" });
+  setShortLabel(showReportsButton, langText({ en: "Claim", "zh-CN": "认领", th: "รับคืน" }));
+  setShortLabel(showReportItemButton, langText({ en: "Report", "zh-CN": "报告", th: "รายงาน" }));
+  setShortLabel(showRoomButton, langText({ en: "Room", "zh-CN": "招领室", th: "ห้อง" }));
+  setShortLabel(showClaimsButton, langText({ en: "Claims", "zh-CN": "认领", th: "คำขอ" }));
+  setShortLabel(showNotificationsButton, langText({ en: "Alerts", "zh-CN": "通知", th: "แจ้งเตือน" }));
+  setShortLabel(showAccountButton, langText({ en: "Profile", "zh-CN": "资料", th: "โปรไฟล์" }));
+  if (advancedModeTitle) advancedModeTitle.textContent = langText({ en: "Simple Mode", "zh-CN": "简单模式", th: "โหมดง่าย" });
+  if (advancedModeStatus) advancedModeStatus.textContent = langText({ en: "Default", "zh-CN": "默认", th: "ค่าเริ่มต้น" });
+}
+
+function syncModeUi({ navigateIfNeeded = false } = {}) {
+  appShell?.classList.toggle("is-advanced-mode", state.advancedMode);
+  appShell?.classList.toggle("is-simple-mode", !state.advancedMode);
+  document.body.dataset.experienceMode = state.advancedMode ? "advanced" : "simple";
+
+  if (advancedModeToggle) {
+    advancedModeToggle.checked = state.advancedMode;
+    advancedModeToggle.setAttribute("aria-checked", String(state.advancedMode));
+  }
+
+  const showAdvancedNav = state.advancedMode;
+  showReportItemButton?.classList.toggle("is-hidden", showAdvancedNav);
+  showRoomButton?.classList.remove("is-hidden");
+  showReturnedButton?.classList.toggle("is-hidden", !showAdvancedNav);
+  showQueryButton?.classList.toggle("is-hidden", !showAdvancedNav);
+  showAdminButton?.classList.toggle("is-hidden", !(showAdvancedNav && currentUserCanAdmin()));
+  logoutButton?.classList.toggle("is-hidden", !showAdvancedNav);
+  roomAdminPanel?.classList.toggle("is-hidden", !(showAdvancedNav && currentUserCanAdmin()));
+
+  syncModeLabels();
+  syncNewWindowMenu();
+
+  if (!state.advancedMode) {
+    state.multitaskRequested = false;
+    state.multitaskActive = false;
+  }
+
+  if (navigateIfNeeded && state.user && !sectionAvailableInCurrentMode(state.currentView)) {
+    navigateTo("reports");
+  }
+}
+
+function setAdvancedMode(enabled, { persist = true, navigateIfNeeded = true } = {}) {
+  state.advancedMode = Boolean(enabled);
+  if (persist) {
+    localStorage.setItem(ADVANCED_MODE_STORAGE_KEY, state.advancedMode ? "true" : "false");
+  }
+  if (!state.advancedMode) {
+    closeNewWindowMenu();
+  }
+  setSidebarMode("left");
+  syncModeUi({ navigateIfNeeded });
+  applyNavigationLayoutPolicy(state.currentView);
+  syncWorkspaceLayout();
 }
 
 function defaultPanelLayout(name) {
@@ -1319,6 +1444,17 @@ function clampLayoutSizes() {
     SECONDARY_MIN_HEIGHT,
     secondaryMax,
   );
+
+  const availableWidth = Math.round(workspaceRect?.width || window.innerWidth);
+  const secondaryWidthMax = Math.max(
+    SECONDARY_MIN_WIDTH,
+    availableWidth - REPORTS_MIN_WIDTH - SPLITTER_SIZE,
+  );
+  state.layoutSizes.secondaryWidth = clampValue(
+    Math.round(state.layoutSizes.secondaryWidth || 420),
+    SECONDARY_MIN_WIDTH,
+    Math.max(SECONDARY_MIN_WIDTH, Math.min(560, secondaryWidthMax)),
+  );
 }
 
 function applyPanelLayout(name) {
@@ -1350,6 +1486,10 @@ function syncWorkspaceLayout() {
   const phoneLayout = responsiveMode === "mobile";
   const tabletLayout = responsiveMode === "tablet";
 
+  sidebarState.closed = false;
+  sidebarState.collapsed = false;
+  state.layoutSizes.sidebarWidth = STABLE_SIDEBAR_WIDTH;
+
   if (phoneLayout) {
     sidebarState.closed = false;
     sidebarState.collapsed = false;
@@ -1369,6 +1509,7 @@ function syncWorkspaceLayout() {
     && secondaryVisible
     && !reportsState.minimized
     && !secondaryState.minimized;
+  const splitContentSideBySide = canResizeContent && isDesktopWindowLayout();
 
   appShell?.classList.toggle("has-open-sidebar", sidebarVisible);
   appShell?.classList.toggle("is-phone-layout", phoneLayout);
@@ -1388,15 +1529,16 @@ function syncWorkspaceLayout() {
   sidebarPanel?.classList.toggle("is-bottom-mode", sidebarMode === "bottom");
   sidebarPanel?.classList.toggle("is-minimal-mode", sidebarMode === "minimal");
   sidebarState.collapsed = sidebarMode === "minimal" ? true : Boolean(sidebarState.collapsed && sidebarMode === "left");
-  if (phoneLayout) {
-    sidebarState.collapsed = false;
-  }
+  sidebarState.collapsed = false;
   applyPanelLayout("sidebar");
-  sidebarPanel?.classList.toggle("is-hidden", !sidebarVisible);
-  sidebarLauncherButton?.classList.toggle("is-hidden", sidebarVisible);
-  const canResizeSidebar = sidebarVisible && sidebarMode === "left" && isDesktopWindowLayout();
+  sidebarPanel?.classList.toggle("is-hidden", false);
+  sidebarLauncherButton?.classList.toggle("is-hidden", true);
+  const canResizeSidebar = false;
   sidebarSplitter?.classList.toggle("is-hidden", !canResizeSidebar);
-  contentSplitter?.classList.toggle("is-hidden", !canResizeContent);
+  contentSplitter?.classList.toggle("is-hidden", !(canResizeContent && state.advancedMode && state.multitaskActive));
+  contentSplitter?.classList.toggle("is-vertical", splitContentSideBySide);
+  contentSplitter?.classList.toggle("is-horizontal", !splitContentSideBySide);
+  contentSplitter?.setAttribute("aria-orientation", splitContentSideBySide ? "vertical" : "horizontal");
   reportsSection?.classList.toggle("is-hidden", !reportsVisible);
   secondaryStack?.classList.toggle("is-hidden", !secondaryVisible);
   windowWorkspace.classList.toggle("has-secondary", secondaryVisible);
@@ -1409,9 +1551,10 @@ function syncWorkspaceLayout() {
     const isVisible = secondaryVisible && name === secondaryName;
     panel?.classList.toggle("is-hidden", !isVisible);
   });
+  updatePanelActiveState();
 
   if (sidebarVisible && sidebarParticipatesInSideLayout()) {
-    const sidebarWidth = sidebarMode === "minimal" ? SIDEBAR_COLLAPSED_WIDTH : state.layoutSizes.sidebarWidth;
+    const sidebarWidth = STABLE_SIDEBAR_WIDTH;
     workspaceLayout.style.setProperty("--sidebar-width", `${sidebarWidth}px`);
     sidebarSplitter?.setAttribute("aria-valuenow", String(sidebarWidth));
   } else {
@@ -1419,7 +1562,7 @@ function syncWorkspaceLayout() {
   }
 
   if (canResizeContent) {
-    secondaryStack?.style.setProperty("flex-basis", `${state.layoutSizes.secondaryHeight}px`);
+    secondaryStack?.style.setProperty("flex-basis", `${state.layoutSizes.secondaryWidth}px`);
   } else if (secondaryStack) {
     secondaryStack.style.removeProperty("flex-basis");
   }
@@ -1457,9 +1600,80 @@ function openPanel(name, { unminimize = true } = {}) {
   syncWorkspaceLayout();
 }
 
+function updatePanelActiveState() {
+  Object.entries(panelElements).forEach(([name, panel]) => {
+    if (!panel) return;
+    const active = name === state.currentView || (state.currentView === "reports" && name === "reports");
+    panel.classList.toggle("is-active-panel", active);
+    if (active) {
+      panel.setAttribute("aria-current", "true");
+    } else {
+      panel.removeAttribute("aria-current");
+    }
+  });
+}
+
+function focusActivePanel() {
+  const panelName = state.currentView === "reports" ? "reports" : currentSecondaryPanelName();
+  const panel = panelElements[panelName];
+  if (!panel || panel.classList.contains("is-hidden")) return;
+  if (!panel.hasAttribute("tabindex")) {
+    panel.setAttribute("tabindex", "-1");
+  }
+  window.requestAnimationFrame(() => {
+    if (!panel.isConnected || panel.classList.contains("is-hidden")) return;
+    panel.focus({ preventScroll: true });
+  });
+}
+
+function shouldMinimizeReportsForSecondary(section) {
+  if (!secondaryPanelNames.includes(section) || !isDesktopWindowLayout()) return false;
+  const workspaceWidth = Math.round(windowWorkspace?.getBoundingClientRect().width || window.innerWidth);
+  return workspaceWidth < (REPORTS_MIN_WIDTH + SECONDARY_MIN_WIDTH + SPLITTER_SIZE + 80);
+}
+
+function applyNavigationLayoutPolicy(section) {
+  const reportsState = ensurePanelState("reports");
+  if (section === "reports") {
+    reportsState.closed = false;
+    reportsState.minimized = false;
+    state.autoMinimizedReports = false;
+    state.multitaskActive = false;
+    secondaryPanelNames.forEach((name) => {
+      const panelState = ensurePanelState(name);
+      panelState.closed = true;
+      panelState.minimized = false;
+    });
+    return;
+  }
+  if (!secondaryPanelNames.includes(section)) return;
+
+  const useMultitask = state.advancedMode && (state.multitaskRequested || state.multitaskActive);
+  state.multitaskActive = useMultitask;
+  reportsState.closed = !useMultitask;
+  if (useMultitask && shouldMinimizeReportsForSecondary(section)) {
+    reportsState.minimized = true;
+    state.autoMinimizedReports = true;
+  } else {
+    reportsState.minimized = false;
+    state.autoMinimizedReports = false;
+  }
+
+  secondaryPanelNames.forEach((name) => {
+    const panelState = ensurePanelState(name);
+    panelState.closed = name !== section;
+    panelState.minimized = false;
+  });
+  state.multitaskRequested = false;
+}
+
 function closePanel(name) {
   const panel = panelElements[name];
   if (!panel) return;
+  if (name === "sidebar") {
+    setSidebarMode("left");
+    return;
+  }
   if (name === "reports" && state.currentView === "reports") {
     return;
   }
@@ -1477,22 +1691,22 @@ function togglePanelMinimize(name) {
   if (!panel) return;
   const panelState = ensurePanelState(name);
   panelState.minimized = !panelState.minimized;
+  if (name === "reports") {
+    state.autoMinimizedReports = false;
+  }
   applyPanelLayout(name);
   syncWorkspaceLayout();
 }
 
 function toggleSidebarCollapse() {
-  if (!isDesktopWindowLayout()) {
-    closePanel("sidebar");
-    return;
-  }
-  setSidebarMode(currentSidebarMode() === "minimal" ? "left" : "minimal");
+  setSidebarMode("left");
 }
 
 function beginLayoutResize(event) {
   if (!isDesktopWindowLayout() || event.button !== 0) return;
   const resizeType = event.currentTarget.dataset.layoutResize || "";
   if (!resizeType) return;
+  if (resizeType === "sidebar") return;
   state.pendingLayoutResize = null;
   if (state.layoutResizeFrame) {
     window.cancelAnimationFrame(state.layoutResizeFrame);
@@ -1504,6 +1718,7 @@ function beginLayoutResize(event) {
     startY: event.clientY,
     startSidebarWidth: state.layoutSizes.sidebarWidth,
     startSecondaryHeight: state.layoutSizes.secondaryHeight,
+    startSecondaryWidth: state.layoutSizes.secondaryWidth,
   };
   document.body.classList.add("is-resizing-layout");
   event.preventDefault();
@@ -1522,14 +1737,15 @@ function applyLayoutResize(clientX, clientY) {
 
   if (interaction.type === "content") {
     const workspaceRect = windowWorkspace?.getBoundingClientRect();
-    const maxHeight = Math.max(
-      SECONDARY_MIN_HEIGHT,
-      Math.round((workspaceRect?.height || window.innerHeight) - REPORTS_MIN_HEIGHT - SPLITTER_SIZE),
+    const availableWidth = Math.round(workspaceRect?.width || window.innerWidth);
+    const maxWidth = Math.max(
+      SECONDARY_MIN_WIDTH,
+      availableWidth - REPORTS_MIN_WIDTH - SPLITTER_SIZE,
     );
-    state.layoutSizes.secondaryHeight = clampValue(
-      Math.round(interaction.startSecondaryHeight - (clientY - interaction.startY)),
-      SECONDARY_MIN_HEIGHT,
-      maxHeight,
+    state.layoutSizes.secondaryWidth = clampValue(
+      Math.round(interaction.startSecondaryWidth - (clientX - interaction.startX)),
+      SECONDARY_MIN_WIDTH,
+      Math.max(SECONDARY_MIN_WIDTH, Math.min(560, maxWidth)),
     );
   }
 
@@ -1572,6 +1788,7 @@ function scheduleLayoutSync() {
   if (state.layoutSyncFrame) return;
   state.layoutSyncFrame = window.requestAnimationFrame(() => {
     state.layoutSyncFrame = 0;
+    applyNavigationLayoutPolicy(state.currentView);
     syncAllPanels(false);
     if (state.tutorialActive) {
       scheduleTutorialSpotlightUpdate();
@@ -1602,6 +1819,13 @@ function logClientError(context, error, details = {}) {
     details,
     error,
   });
+}
+
+function logClientDebug(context, details = {}) {
+  const host = window.location.hostname;
+  const isDevelopment = !host || host === "localhost" || host === "127.0.0.1" || host.endsWith(".local");
+  if (!isDevelopment) return;
+  console.info(`[LostFound] ${context}`, details);
 }
 
 function currentLanguage() {
@@ -1645,6 +1869,7 @@ function applyTranslations() {
   }
   showRoomButton.textContent = langText({ en: "Lost & Found Room", "zh-CN": "失物招领室", th: "ห้องของหายและของพบ" });
   showReturnedButton.textContent = langText({ en: "Recently Returned", "zh-CN": "最近归还", th: "เพิ่งถูกรับคืน" });
+  newWindowButton?.setAttribute("title", t("nav.newWindow"));
   refreshRoomButton.textContent = langText({ en: "Refresh room", "zh-CN": "刷新招领室", th: "รีเฟรชห้องของหาย" });
   refreshReturnedButton.textContent = langText({ en: "Refresh returned", "zh-CN": "刷新归还列表", th: "รีเฟรชรายการที่รับคืน" });
   uploadRoomButton.textContent = langText({ en: "Upload to Room", "zh-CN": "上传到招领室", th: "อัปโหลดเข้าห้องของหาย" });
@@ -1655,6 +1880,7 @@ function applyTranslations() {
   const statCopy = document.querySelector(".stat-card p");
   if (statEyebrow) statEyebrow.textContent = langText({ en: "Trust builder", "zh-CN": "信任指标", th: "ตัวชี้วัดความน่าเชื่อถือ" });
   if (statCopy) statCopy.textContent = langText({ en: "Items returned this week", "zh-CN": "本周归还物品", th: "สิ่งของที่ส่งคืนสัปดาห์นี้" });
+  syncModeLabels();
   renderNotifications(state.notifications);
 }
 
@@ -2375,6 +2601,7 @@ function showAuthScreen() {
 function showAppShell() {
   authScreen?.classList.add("is-hidden");
   appShell?.classList.remove("is-hidden");
+  syncModeUi();
   window.requestAnimationFrame(() => {
     syncAllPanels(Object.keys(state.panelState).length === 0);
     openPanel("sidebar");
@@ -2517,16 +2744,19 @@ function tutorialSteps() {
       body: t("tutorial.claimFlowBody"),
       requiresInteraction: true,
     },
-    {
+  ];
+
+  if (state.advancedMode) {
+    steps.push({
       section: "query",
       selector: "#queryForm",
       title: t("tutorial.chatTitle"),
       body: t("tutorial.chatBody"),
       requiresInteraction: true,
-    },
-  ];
+    });
+  }
 
-  if (currentUserCanAdmin()) {
+  if (state.advancedMode && currentUserCanAdmin()) {
     steps.push({
       section: "admin",
       selector: "#adminSection .admin-tab-switch",
@@ -2584,10 +2814,12 @@ function resolveTutorialTarget(step) {
 
 function tutorialViewportRect(target) {
   const rect = target.getBoundingClientRect();
-  const top = clamp(rect.top, 0, window.innerHeight);
-  const left = clamp(rect.left, 0, window.innerWidth);
-  const width = Math.max(0, Math.min(rect.width, window.innerWidth - left));
-  const height = Math.max(0, Math.min(rect.height, window.innerHeight - top));
+  const viewportWidth = window.visualViewport?.width || window.innerWidth;
+  const viewportHeight = window.visualViewport?.height || window.innerHeight;
+  const top = clamp(rect.top, 0, viewportHeight);
+  const left = clamp(rect.left, 0, viewportWidth);
+  const width = Math.max(0, Math.min(rect.width, viewportWidth - left));
+  const height = Math.max(0, Math.min(rect.height, viewportHeight - top));
   return {
     top,
     left,
@@ -2700,8 +2932,8 @@ function buildTutorialCardPlacement(side, targetRect, cardWidth, cardHeight, vie
 function positionTutorialCard(targetRect) {
   if (!tutorialCard) return;
 
-  const viewportWidth = window.innerWidth;
-  const viewportHeight = window.innerHeight;
+  const viewportWidth = window.visualViewport?.width || window.innerWidth;
+  const viewportHeight = window.visualViewport?.height || window.innerHeight;
   const currentRect = tutorialCard.getBoundingClientRect();
   const padding = Math.max(10, Math.min(TUTORIAL_VIEWPORT_PADDING, Math.floor(viewportWidth * 0.03)));
   const cardWidth = Math.min(currentRect.width || 360, viewportWidth - (padding * 2));
@@ -2729,16 +2961,36 @@ function positionTutorialCard(targetRect) {
     return;
   }
 
-  const fallbackTop = clamp(
-    targetRect.bottom + TUTORIAL_CARD_MARGIN,
-    padding,
-    viewportHeight - padding - cardHeight,
-  );
-  const fallbackLeft = clamp(
-    targetRect.left,
-    padding,
-    viewportWidth - padding - cardWidth,
-  );
+  const fallbackCandidates = [
+    {
+      top: padding,
+      left: clamp(targetRect.left, padding, viewportWidth - padding - cardWidth),
+    },
+    {
+      top: viewportHeight - padding - cardHeight,
+      left: clamp(targetRect.left, padding, viewportWidth - padding - cardWidth),
+    },
+    {
+      top: clamp(targetRect.bottom + TUTORIAL_CARD_MARGIN, padding, viewportHeight - padding - cardHeight),
+      left: clamp(targetRect.left + (targetRect.width / 2) - (cardWidth / 2), padding, viewportWidth - padding - cardWidth),
+    },
+    {
+      top: clamp(targetRect.top - TUTORIAL_CARD_MARGIN - cardHeight, padding, viewportHeight - padding - cardHeight),
+      left: clamp(targetRect.left + (targetRect.width / 2) - (cardWidth / 2), padding, viewportWidth - padding - cardWidth),
+    },
+  ];
+  const fallback = fallbackCandidates.find((candidate) => !rectsOverlap({
+    top: candidate.top,
+    left: candidate.left,
+    right: candidate.left + cardWidth,
+    bottom: candidate.top + cardHeight,
+  }, targetRect)) || fallbackCandidates.sort((first, second) => {
+    const firstDistance = Math.abs((first.top + (cardHeight / 2)) - (targetRect.top + (targetRect.height / 2)));
+    const secondDistance = Math.abs((second.top + (cardHeight / 2)) - (targetRect.top + (targetRect.height / 2)));
+    return secondDistance - firstDistance;
+  })[0];
+  const fallbackTop = clamp(fallback.top, padding, viewportHeight - padding - cardHeight);
+  const fallbackLeft = clamp(fallback.left, padding, viewportWidth - padding - cardWidth);
 
   tutorialCard.style.top = `${fallbackTop}px`;
   tutorialCard.style.left = `${fallbackLeft}px`;
@@ -2747,8 +2999,8 @@ function positionTutorialCard(targetRect) {
 }
 
 function positionTutorialBackdrop(rect) {
-  const viewportWidth = window.innerWidth;
-  const viewportHeight = window.innerHeight;
+  const viewportWidth = window.visualViewport?.width || window.innerWidth;
+  const viewportHeight = window.visualViewport?.height || window.innerHeight;
   const top = Math.max(0, Math.min(rect.top, viewportHeight));
   const left = Math.max(0, Math.min(rect.left, viewportWidth));
   const width = Math.max(0, Math.min(rect.width, viewportWidth - left));
@@ -2943,9 +3195,29 @@ function canPreviewImage(path) {
 }
 
 function normalizeImageUrl(path) {
-  if (!path) return "";
-  if (/^(https?:|data:|blob:)/.test(path)) return path;
-  if (typeof path === "string" && path.startsWith("/")) return `${API_BASE}${path}`;
+  if (typeof path !== "string") return "";
+  const source = path.trim();
+  if (!source || /\b(?:undefined|null)\b/i.test(source)) return "";
+  if (/^(data:|blob:)/.test(source)) return source;
+
+  if (/^https?:/i.test(source)) {
+    try {
+      const url = new URL(source);
+      url.pathname = url.pathname.replace(/\/{2,}/g, "/");
+      if (/\b(?:undefined|null)\b/i.test(url.pathname)) return "";
+      return url.toString();
+    } catch (error) {
+      logClientDebug("invalid image URL", { source, message: error?.message || String(error) });
+      return "";
+    }
+  }
+
+  const [withoutHash, hash = ""] = source.replace(/\\/g, "/").split("#", 2);
+  const [rawPath, query = ""] = withoutHash.split("?", 2);
+  const normalizedPath = rawPath.replace(/\/{2,}/g, "/");
+  const suffix = `${query ? `?${query}` : ""}${hash ? `#${hash}` : ""}`;
+  if (normalizedPath.startsWith("uploads/")) return `${API_BASE}/${normalizedPath}${suffix}`;
+  if (normalizedPath.startsWith("/")) return `${API_BASE}${normalizedPath}${suffix}`;
   return "";
 }
 
@@ -2954,13 +3226,14 @@ function cacheBustImageUrl(source, version = Date.now()) {
   const versionValue = String(version || Date.now());
   try {
     const url = new URL(source, window.location.href);
+    url.searchParams.delete("ts");
     url.searchParams.delete("v");
-    url.searchParams.set("ts", versionValue);
+    url.searchParams.set("v", versionValue);
     return url.toString();
   } catch (error) {
     const [base, hash = ""] = source.split("#");
     const separator = base.includes("?") ? "&" : "?";
-    return `${base}${separator}ts=${encodeURIComponent(versionValue)}${hash ? `#${hash}` : ""}`;
+    return `${base}${separator}v=${encodeURIComponent(versionValue)}${hash ? `#${hash}` : ""}`;
   }
 }
 
@@ -2978,12 +3251,6 @@ function normalizeAvatarUrl(source, version = state.avatarVersion || Date.now())
   const normalizedSource = normalizeImageUrl(source);
   if (!normalizedSource) return "";
   if (!isUploadImageUrl(normalizedSource)) return normalizedSource;
-  try {
-    const url = new URL(normalizedSource, window.location.href);
-    if (url.searchParams.has("ts")) return url.toString();
-  } catch {
-    if (/\bts=/.test(normalizedSource)) return normalizedSource;
-  }
   return cacheBustImageUrl(normalizedSource, version);
 }
 
@@ -3436,6 +3703,7 @@ function applyAvatar(element, imageUrl, fallbackText) {
   element.textContent = fallbackText;
   element.style.backgroundImage = "";
   element.style.color = "";
+  element.classList.remove("has-avatar-image", "is-avatar-broken");
   const source = normalizeAvatarUrl(imageUrl);
   element.dataset.avatarSource = source;
   if (!source) return;
@@ -3445,11 +3713,21 @@ function applyAvatar(element, imageUrl, fallbackText) {
     if (element.dataset.avatarSource !== source) return;
     element.style.backgroundImage = `url("${source}")`;
     element.style.color = "transparent";
+    element.classList.add("has-avatar-image");
+    element.classList.remove("is-avatar-broken");
   };
   probe.onerror = () => {
     if (element.dataset.avatarSource !== source) return;
     element.style.backgroundImage = "";
     element.style.color = "";
+    element.classList.remove("has-avatar-image");
+    element.classList.add("is-avatar-broken");
+    element.textContent = fallbackText;
+    logClientDebug("avatar image failed to load", {
+      elementId: element.id || "",
+      source,
+      fallbackText,
+    });
   };
   probe.src = source;
 }
@@ -3477,9 +3755,8 @@ function buildHash(section, itemId = null) {
 function readRoute() {
   const raw = window.location.hash.replace(/^#/, "").trim();
   if (!raw) {
-    const defaultSection = defaultSecondaryPanelName();
     return {
-      section: defaultSection === "reports" ? "reports" : defaultSection,
+      section: "reports",
       itemId: state.currentItemId,
     };
   }
@@ -3490,13 +3767,17 @@ function readRoute() {
     const itemId = Number(raw.slice("query-".length)) || null;
     return { section: "query", itemId };
   }
-  if (["reports", "room", "returned", "claims", "account", "admin"].includes(raw)) {
+  if (["reports", "room", "returned", "claims", "notifications", "account", "admin"].includes(raw)) {
     return { section: raw, itemId: state.currentItemId };
   }
   return { section: "reports", itemId: state.currentItemId };
 }
 
-function navigateTo(section, itemId = null) {
+function navigateTo(section, itemId = null, options = {}) {
+  state.multitaskRequested = Boolean(options.multitask && state.advancedMode);
+  if (!state.multitaskRequested) {
+    state.multitaskActive = false;
+  }
   const nextHash = buildHash(section, itemId);
   if (window.location.hash === nextHash) {
     void activateRoute({ section, itemId });
@@ -3505,15 +3786,53 @@ function navigateTo(section, itemId = null) {
   window.location.hash = nextHash;
 }
 
+function closeNewWindowMenu() {
+  newWindowMenu?.classList.add("is-hidden");
+  newWindowButton?.setAttribute("aria-expanded", "false");
+}
+
+function toggleNewWindowMenu() {
+  if (!newWindowMenu || !newWindowButton) return;
+  const willOpen = newWindowMenu.classList.contains("is-hidden");
+  newWindowMenu.classList.toggle("is-hidden", !willOpen);
+  newWindowButton.setAttribute("aria-expanded", willOpen ? "true" : "false");
+  if (willOpen) {
+    const firstAvailable = newWindowMenu.querySelector("button:not(.is-hidden):not(:disabled)");
+    window.requestAnimationFrame(() => firstAvailable?.focus({ preventScroll: true }));
+  }
+}
+
+function syncNewWindowMenu() {
+  newWindowMenuButtons.forEach((button) => {
+    const target = button.dataset.newWindowTarget || "";
+    button.classList.toggle("is-hidden", !sectionAvailableInCurrentMode(target));
+    button.classList.toggle("is-active", target === state.currentView);
+  });
+}
+
+function openNewWindowTarget(section) {
+  if (!section) return;
+  closeNewWindowMenu();
+  if (section === "admin" && !currentUserCanAdmin()) {
+    navigateTo("reports");
+    return;
+  }
+  navigateTo(section, null, { multitask: state.advancedMode });
+}
+
 function updateTopbarState() {
   const toggle = (button, active) => button.classList.toggle("is-active", active);
   toggle(showReportsButton, state.currentView === "reports");
+  toggle(showReportItemButton, false);
   toggle(showRoomButton, state.currentView === "room");
   toggle(showReturnedButton, state.currentView === "returned");
   toggle(showQueryButton, state.currentView === "query");
   toggle(showClaimsButton, state.currentView === "claims");
+  toggle(showNotificationsButton, state.currentView === "notifications");
   toggle(showAccountButton, state.currentView === "account");
   toggle(showAdminButton, state.currentView === "admin");
+  syncModeUi();
+  syncNewWindowMenu();
 }
 
 function switchSection(section) {
@@ -3521,16 +3840,28 @@ function switchSection(section) {
   if (section === "reports") {
     openPanel("reports", { unminimize: true });
   } else if (secondaryPanelNames.includes(section)) {
+    if (state.advancedMode && (state.multitaskRequested || state.multitaskActive)) {
+      openPanel("reports", { unminimize: false });
+    } else {
+      ensurePanelState("reports").closed = true;
+    }
     openPanel(section, { unminimize: true });
   }
+  applyNavigationLayoutPolicy(section);
   updateTopbarState();
+  updatePanelActiveState();
   syncWorkspaceLayout();
+  focusActivePanel();
 }
 
 async function activateRoute(route = readRoute()) {
   if (!state.user) return;
 
   const section = route.section || "reports";
+  if (!sectionAvailableInCurrentMode(section)) {
+    navigateTo("reports");
+    return;
+  }
   if (section !== "query" && state.currentView === "query") {
     clearQueryState();
   }
@@ -3540,6 +3871,12 @@ async function activateRoute(route = readRoute()) {
   if (section === "claims") {
     switchSection("claims");
     await loadClaims();
+    return;
+  }
+
+  if (section === "notifications") {
+    switchSection("notifications");
+    await loadNotifications();
     return;
   }
 
@@ -3649,68 +3986,212 @@ async function loadFilters() {
   categoryInput.value = "Other";
 }
 
-function renderNotifications(notifications = state.notifications) {
-  if (!notificationList) return;
-  notificationList.replaceChildren();
-  notificationBadge.textContent = String(state.unreadNotifications || 0);
-  notificationBadge.classList.toggle("is-hidden", !state.unreadNotifications);
-  notificationButton?.setAttribute("aria-expanded", notificationDropdown && !notificationDropdown.classList.contains("is-hidden") ? "true" : "false");
+function notificationCategory(notification) {
+  const eventType = String(notification?.event_type || "").toLowerCase();
+  if (eventType === "claim_approved") {
+    return {
+      key: "claim-approved",
+      label: langText({ en: "Claim approved", "zh-CN": "认领通过", th: "อนุมัติคำขอ" }),
+      className: "is-safe",
+    };
+  }
+  if (eventType === "claim_rejected") {
+    return {
+      key: "claim-rejected",
+      label: langText({ en: "Claim rejected", "zh-CN": "认领被拒", th: "ปฏิเสธคำขอ" }),
+      className: "is-flagged",
+    };
+  }
+  if (eventType.includes("query")) {
+    return {
+      key: "chat-reply",
+      label: langText({ en: "New chat reply", "zh-CN": "新聊天回复", th: "ข้อความใหม่" }),
+      className: "is-lost",
+    };
+  }
+  if (eventType.includes("admin") || eventType.includes("override")) {
+    return {
+      key: "admin-message",
+      label: langText({ en: "Admin message", "zh-CN": "管理员消息", th: "ข้อความผู้ดูแล" }),
+      className: "is-claimed",
+    };
+  }
+  if (eventType.includes("report") || eventType.includes("match") || eventType.includes("dispute")) {
+    return {
+      key: "report-update",
+      label: langText({ en: "Report update", "zh-CN": "报告更新", th: "อัปเดตรายงาน" }),
+      className: "is-lost",
+    };
+  }
+  return {
+    key: "admin-message",
+    label: langText({ en: "Admin message", "zh-CN": "管理员消息", th: "ข้อความผู้ดูแล" }),
+    className: "is-safe",
+  };
+}
 
+function isClaimApprovedNotification(notification) {
+  return String(notification?.event_type || "").toLowerCase() === "claim_approved";
+}
+
+async function markNotificationRead(notificationId, { reload = true } = {}) {
+  if (!notificationId) return;
+  try {
+    await apiFetch(`/notifications/${notificationId}/read`, { method: "POST" });
+    if (reload) {
+      await loadNotifications();
+    }
+  } catch (error) {
+    logClientError("mark notification read failed", error, { notificationId });
+  }
+}
+
+function createNotificationCard(notification, { page = false } = {}) {
+  const item = document.createElement("article");
+  const category = notificationCategory(notification);
+  item.className = `notification-item notification-category-${category.key}`;
+  item.classList.toggle("is-unread", !notification.read);
+  item.classList.toggle("is-priority", isClaimApprovedNotification(notification));
+
+  const head = document.createElement("div");
+  head.className = "notification-item-head";
+  const relatedItem = relatedItemForNotification(notification);
+  const titleWrap = document.createElement("span");
+  titleWrap.className = "person-line notification-title-line";
+  titleWrap.append(createMiniAvatar(
+    relatedItem?.reporter_identity || relatedItem?.reporter_name || notification.title || "LF",
+    relatedItem?.reporter_avatar_url || "",
+  ));
+  const title = document.createElement("strong");
+  title.textContent = notification.title || t("notifications.title");
+  titleWrap.append(title);
+
+  const categoryBadge = document.createElement("span");
+  categoryBadge.className = `status-badge notification-category-badge ${category.className}`;
+  categoryBadge.textContent = category.label;
+
+  const button = document.createElement("button");
+  button.className = "ghost-button small-button";
+  button.type = "button";
+  button.textContent = t("notifications.markRead");
+  button.disabled = Boolean(notification.read);
+  button.addEventListener("click", () => {
+    void markNotificationRead(notification.id);
+  });
+  head.append(titleWrap, categoryBadge, button);
+
+  const body = document.createElement("p");
+  body.className = "item-description";
+  body.textContent = notification.message || "";
+
+  const meta = document.createElement("p");
+  meta.className = "notification-meta";
+  meta.textContent = formatDateTime(notification.created_at);
+
+  item.append(head, body, meta);
+
+  if (page && (notification.related_claim_id || isClaimApprovedNotification(notification))) {
+    const actions = document.createElement("div");
+    actions.className = "card-actions notification-card-actions";
+    const viewClaim = document.createElement("button");
+    viewClaim.className = "primary-button small-button";
+    viewClaim.type = "button";
+    viewClaim.textContent = langText({ en: "View claim", "zh-CN": "查看认领", th: "ดูคำขอ" });
+    viewClaim.addEventListener("click", async () => {
+      await markNotificationRead(notification.id);
+      navigateTo("claims");
+    });
+    actions.append(viewClaim);
+    item.append(actions);
+  }
+
+  appendNotificationPreview(notification, item);
+  return item;
+}
+
+function renderNotificationCollection(container, notifications = [], { page = false } = {}) {
+  if (!container) return;
+  container.replaceChildren();
   if (!notifications.length) {
     const empty = document.createElement("p");
     empty.className = "status-message";
     empty.textContent = t("notifications.empty");
-    notificationList.append(empty);
+    container.append(empty);
+    return;
+  }
+  notifications.forEach((notification) => {
+    container.append(createNotificationCard(notification, { page }));
+  });
+}
+
+function renderNotificationPageSummary(notifications = state.notifications) {
+  if (!notificationPageCount) return;
+  notificationPageCount.textContent = langText({
+    en: `${notifications.length} notification${notifications.length === 1 ? "" : "s"}`,
+    "zh-CN": `${notifications.length} 条通知`,
+    th: `${notifications.length} การแจ้งเตือน`,
+  });
+}
+
+function claimApprovalCopy(notification) {
+  const relatedItem = relatedItemForNotification(notification);
+  const quotedTitle = String(notification?.message || "").match(/"([^"]+)"/)?.[1] || "";
+  const itemTitle = relatedItem?.title || quotedTitle || langText({ en: "your item", "zh-CN": "你的物品", th: "สิ่งของของคุณ" });
+  const collectionLocation = localizeValue("Lost & Found Room");
+  const fallbackInstruction = langText({
+    en: `Please collect the item at ${collectionLocation}.`,
+    "zh-CN": `请到${collectionLocation}领取物品。`,
+    th: `โปรดรับสิ่งของที่${collectionLocation}`,
+  });
+  const backendMessage = String(notification?.message || "").trim();
+  const message = /\b(collect|collection|pick up|pickup|lost & found|student services)\b/i.test(backendMessage)
+    ? backendMessage
+    : fallbackInstruction;
+  return {
+    eyebrow: langText({ en: "Claim approved", "zh-CN": "认领已通过", th: "อนุมัติคำขอแล้ว" }),
+    title: langText({
+      en: `Your claim for ${itemTitle} was approved.`,
+      "zh-CN": `你对 ${itemTitle} 的认领已通过。`,
+      th: `คำขอรับ ${itemTitle} ของคุณได้รับการอนุมัติแล้ว`,
+    }),
+    message,
+  };
+}
+
+function currentClaimSuccessNotification() {
+  return state.notifications.find((notification) => !notification.read && isClaimApprovedNotification(notification)) || null;
+}
+
+function renderClaimSuccessBanner(notification = currentClaimSuccessNotification()) {
+  if (!claimSuccessBanner) return;
+  if (!notification) {
+    state.activeClaimSuccessNotificationId = null;
+    claimSuccessBanner.classList.add("is-hidden");
     return;
   }
 
-  notifications.forEach((notification) => {
-    const item = document.createElement("article");
-    item.className = "notification-item";
-    item.classList.toggle("is-unread", !notification.read);
+  state.activeClaimSuccessNotificationId = notification.id;
+  const copy = claimApprovalCopy(notification);
+  claimSuccessEyebrow.textContent = copy.eyebrow;
+  claimSuccessTitle.textContent = copy.title;
+  claimSuccessMessage.textContent = copy.message;
+  claimSuccessBanner.classList.remove("is-hidden");
+}
 
-    const head = document.createElement("div");
-    head.className = "notification-item-head";
-    const relatedItem = relatedItemForNotification(notification);
-    const titleWrap = document.createElement("span");
-    titleWrap.className = "person-line notification-title-line";
-    if (relatedItem?.reporter_avatar_url) {
-      titleWrap.append(createMiniAvatar(relatedItem.reporter_identity || relatedItem.reporter_name || "Reporter", relatedItem.reporter_avatar_url));
-    }
-    const title = document.createElement("strong");
-    title.textContent = notification.title || t("notifications.title");
-    titleWrap.append(title);
-    const button = document.createElement("button");
-    button.className = "ghost-button small-button";
-    button.type = "button";
-    button.textContent = t("notifications.markRead");
-    button.disabled = Boolean(notification.read);
-    button.addEventListener("click", async () => {
-      try {
-        await apiFetch(`/notifications/${notification.id}/read`, { method: "POST" });
-        await loadNotifications();
-      } catch (error) {
-        logClientError("mark notification read failed", error, { notificationId: notification.id });
-      }
-    });
-    head.append(titleWrap, button);
+function renderNotifications(notifications = state.notifications) {
+  notificationBadge.textContent = String(state.unreadNotifications || 0);
+  notificationBadge.classList.toggle("is-hidden", !state.unreadNotifications);
+  notificationButton?.setAttribute("aria-expanded", notificationDropdown && !notificationDropdown.classList.contains("is-hidden") ? "true" : "false");
 
-    const body = document.createElement("p");
-    body.className = "item-description";
-    body.textContent = notification.message || "";
-
-    const meta = document.createElement("p");
-    meta.className = "notification-meta";
-    meta.textContent = formatDateTime(notification.created_at);
-
-    item.append(head, body, meta);
-    appendNotificationPreview(notification, item);
-    notificationList.append(item);
-  });
+  renderNotificationCollection(notificationList, notifications);
+  renderNotificationCollection(notificationPageList, notifications, { page: true });
+  renderNotificationPageSummary(notifications);
+  renderClaimSuccessBanner();
 }
 
 async function loadNotifications() {
   if (!state.user) return;
+  setLoadingLine(notificationPageLoading, true);
   try {
     const data = await apiFetch("/notifications");
     const previousUnreadCount = Number(state.unreadNotifications || 0);
@@ -3723,6 +4204,8 @@ async function loadNotifications() {
     renderNotifications(state.notifications);
   } catch (error) {
     logClientError("loading notifications failed", error);
+  } finally {
+    setLoadingLine(notificationPageLoading, false);
   }
 }
 
@@ -4256,6 +4739,7 @@ function renderAccount() {
   addInfo(accountInfoList, langText({ en: "Class of", "zh-CN": "毕业年份", th: "รุ่นจบ" }), state.user.class_of || "-");
   addInfo(accountInfoList, langText({ en: "Created", "zh-CN": "创建时间", th: "สร้างเมื่อ" }), formatDateTime(state.user.created_at));
   addInfo(accountInfoList, langText({ en: "Admin", "zh-CN": "管理员", th: "ผู้ดูแล" }), currentUserCanAdmin() ? t("common.yes") : t("common.no"));
+  syncModeUi();
 }
 
 function renderAdminMonitor(monitor = state.adminMonitor || emptyAdminMonitor()) {
@@ -5835,8 +6319,7 @@ async function restoreSession() {
 async function enterAuthenticatedApp() {
   showAppShell();
   renderCurrentAccountChip();
-  showAdminButton.classList.toggle("is-hidden", !currentUserCanAdmin());
-  roomAdminPanel.classList.toggle("is-hidden", !currentUserCanAdmin());
+  syncModeUi();
   prefillReporter();
   dateInput.value = todayIso();
   updateLocationUi();
@@ -6017,6 +6500,9 @@ async function uploadProfileImage() {
       currentUserCanAdmin() ? loadAdminData() : Promise.resolve(),
       state.currentView === "query" ? loadQueryPage(state.currentQueryItem?.id || null) : Promise.resolve(),
     ]);
+    renderAccount();
+    renderCurrentAccountChip();
+    renderNotifications();
     if (currentUserCanAdmin() && state.currentView === "admin") {
       await loadAdminMonitor();
     }
@@ -6395,6 +6881,7 @@ function logout() {
   closeConfirmModal();
   closeImagePreview();
   closeRoomClaimPreview();
+  renderClaimSuccessBanner(null);
   hideUndoToast();
   stopAdminMonitorPolling();
   stopNotificationPolling();
@@ -6427,11 +6914,16 @@ function logout() {
   state.selectedQueryFile = null;
   state.tutorialDismissedForSession = false;
   state.panelState = {};
+  state.autoMinimizedReports = false;
+  state.multitaskRequested = false;
+  state.multitaskActive = false;
+  state.activeClaimSuccessNotificationId = null;
   state.activeLayoutResize = null;
   state.pendingLayoutResize = null;
   state.layoutSizes = {
     sidebarWidth: initialSidebarWidth,
     secondaryHeight: 320,
+    secondaryWidth: 420,
   };
   gallery.replaceChildren();
   roomGallery.replaceChildren();
@@ -6444,9 +6936,14 @@ function logout() {
   adminInspectionList.replaceChildren();
   resetAdminMonitor();
   notificationList.replaceChildren();
+  notificationPageList?.replaceChildren();
   notificationDropdown.classList.add("is-hidden");
   queryMessages.replaceChildren();
   showAdminButton.classList.add("is-hidden");
+  showReportItemButton?.classList.remove("is-hidden");
+  closeNewWindowMenu();
+  syncNewWindowMenu();
+  syncModeUi();
   setMessage(adminMessage, "");
   setWarningCard(reportWarningCard, "");
   setWarningCard(searchWarningCard, "");
@@ -6483,12 +6980,15 @@ function bindEvents() {
     [authPasswordToggle, "click", () => setAuthPasswordVisibility(authPassword?.type === "password"), "password visibility"],
     [authConfirmPasswordToggle, "click", () => setAuthConfirmPasswordVisibility(authConfirmPassword?.type === "password"), "confirm password visibility"],
     [showReportsButton, "click", () => navigateTo("reports"), "reports nav"],
+    [showReportItemButton, "click", openReportModal, "report item nav"],
     [showRoomButton, "click", () => navigateTo("room"), "room nav"],
     [showReturnedButton, "click", () => navigateTo("returned"), "returned nav"],
     [showQueryButton, "click", () => navigateTo("query"), "query nav"],
     [showClaimsButton, "click", () => navigateTo("claims"), "claims nav"],
+    [showNotificationsButton, "click", () => navigateTo("notifications"), "notifications nav"],
     [showAccountButton, "click", () => navigateTo("account"), "account nav"],
     [showAdminButton, "click", () => navigateTo("admin"), "admin nav"],
+    [newWindowButton, "click", toggleNewWindowMenu, "new window menu"],
     [sidebarLauncherButton, "click", () => openPanel("sidebar"), "sidebar launcher"],
     [sidebarCollapseButton, "click", toggleSidebarCollapse, "sidebar collapse"],
     [sidebarModeSelect, "change", () => setSidebarMode(sidebarModeSelect.value), "sidebar mode"],
@@ -6505,6 +7005,7 @@ function bindEvents() {
     [uploadRoomButton, "click", uploadRoomItems, "upload room items"],
     [refreshQueryItemsButton, "click", loadQueryItemOptions, "refresh query items"],
     [refreshClaimsButton, "click", loadClaims, "refresh claims"],
+    [refreshNotificationsButton, "click", loadNotifications, "refresh notifications"],
     [refreshAdminButton, "click", loadAdminSurface, "refresh admin"],
     [adminUsersTab, "click", () => switchAdminTab("users"), "admin users tab"],
     [adminItemsTab, "click", () => switchAdminTab("items"), "admin items tab"],
@@ -6537,6 +7038,23 @@ function bindEvents() {
     [undoToastClose, "click", hideUndoToast, "close undo toast"],
     [profileImageInput, "change", () => selectProfileImage(profileImageInput?.files?.[0] || null), "profile image input"],
     [profileImageButton, "click", uploadProfileImage, "upload profile image"],
+    [advancedModeToggle, "change", () => setAdvancedMode(advancedModeToggle.checked), "advanced mode toggle"],
+    [accountLogoutButton, "click", logout, "account logout"],
+    [claimSuccessViewButton, "click", async () => {
+      const notificationId = state.activeClaimSuccessNotificationId;
+      if (notificationId) {
+        await markNotificationRead(notificationId);
+      }
+      navigateTo("claims");
+    }, "claim success view"],
+    [claimSuccessDismissButton, "click", async () => {
+      const notificationId = state.activeClaimSuccessNotificationId;
+      if (notificationId) {
+        await markNotificationRead(notificationId);
+      } else {
+        renderClaimSuccessBanner(null);
+      }
+    }, "claim success dismiss"],
     [tutorialBackButton, "click", () => { void rewindTutorial(); }, "tutorial back"],
     [tutorialNextButton, "click", () => { void advanceTutorial(); }, "tutorial next"],
     [tutorialSkipButton, "click", () => {
@@ -6548,6 +7066,12 @@ function bindEvents() {
     }, "tutorial close"],
   ].forEach(([target, eventName, handler, label]) => {
     bindListener(target, eventName, handler, { label });
+  });
+
+  newWindowMenuButtons.forEach((button) => {
+    bindListener(button, "click", () => openNewWindowTarget(button.dataset.newWindowTarget || "reports"), {
+      label: `new window ${button.dataset.newWindowTarget || "unknown"}`,
+    });
   });
 
   bindListener(languageSelect, "change", async () => {
@@ -6687,16 +7211,34 @@ function bindEvents() {
       scheduleLayoutSync();
       ensureQueryComposerVisible();
     }, { label: "visual viewport resize" });
+    bindListener(window.visualViewport, "scroll", scheduleTutorialSpotlightUpdate, {
+      label: "visual viewport scroll",
+      options: { passive: true },
+    });
   }
   bindListener(window, "scroll", () => {
     scheduleTutorialSpotlightUpdate();
   }, { label: "window scroll", options: { passive: true, capture: true } });
+  bindListener(document, "scroll", () => {
+    scheduleTutorialSpotlightUpdate();
+  }, { label: "document scroll", options: { passive: true, capture: true } });
   bindListener(document, "click", (event) => {
+    if (newWindowMenu && !newWindowMenu.classList.contains("is-hidden")) {
+      const clickedInsideMenu = newWindowMenu.contains(event.target) || newWindowButton?.contains(event.target);
+      if (!clickedInsideMenu) {
+        closeNewWindowMenu();
+      }
+    }
     if (!notificationDropdown || notificationDropdown.classList.contains("is-hidden")) return;
     if (notificationDropdown.contains(event.target) || notificationButton?.contains(event.target)) return;
     notificationDropdown.classList.add("is-hidden");
     notificationButton?.setAttribute("aria-expanded", "false");
   }, { label: "document notification dismiss" });
+  bindListener(document, "keydown", (event) => {
+    if (event.key === "Escape") {
+      closeNewWindowMenu();
+    }
+  }, { label: "document escape dismiss" });
 
   ["dragenter", "dragover"].forEach((eventName) => {
     bindListener(dropZone, eventName, (event) => {
@@ -6733,6 +7275,7 @@ async function initUI() {
   resetAdminMonitor();
   switchAdminTab("users");
   renderDefaultLayout();
+  syncModeUi();
   bindEvents();
   renderSelectedQueryFile();
   updateReportSubmitState();

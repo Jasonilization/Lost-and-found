@@ -84,6 +84,19 @@
           </div>
         </div>
         <div class="app-topbar-end">
+          <div class="new-window-wrap">
+            <button class="ghost-button new-window-button" id="newWindowButton" type="button" aria-haspopup="menu" aria-expanded="false" title="New window" data-i18n="nav.newWindow">New window</button>
+            <div class="new-window-menu surface-card glass is-hidden" id="newWindowMenu" role="menu" aria-label="Open panel">
+              <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="reports" data-i18n="nav.reports">Reports</button>
+              <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="room" data-i18n="nav.room">Lost &amp; Found Room</button>
+              <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="returned" data-i18n="nav.returned">Recently Returned</button>
+              <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="query" data-i18n="nav.query">Query</button>
+              <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="claims" data-i18n="nav.claims">My Claims</button>
+              <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="notifications" data-i18n="notifications.title">Notifications</button>
+              <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="account" data-i18n="nav.account">Account</button>
+              <button class="ghost-button small-button is-hidden" type="button" role="menuitem" data-new-window-target="admin" data-i18n="nav.admin">Admin Panel</button>
+            </div>
+          </div>
           <label class="nav-mode-select-wrap">
             <span>Nav</span>
             <select id="sidebarModeSelect" aria-label="Navigation layout">
@@ -148,10 +161,12 @@
             </div>
             <div class="topbar-actions sidebar-nav-group">
               <button class="ghost-button" id="showReportsButton" type="button" data-nav-icon="R" data-i18n="nav.reports">Reports</button>
+              <button class="ghost-button" id="showReportItemButton" type="button" data-nav-icon="+">Report item</button>
               <button class="ghost-button" id="showRoomButton" type="button" data-nav-icon="L">Lost &amp; Found Room</button>
               <button class="ghost-button" id="showReturnedButton" type="button" data-nav-icon="V">Recently Returned</button>
               <button class="ghost-button" id="showQueryButton" type="button" data-nav-icon="Q" data-i18n="nav.query">Query</button>
               <button class="ghost-button" id="showClaimsButton" type="button" data-nav-icon="C" data-i18n="nav.claims">My Claims</button>
+              <button class="ghost-button" id="showNotificationsButton" type="button" data-nav-icon="N" data-i18n="notifications.title">Notifications</button>
               <button class="ghost-button" id="showAccountButton" type="button" data-nav-icon="A" data-i18n="nav.account">Account</button>
               <button class="ghost-button is-hidden" id="showAdminButton" type="button" data-nav-icon="!" data-i18n="nav.admin">Admin Panel</button>
               <button class="ghost-button danger-button" id="logoutButton" type="button" data-nav-icon="×" data-i18n="nav.logout">Logout</button>
@@ -309,6 +324,29 @@
             <span class="loading-line" id="claimsLoading">Loading claims...</span>
           </div>
           <div class="claims-list" id="claimsList"></div>
+        </div>
+        </section>
+
+        <section class="panel page-panel surface-card window-panel is-hidden" id="notificationsSection" data-panel="notifications" aria-labelledby="notificationsPageTitle">
+          <div class="section-heading window-header">
+            <div>
+              <p class="eyebrow">Updates</p>
+              <h3 id="notificationsPageTitle" data-i18n="notifications.title">Notifications</h3>
+            </div>
+            <div class="window-header-actions">
+              <button class="ghost-button" id="refreshNotificationsButton" type="button" data-i18n="common.refresh">Refresh</button>
+              <div class="window-controls">
+                <button class="icon-button window-control" data-panel-minimize="notifications" type="button" aria-label="Minimize notifications panel">−</button>
+                <button class="icon-button window-control" data-panel-close="notifications" type="button" aria-label="Close notifications panel">×</button>
+              </div>
+            </div>
+          </div>
+          <div class="window-body">
+            <div class="list-meta">
+              <span id="notificationPageCount">0 notifications</span>
+              <span class="loading-line" id="notificationPageLoading">Loading notifications...</span>
+            </div>
+            <div class="notification-page-list" id="notificationPageList"></div>
           </div>
         </section>
 
@@ -353,6 +391,21 @@
             <article class="detail-card surface-card">
               <p class="eyebrow">Details</p>
               <dl class="info-list account-info-list" id="accountInfoList"></dl>
+            </article>
+
+            <article class="detail-card surface-card mode-settings-card">
+              <p class="eyebrow">Experience</p>
+              <div class="mode-toggle-row">
+                <div>
+                  <h4 id="advancedModeTitle">Simple Mode</h4>
+                  <p class="account-mode-status" id="advancedModeStatus">Default</p>
+                </div>
+                <label class="switch-toggle">
+                  <input id="advancedModeToggle" type="checkbox">
+                  <span aria-hidden="true"></span>
+                </label>
+              </div>
+              <button class="ghost-button danger-button account-logout-button" id="accountLogoutButton" type="button" data-i18n="nav.logout">Logout</button>
             </article>
           </div>
           </div>
@@ -552,6 +605,18 @@
         </section>
           </div>
         </main>
+      </div>
+      <div class="claim-success-banner surface-card glass is-hidden" id="claimSuccessBanner" role="status" aria-live="assertive">
+        <div class="claim-success-icon" aria-hidden="true">OK</div>
+        <div class="claim-success-copy">
+          <p class="eyebrow" id="claimSuccessEyebrow">Claim approved</p>
+          <h3 id="claimSuccessTitle">Your claim was approved.</h3>
+          <p id="claimSuccessMessage">Please collect the item at Lost &amp; Found Room.</p>
+        </div>
+        <div class="claim-success-actions">
+          <button class="primary-button" id="claimSuccessViewButton" type="button">View claim</button>
+          <button class="ghost-button" id="claimSuccessDismissButton" type="button" data-i18n="common.close">Close</button>
+        </div>
       </div>
       <button class="primary-button floating-report-button" id="openReportModalButton" type="button" aria-label="Open report form" title="Create a report">
         <span aria-hidden="true">+</span>

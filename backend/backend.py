@@ -711,9 +711,28 @@ def validate_upload_metadata(
     return extension
 
 
-def safe_upload_path(extension: str) -> Path:
-    destination = UPLOAD_DIR / f"{uuid4().hex}{extension}"
-    return destination
+def normalized_upload_subdirectory(subdirectory: Optional[str] = None) -> list[str]:
+    raw_subdirectory = str(subdirectory or "").strip().replace("\\", "/").strip("/")
+    if not raw_subdirectory:
+        return []
+
+    parts = [part for part in raw_subdirectory.split("/") if part]
+    if any(part in {".", ".."} or not re.fullmatch(r"[A-Za-z0-9._-]+", part) for part in parts):
+        raise HTTPException(status_code=500, detail="Upload directory is misconfigured.")
+    return parts
+
+
+def upload_url_for_path(destination: Path) -> str:
+    relative_path = destination.resolve().relative_to(UPLOAD_DIR).as_posix()
+    return f"/uploads/{relative_path}"
+
+
+def safe_upload_path(extension: str, *, subdirectory: Optional[str] = None) -> Path:
+    destination_dir = UPLOAD_DIR
+    for part in normalized_upload_subdirectory(subdirectory):
+        destination_dir = destination_dir / part
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    return destination_dir / f"{uuid4().hex}{extension}"
 
 
 def finalize_upload_permissions(destination: Path) -> None:
@@ -792,10 +811,11 @@ async def save_upload_file(
     *,
     expected_extensions: Optional[set[str]] = None,
     allowed_types: Optional[dict[str, dict[str, object]]] = None,
+    upload_subdir: Optional[str] = None,
 ) -> dict:
     upload_types = allowed_types or ALLOWED_UPLOAD_TYPES
     extension = validate_upload_metadata(upload.filename or "", expected_extensions, allowed_types=upload_types)
-    destination = safe_upload_path(extension)
+    destination = safe_upload_path(extension, subdirectory=upload_subdir)
     total_size = 0
     first_chunk = b""
     client_mime_type = (upload.content_type or "").strip().lower()
@@ -819,8 +839,13 @@ async def save_upload_file(
                     raise HTTPException(status_code=413, detail="Uploaded file exceeds the 5 MB limit.")
                 output_file.write(chunk)
     except FileExistsError:
-        destination = safe_upload_path(extension)
-        return await save_upload_file(upload, expected_extensions=expected_extensions, allowed_types=upload_types)
+        destination = safe_upload_path(extension, subdirectory=upload_subdir)
+        return await save_upload_file(
+            upload,
+            expected_extensions=expected_extensions,
+            allowed_types=upload_types,
+            upload_subdir=upload_subdir,
+        )
     except HTTPException:
         if destination.exists():
             destination.unlink()
@@ -862,7 +887,7 @@ async def save_upload_file(
     return {
         "original_name": Path(upload.filename or "").name,
         "stored_name": destination.name,
-        "path": f"/uploads/{destination.name}",
+        "path": upload_url_for_path(destination),
         "size": total_size,
         "mime_type": detected_mime_type,
         "extension": extension,
@@ -876,6 +901,7 @@ def save_upload_bytes(
     expected_extensions: Optional[set[str]] = None,
     client_mime_type: Optional[str] = None,
     allowed_types: Optional[dict[str, dict[str, object]]] = None,
+    upload_subdir: Optional[str] = None,
 ) -> Optional[dict]:
     if not filename or not file_bytes:
         return None
@@ -923,13 +949,13 @@ def save_upload_bytes(
         )
         raise HTTPException(status_code=415, detail="Client MIME type does not match the allowed file type.")
 
-    destination = safe_upload_path(extension)
+    destination = safe_upload_path(extension, subdirectory=upload_subdir)
     destination.write_bytes(working_bytes)
     finalize_upload_permissions(destination)
     return {
         "original_name": Path(working_filename).name,
         "stored_name": destination.name,
-        "path": f"/uploads/{destination.name}",
+        "path": upload_url_for_path(destination),
         "size": len(working_bytes),
         "mime_type": detected_mime_type,
         "extension": extension,
@@ -1000,7 +1026,7 @@ def require_admin_user(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 
-def decode_image_payload(image: Optional[ReportImagePayload]) -> Optional[str]:
+def decode_image_payload(image: Optional[ReportImagePayload], *, upload_subdir: Optional[str] = None) -> Optional[str]:
     if not image or not image.data.strip():
         return None
 
@@ -1032,6 +1058,7 @@ def decode_image_payload(image: Optional[ReportImagePayload]) -> Optional[str]:
         expected_extensions=IMAGE_UPLOAD_EXTENSIONS,
         client_mime_type=image.content_type,
         allowed_types=REPORT_IMAGE_UPLOAD_TYPES,
+        upload_subdir=upload_subdir,
     )
     if saved:
         report_logger.info(
@@ -1045,9 +1072,32 @@ def decode_image_payload(image: Optional[ReportImagePayload]) -> Optional[str]:
     return saved["path"] if saved else None
 
 
-def resolve_upload_path(upload_path: Optional[str]) -> Optional[Path]:
+def normalize_upload_url_path(upload_path: Optional[str]) -> str:
     raw_path = str(upload_path or "").strip()
+    if not raw_path:
+        return ""
+    if raw_path.startswith(("http://", "https://")):
+        raw_path = urlparse(raw_path).path
+    else:
+        raw_path = raw_path.split("#", 1)[0].split("?", 1)[0]
+    raw_path = raw_path.replace("\\", "/")
+    raw_path = re.sub(r"/+", "/", raw_path)
+    if raw_path.startswith("uploads/"):
+        raw_path = f"/{raw_path}"
     if not raw_path.startswith("/uploads/"):
+        return ""
+    relative_path = raw_path[len("/uploads/"):]
+    if not relative_path:
+        return ""
+    relative_parts = [part for part in relative_path.split("/") if part]
+    if any(part in {".", ".."} for part in relative_parts):
+        return ""
+    return f"/uploads/{'/'.join(relative_parts)}"
+
+
+def resolve_upload_path(upload_path: Optional[str]) -> Optional[Path]:
+    raw_path = normalize_upload_url_path(upload_path)
+    if not raw_path:
         return None
 
     absolute_path = (UPLOAD_DIR / raw_path[len("/uploads/"):]).resolve()
@@ -1135,9 +1185,15 @@ def safe_user_avatar_url(user: Optional[User]) -> str:
     avatar_path = str(user.avatar_path if user else "").strip()
     if not avatar_path:
         return ""
-    if avatar_path.startswith(("http://", "https://")):
-        return avatar_path
-    resolved_path = resolve_upload_path(avatar_path)
+    normalized_avatar_path = normalize_upload_url_path(avatar_path)
+    if not normalized_avatar_path:
+        report_logger.warning(
+            "[Profile] rejected malformed avatar path user_id=%s avatar_path=%s",
+            getattr(user, "id", None),
+            avatar_path,
+        )
+        return ""
+    resolved_path = resolve_upload_path(normalized_avatar_path)
     if not resolved_path or not resolved_path.exists():
         report_logger.warning(
             "[Profile] avatar path unavailable user_id=%s avatar_path=%s",
@@ -1146,7 +1202,7 @@ def safe_user_avatar_url(user: Optional[User]) -> str:
         )
         return ""
     ensure_upload_is_served_readable(resolved_path)
-    return avatar_path
+    return normalized_avatar_path
 
 
 def build_input_text(*parts: Optional[str]) -> str:
@@ -2202,12 +2258,23 @@ def notify_claim_decision(db: Session, *, item: LostFoundItem, claim: Claim, sta
         recipients.add(item.submitted_by_user_id)
     action_label = "approved" if status == "approved" else "rejected"
     for recipient_id in recipients:
+        if action_label == "approved" and recipient_id == claim.user_id:
+            message = (
+                f'Your claim for "{item.title}" was approved. '
+                f"Please collect the item at {LOST_FOUND_ROOM_LABEL}."
+            )
+        elif action_label == "approved":
+            message = f'A claim for "{item.title}" was approved. The item is marked as returned.'
+        elif recipient_id == claim.user_id:
+            message = f'Your claim for "{item.title}" was rejected.'
+        else:
+            message = f'A claim for "{item.title}" was rejected.'
         create_notification(
             db,
             user_id=recipient_id,
             event_type=f"claim_{action_label}",
             title=f"Claim {action_label}",
-            message=f'Your claim update for "{item.title}" was {action_label}.',
+            message=message,
             related_item_id=item.id,
             related_claim_id=claim.id,
         )
@@ -2808,7 +2875,7 @@ def upload_profile_image(
     db: Session = Depends(get_db),
 ) -> dict:
     image = ReportImagePayload(filename=payload.filename, content_type=payload.content_type, data=payload.data)
-    avatar_path = decode_image_payload(image)
+    avatar_path = decode_image_payload(image, upload_subdir="profile")
     if not avatar_path:
         raise HTTPException(status_code=400, detail="Profile image is required.")
     avatar_file = resolve_upload_path(avatar_path)

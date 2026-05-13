@@ -283,17 +283,40 @@ class BlockingFlowTests(unittest.TestCase):
         self.created_upload_paths.append(avatar_url)
 
         self.assertTrue(avatar_path.exists())
-        self.assertTrue(avatar_url.startswith("/uploads/"))
+        self.assertTrue(avatar_url.startswith("/uploads/profile/"))
+        self.assertNotIn("//", avatar_url)
         self.assertEqual(self.user.avatar_path, avatar_url)
+        self.assertEqual(backend_app.resolve_upload_path(f"{avatar_url}?v=123"), avatar_path)
         mode = stat.S_IMODE(avatar_path.stat().st_mode)
         self.assertTrue(mode & stat.S_IRGRP)
         self.assertTrue(mode & stat.S_IROTH)
 
         avatar_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
         self.assertEqual(backend_app.safe_user_avatar_url(self.user), avatar_url)
+        self.user.avatar_path = avatar_url.lstrip("/")
+        self.assertEqual(backend_app.safe_user_avatar_url(self.user), avatar_url)
         repaired_mode = stat.S_IMODE(avatar_path.stat().st_mode)
         self.assertTrue(repaired_mode & stat.S_IRGRP)
         self.assertTrue(repaired_mode & stat.S_IROTH)
+
+        self.user.avatar_path = f"http://localhost:8000{avatar_url}?v=123"
+        self.assertEqual(backend_app.safe_user_avatar_url(self.user), avatar_url)
+
+    def test_upload_url_normalization_rejects_malformed_profile_paths(self) -> None:
+        self.assertEqual(
+            backend_app.normalize_upload_url_path("uploads/profile/avatar.png"),
+            "/uploads/profile/avatar.png",
+        )
+        self.assertEqual(
+            backend_app.normalize_upload_url_path("/uploads//profile//avatar.png?v=123"),
+            "/uploads/profile/avatar.png",
+        )
+        self.assertEqual(
+            backend_app.normalize_upload_url_path("http://localhost:8000/uploads/profile/avatar.png?v=123"),
+            "/uploads/profile/avatar.png",
+        )
+        self.assertEqual(backend_app.normalize_upload_url_path("profile/avatar.png"), "")
+        self.assertEqual(backend_app.normalize_upload_url_path("http://localhost:8000/undefined"), "")
 
     def test_missing_profile_avatar_serializes_as_empty_url(self) -> None:
         self.user.avatar_path = "/uploads/missing-profile-avatar.jpg"
