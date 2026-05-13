@@ -716,13 +716,24 @@
           <div class="room-preview-stage-wrap">
             <div class="room-preview-stage" id="roomPreviewStage">
               <img id="roomPreviewImage" alt="">
-              <div class="room-preview-circle" id="roomPreviewCircle">
-                <button class="room-preview-handle" id="roomPreviewHandle" type="button" aria-label="Resize circle"></button>
+              <div class="room-preview-selection-layer" id="roomPreviewSelectionLayer">
+                <svg class="room-preview-selection-svg" id="roomPreviewSelectionSvg" viewBox="0 0 1 1" preserveAspectRatio="none" focusable="false" aria-hidden="true">
+                  <path class="room-preview-selection-path" id="roomPreviewSelectionPath" vector-effect="non-scaling-stroke"></path>
+                </svg>
+                <div class="room-preview-circle" id="roomPreviewCircle">
+                  <button class="room-preview-handle" id="roomPreviewHandle" type="button" aria-label="Resize circle"></button>
+                </div>
               </div>
             </div>
           </div>
           <div class="room-preview-side">
-            <p class="item-description" id="roomPreviewHint">Drag the red circle and resize it so it covers the exact part that belongs to you.</p>
+            <p class="item-description" id="roomPreviewHint">Draw around the item with a finger or stylus, or use the circle tool for a quick selection.</p>
+            <div class="room-preview-tools" role="toolbar" aria-label="Selection tools">
+              <button class="ghost-button small-button is-active" id="roomDrawButton" type="button">Draw</button>
+              <button class="ghost-button small-button" id="roomCircleToolButton" type="button">Circle</button>
+              <button class="ghost-button small-button" id="roomUndoSelectionButton" type="button" disabled>Undo</button>
+              <button class="ghost-button small-button" id="roomClearSelectionButton" type="button">Clear</button>
+            </div>
             <p class="dialog-subtitle" id="roomPreviewResult">No selection analysis yet.</p>
             <div class="tag-row" id="roomPreviewTags"></div>
             <p class="status-message" id="roomPreviewMessage"></p>

@@ -56,6 +56,9 @@ const HAPTIC_PATTERNS = {
   success: [10, 24, 14],
   notification: [10, 34, 10],
 };
+const ROOM_SELECTION_MIN_DISTANCE = 0.004;
+const ROOM_SELECTION_SMOOTHING_EPSILON = 0.006;
+const ROOM_SELECTION_MAX_POINTS = 240;
 const savedSidebarMode = localStorage.getItem(SIDEBAR_MODE_STORAGE_KEY);
 const savedSidebarWidth = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY) || "");
 const initialSidebarWidth = Number.isFinite(savedSidebarWidth)
@@ -704,6 +707,12 @@ const state = {
   activeRoomPreviewItem: null,
   roomPreviewAnalysis: null,
   roomPreviewDrag: null,
+  roomPreviewTool: "draw",
+  roomPreviewPathPoints: [],
+  roomPreviewDraftPoints: [],
+  roomPreviewUndoStack: [],
+  roomPreviewRenderFrame: 0,
+  roomPreviewLayerFrame: 0,
   pendingLayoutResize: null,
   layoutResizeFrame: 0,
   layoutSyncFrame: 0,
@@ -942,13 +951,20 @@ const roomPreviewCancelButton = document.querySelector("#roomPreviewCancelButton
 const roomClaimPreviewLabel = document.querySelector("#roomClaimPreviewLabel");
 const roomPreviewImage = document.querySelector("#roomPreviewImage");
 const roomPreviewStage = document.querySelector("#roomPreviewStage");
+const roomPreviewSelectionLayer = document.querySelector("#roomPreviewSelectionLayer");
+const roomPreviewSelectionPath = document.querySelector("#roomPreviewSelectionPath");
 const roomPreviewCircle = document.querySelector("#roomPreviewCircle");
 const roomPreviewHandle = document.querySelector("#roomPreviewHandle");
+const roomPreviewHint = document.querySelector("#roomPreviewHint");
 const roomPreviewResult = document.querySelector("#roomPreviewResult");
 const roomPreviewTags = document.querySelector("#roomPreviewTags");
 const roomPreviewMessage = document.querySelector("#roomPreviewMessage");
 const roomAnalyzeButton = document.querySelector("#roomAnalyzeButton");
 const roomConfirmButton = document.querySelector("#roomConfirmButton");
+const roomDrawButton = document.querySelector("#roomDrawButton");
+const roomCircleToolButton = document.querySelector("#roomCircleToolButton");
+const roomUndoSelectionButton = document.querySelector("#roomUndoSelectionButton");
+const roomClearSelectionButton = document.querySelector("#roomClearSelectionButton");
 const claimForm = document.querySelector("#claimForm");
 const claimItemLabel = document.querySelector("#claimItemLabel");
 const claimReasonInput = document.querySelector("#claimReasonInput");
@@ -1873,6 +1889,17 @@ function applyTranslations() {
   refreshRoomButton.textContent = langText({ en: "Refresh room", "zh-CN": "刷新招领室", th: "รีเฟรชห้องของหาย" });
   refreshReturnedButton.textContent = langText({ en: "Refresh returned", "zh-CN": "刷新归还列表", th: "รีเฟรชรายการที่รับคืน" });
   uploadRoomButton.textContent = langText({ en: "Upload to Room", "zh-CN": "上传到招领室", th: "อัปโหลดเข้าห้องของหาย" });
+  if (roomPreviewHint) {
+    roomPreviewHint.textContent = langText({
+      en: "Draw around the item with a finger or stylus, or use the circle tool for a quick selection.",
+      "zh-CN": "用手指或触控笔圈出物品，也可以使用圆形工具快速选择。",
+      th: "วาดรอบสิ่งของด้วยนิ้วหรือปากกา หรือใช้เครื่องมือวงกลมเพื่อเลือกอย่างรวดเร็ว",
+    });
+  }
+  if (roomDrawButton) roomDrawButton.textContent = langText({ en: "Draw", "zh-CN": "手绘", th: "วาด" });
+  if (roomCircleToolButton) roomCircleToolButton.textContent = langText({ en: "Circle", "zh-CN": "圆形", th: "วงกลม" });
+  if (roomUndoSelectionButton) roomUndoSelectionButton.textContent = t("common.undo");
+  if (roomClearSelectionButton) roomClearSelectionButton.textContent = langText({ en: "Clear", "zh-CN": "清除", th: "ล้าง" });
   roomAnalyzeButton.textContent = langText({ en: "Analyze selected area", "zh-CN": "分析选中区域", th: "วิเคราะห์บริเวณที่เลือก" });
   roomConfirmButton.textContent = langText({ en: "Yes, this is my item", "zh-CN": "是的，这是我的物品", th: "ใช่ นี่คือของของฉัน" });
   roomPreviewCancelButton.textContent = t("common.cancel");
@@ -6579,7 +6606,25 @@ async function uploadRoomItems() {
   }
 }
 
-function roomPreviewSelection() {
+function formatRoomPreviewCoord(value) {
+  return Number(Number(value).toFixed(4));
+}
+
+function cloneRoomPreviewPoints(points = []) {
+  return points.map((point) => ({
+    x: Number(point.x),
+    y: Number(point.y),
+  }));
+}
+
+function clampRoomPreviewPoint(point) {
+  return {
+    x: Math.min(1, Math.max(0, Number(point.x || 0))),
+    y: Math.min(1, Math.max(0, Number(point.y || 0))),
+  };
+}
+
+function roomPreviewCircleSelection() {
   return {
     x: Number(roomPreviewCircle.dataset.x || 0.5),
     y: Number(roomPreviewCircle.dataset.y || 0.5),
@@ -6587,7 +6632,47 @@ function roomPreviewSelection() {
   };
 }
 
-function applyRoomPreviewSelection(selection = roomPreviewSelection()) {
+function pointDistance(a, b) {
+  if (!a || !b) return Infinity;
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function roomPreviewPointBounds(points = []) {
+  return points.reduce((bounds, point) => ({
+    minX: Math.min(bounds.minX, point.x),
+    minY: Math.min(bounds.minY, point.y),
+    maxX: Math.max(bounds.maxX, point.x),
+    maxY: Math.max(bounds.maxY, point.y),
+  }), {
+    minX: 1,
+    minY: 1,
+    maxX: 0,
+    maxY: 0,
+  });
+}
+
+function roomPreviewSelection() {
+  const points = state.roomPreviewPathPoints || [];
+  if (points.length >= 3) {
+    const bounds = roomPreviewPointBounds(points);
+    return {
+      type: "path",
+      points: points.map((point) => [
+        formatRoomPreviewCoord(point.x),
+        formatRoomPreviewCoord(point.y),
+      ]),
+      bounding_box: {
+        left: formatRoomPreviewCoord(bounds.minX),
+        top: formatRoomPreviewCoord(bounds.minY),
+        right: formatRoomPreviewCoord(bounds.maxX),
+        bottom: formatRoomPreviewCoord(bounds.maxY),
+      },
+    };
+  }
+  return roomPreviewCircleSelection();
+}
+
+function applyRoomPreviewSelection(selection = roomPreviewCircleSelection()) {
   const x = Math.min(1, Math.max(0, Number(selection.x || 0.5)));
   const y = Math.min(1, Math.max(0, Number(selection.y || 0.5)));
   const radius = Math.min(0.48, Math.max(0.04, Number(selection.radius || 0.18)));
@@ -6600,9 +6685,302 @@ function applyRoomPreviewSelection(selection = roomPreviewSelection()) {
   roomPreviewCircle.style.height = `${radius * 200}%`;
 }
 
+function roomPreviewImageLayerRect() {
+  const stageRect = roomPreviewStage?.getBoundingClientRect();
+  if (!stageRect?.width || !stageRect?.height) return null;
+
+  const naturalWidth = roomPreviewImage?.naturalWidth || 0;
+  const naturalHeight = roomPreviewImage?.naturalHeight || 0;
+  if (!naturalWidth || !naturalHeight) {
+    return {
+      left: 0,
+      top: 0,
+      width: stageRect.width,
+      height: stageRect.height,
+      stageRect,
+    };
+  }
+
+  const stageRatio = stageRect.width / stageRect.height;
+  const imageRatio = naturalWidth / naturalHeight;
+  let width = stageRect.width;
+  let height = stageRect.height;
+  let left = 0;
+  let top = 0;
+
+  if (imageRatio > stageRatio) {
+    height = width / imageRatio;
+    top = (stageRect.height - height) / 2;
+  } else {
+    width = height * imageRatio;
+    left = (stageRect.width - width) / 2;
+  }
+
+  return { left, top, width, height, stageRect };
+}
+
+function syncRoomPreviewSelectionLayer() {
+  if (!roomPreviewSelectionLayer) return;
+  const layerRect = roomPreviewImageLayerRect();
+  if (!layerRect) return;
+  roomPreviewSelectionLayer.style.left = `${layerRect.left}px`;
+  roomPreviewSelectionLayer.style.top = `${layerRect.top}px`;
+  roomPreviewSelectionLayer.style.width = `${layerRect.width}px`;
+  roomPreviewSelectionLayer.style.height = `${layerRect.height}px`;
+}
+
+function scheduleRoomPreviewLayerSync() {
+  if (state.roomPreviewLayerFrame) return;
+  state.roomPreviewLayerFrame = window.requestAnimationFrame(() => {
+    state.roomPreviewLayerFrame = 0;
+    syncRoomPreviewSelectionLayer();
+    renderRoomPreviewSelection();
+  });
+}
+
+function roomPreviewPointFromClient(clientX, clientY) {
+  const layerRect = roomPreviewImageLayerRect();
+  if (!layerRect?.width || !layerRect?.height) return null;
+  const x = (clientX - layerRect.stageRect.left - layerRect.left) / layerRect.width;
+  const y = (clientY - layerRect.stageRect.top - layerRect.top) / layerRect.height;
+  return clampRoomPreviewPoint({ x, y });
+}
+
+function roomPreviewEventPoints(event) {
+  const events = typeof event.getCoalescedEvents === "function"
+    ? event.getCoalescedEvents()
+    : [event];
+  return events
+    .map((coalescedEvent) => roomPreviewPointFromClient(coalescedEvent.clientX, coalescedEvent.clientY))
+    .filter(Boolean);
+}
+
+function roomPreviewPointsToPath(points = [], { closed = true } = {}) {
+  if (!points.length) return "";
+  const command = (point) => `${formatRoomPreviewCoord(point.x)} ${formatRoomPreviewCoord(point.y)}`;
+  if (points.length === 1) {
+    return `M ${command(points[0])}`;
+  }
+  const lineCommands = points.slice(1).map((point) => `L ${command(point)}`).join(" ");
+  return `M ${command(points[0])} ${lineCommands}${closed ? " Z" : ""}`;
+}
+
+function perpendicularRoomPreviewDistance(point, start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  if (dx === 0 && dy === 0) return pointDistance(point, start);
+  return Math.abs(dy * point.x - dx * point.y + end.x * start.y - end.y * start.x) / Math.hypot(dx, dy);
+}
+
+function simplifyRoomPreviewPoints(points, epsilon) {
+  if (points.length <= 2) return cloneRoomPreviewPoints(points);
+
+  let index = 0;
+  let maxDistance = 0;
+  const start = points[0];
+  const end = points[points.length - 1];
+
+  for (let pointIndex = 1; pointIndex < points.length - 1; pointIndex += 1) {
+    const distance = perpendicularRoomPreviewDistance(points[pointIndex], start, end);
+    if (distance > maxDistance) {
+      index = pointIndex;
+      maxDistance = distance;
+    }
+  }
+
+  if (maxDistance <= epsilon) {
+    return [start, end];
+  }
+
+  const left = simplifyRoomPreviewPoints(points.slice(0, index + 1), epsilon);
+  const right = simplifyRoomPreviewPoints(points.slice(index), epsilon);
+  return left.slice(0, -1).concat(right);
+}
+
+function smoothRoomPreviewPoints(points, iterations = 2) {
+  let current = cloneRoomPreviewPoints(points);
+  for (let iteration = 0; iteration < iterations; iteration += 1) {
+    if (current.length < 3) break;
+    const next = [];
+    for (let index = 0; index < current.length; index += 1) {
+      const point = current[index];
+      const nextPoint = current[(index + 1) % current.length];
+      next.push({
+        x: point.x * 0.75 + nextPoint.x * 0.25,
+        y: point.y * 0.75 + nextPoint.y * 0.25,
+      });
+      next.push({
+        x: point.x * 0.25 + nextPoint.x * 0.75,
+        y: point.y * 0.25 + nextPoint.y * 0.75,
+      });
+    }
+    current = next;
+  }
+  return current;
+}
+
+function limitRoomPreviewPoints(points, maxPoints = ROOM_SELECTION_MAX_POINTS) {
+  if (points.length <= maxPoints) return points;
+  const step = Math.ceil(points.length / maxPoints);
+  const limited = points.filter((_, index) => index % step === 0);
+  return limited.length >= 3 ? limited : points.slice(0, maxPoints);
+}
+
+function cleanupRoomPreviewPath(points = []) {
+  const deduped = [];
+  points.forEach((point) => {
+    const clamped = clampRoomPreviewPoint(point);
+    const previous = deduped[deduped.length - 1];
+    if (!previous || pointDistance(previous, clamped) >= ROOM_SELECTION_MIN_DISTANCE) {
+      deduped.push(clamped);
+    }
+  });
+
+  if (deduped.length > 2 && pointDistance(deduped[0], deduped[deduped.length - 1]) < ROOM_SELECTION_MIN_DISTANCE * 1.5) {
+    deduped.pop();
+  }
+  if (deduped.length < 3) return deduped;
+
+  const simplified = simplifyRoomPreviewPoints(deduped, ROOM_SELECTION_SMOOTHING_EPSILON);
+  const smoothed = smoothRoomPreviewPoints(simplified.length >= 3 ? simplified : deduped, 2);
+  return limitRoomPreviewPoints(smoothed.map(clampRoomPreviewPoint));
+}
+
+function roomPreviewPointInPolygon(point, polygon = []) {
+  if (!point || polygon.length < 3) return false;
+  let inside = false;
+  for (let index = 0, previousIndex = polygon.length - 1; index < polygon.length; previousIndex = index, index += 1) {
+    const current = polygon[index];
+    const previous = polygon[previousIndex];
+    const intersects = ((current.y > point.y) !== (previous.y > point.y))
+      && (point.x < ((previous.x - current.x) * (point.y - current.y)) / ((previous.y - current.y) || 0.00001) + current.x);
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+function renderRoomPreviewSelection() {
+  const drawing = state.roomPreviewDrag?.mode === "drawPath";
+  const points = drawing ? state.roomPreviewDraftPoints : state.roomPreviewPathPoints;
+  const hasPath = points.length >= (drawing ? 2 : 3);
+  if (roomPreviewSelectionPath) {
+    roomPreviewSelectionPath.setAttribute("d", hasPath ? roomPreviewPointsToPath(points, { closed: !drawing }) : "");
+  }
+  roomPreviewStage?.classList.toggle("has-freehand-selection", hasPath);
+  roomPreviewStage?.classList.toggle("is-drawing-selection", drawing);
+  roomPreviewStage?.classList.toggle("is-moving-selection", state.roomPreviewDrag?.mode === "movePath");
+  roomPreviewStage?.classList.toggle("is-circle-tool", state.roomPreviewTool === "circle" && !hasPath);
+}
+
+function requestRoomPreviewSelectionRender() {
+  if (state.roomPreviewRenderFrame) return;
+  state.roomPreviewRenderFrame = window.requestAnimationFrame(() => {
+    state.roomPreviewRenderFrame = 0;
+    renderRoomPreviewSelection();
+  });
+}
+
+function captureRoomPreviewSnapshot() {
+  return {
+    tool: state.roomPreviewTool || "draw",
+    circle: roomPreviewCircleSelection(),
+    pathPoints: cloneRoomPreviewPoints(state.roomPreviewPathPoints),
+  };
+}
+
+function roomPreviewSnapshotKey(snapshot) {
+  return JSON.stringify({
+    tool: snapshot.tool,
+    circle: snapshot.circle,
+    pathPoints: snapshot.pathPoints.map((point) => [
+      formatRoomPreviewCoord(point.x),
+      formatRoomPreviewCoord(point.y),
+    ]),
+  });
+}
+
+function updateRoomPreviewToolButtons() {
+  roomDrawButton?.classList.toggle("is-active", state.roomPreviewTool !== "circle");
+  roomCircleToolButton?.classList.toggle("is-active", state.roomPreviewTool === "circle");
+  if (roomUndoSelectionButton) {
+    roomUndoSelectionButton.disabled = state.roomPreviewUndoStack.length === 0;
+  }
+  renderRoomPreviewSelection();
+}
+
+function pushRoomPreviewUndoSnapshot() {
+  const snapshot = captureRoomPreviewSnapshot();
+  const currentKey = roomPreviewSnapshotKey(snapshot);
+  const lastSnapshot = state.roomPreviewUndoStack[state.roomPreviewUndoStack.length - 1];
+  if (lastSnapshot && roomPreviewSnapshotKey(lastSnapshot) === currentKey) return;
+  state.roomPreviewUndoStack.push(snapshot);
+  if (state.roomPreviewUndoStack.length > 12) {
+    state.roomPreviewUndoStack.shift();
+  }
+  updateRoomPreviewToolButtons();
+}
+
+function markRoomPreviewSelectionChanged() {
+  state.roomPreviewAnalysis = null;
+  roomConfirmButton.disabled = true;
+  renderTags(roomPreviewTags, []);
+  roomPreviewResult.textContent = langText({
+    en: "Selection ready. Analyze the selected area when it looks right.",
+    "zh-CN": "选区已准备好。确认无误后分析选中区域。",
+    th: "เลือกบริเวณแล้ว เมื่อตรงตามต้องการให้วิเคราะห์บริเวณที่เลือก",
+  });
+}
+
+function restoreRoomPreviewSnapshot(snapshot) {
+  if (!snapshot) return;
+  state.roomPreviewTool = snapshot.tool || "draw";
+  state.roomPreviewPathPoints = cloneRoomPreviewPoints(snapshot.pathPoints);
+  state.roomPreviewDraftPoints = [];
+  applyRoomPreviewSelection(snapshot.circle || { x: 0.5, y: 0.5, radius: 0.18 });
+  markRoomPreviewSelectionChanged();
+  updateRoomPreviewToolButtons();
+}
+
+function undoRoomPreviewSelection() {
+  const snapshot = state.roomPreviewUndoStack.pop();
+  restoreRoomPreviewSnapshot(snapshot);
+  updateRoomPreviewToolButtons();
+  triggerHaptic("selection");
+}
+
+function setRoomPreviewTool(tool) {
+  if (tool === "circle") {
+    if ((state.roomPreviewPathPoints || []).length) {
+      pushRoomPreviewUndoSnapshot();
+      state.roomPreviewPathPoints = [];
+      state.roomPreviewDraftPoints = [];
+      markRoomPreviewSelectionChanged();
+    }
+    state.roomPreviewTool = "circle";
+  } else {
+    state.roomPreviewTool = "draw";
+  }
+  updateRoomPreviewToolButtons();
+}
+
+function clearRoomPreviewSelection() {
+  pushRoomPreviewUndoSnapshot();
+  state.roomPreviewTool = "draw";
+  state.roomPreviewPathPoints = [];
+  state.roomPreviewDraftPoints = [];
+  applyRoomPreviewSelection({ x: 0.5, y: 0.5, radius: 0.18 });
+  markRoomPreviewSelectionChanged();
+  updateRoomPreviewToolButtons();
+  triggerHaptic("selection");
+}
+
 function resetRoomPreviewState() {
   state.roomPreviewAnalysis = null;
   state.roomPreviewDrag = null;
+  state.roomPreviewTool = "draw";
+  state.roomPreviewPathPoints = [];
+  state.roomPreviewDraftPoints = [];
+  state.roomPreviewUndoStack = [];
   setMessage(roomPreviewMessage, "");
   roomPreviewResult.textContent = langText({
     en: "No selection analysis yet.",
@@ -6612,6 +6990,8 @@ function resetRoomPreviewState() {
   roomConfirmButton.disabled = true;
   renderTags(roomPreviewTags, []);
   applyRoomPreviewSelection({ x: 0.5, y: 0.5, radius: 0.18 });
+  scheduleRoomPreviewLayerSync();
+  updateRoomPreviewToolButtons();
 }
 
 function closeRoomClaimPreview() {
@@ -6639,12 +7019,13 @@ function openRoomClaimPreview(item) {
   roomClaimPreviewDialog.classList.remove("is-closing");
   delete roomClaimPreviewDialog.dataset.closeToken;
   roomClaimPreviewDialog.showModal();
+  scheduleRoomPreviewLayerSync();
   triggerHaptic("open");
 }
 
 function updateRoomPreviewPointer(clientX, clientY, mode) {
-  const rect = roomPreviewStage.getBoundingClientRect();
-  if (!rect.width || !rect.height || !state.roomPreviewDrag) return;
+  const rect = roomPreviewImageLayerRect();
+  if (!rect?.width || !rect?.height || !state.roomPreviewDrag) return;
   const start = state.roomPreviewDrag.start;
   const current = state.roomPreviewDrag.selection;
   const deltaX = (clientX - start.clientX) / rect.width;
@@ -6668,9 +7049,14 @@ function updateRoomPreviewPointer(clientX, clientY, mode) {
 function handleRoomPreviewPointerDown(event) {
   if (!roomClaimPreviewDialog.open) return;
   const isResize = event.target === roomPreviewHandle;
-  const selection = roomPreviewSelection();
+  const selection = roomPreviewCircleSelection();
+  pushRoomPreviewUndoSnapshot();
+  state.roomPreviewTool = "circle";
+  state.roomPreviewPathPoints = [];
+  state.roomPreviewDraftPoints = [];
   state.roomPreviewDrag = {
     mode: isResize ? "resize" : "move",
+    pointerId: event.pointerId,
     selection,
     start: {
       clientX: event.clientX,
@@ -6680,7 +7066,117 @@ function handleRoomPreviewPointerDown(event) {
       radius: selection.radius,
     },
   };
+  event.currentTarget?.setPointerCapture?.(event.pointerId);
   event.preventDefault();
+  event.stopPropagation();
+  markRoomPreviewSelectionChanged();
+  updateRoomPreviewToolButtons();
+}
+
+function startRoomPreviewCircleMove(event, point) {
+  pushRoomPreviewUndoSnapshot();
+  state.roomPreviewPathPoints = [];
+  state.roomPreviewDraftPoints = [];
+  state.roomPreviewTool = "circle";
+  const current = roomPreviewCircleSelection();
+  const radius = Math.min(
+    current.radius,
+    Math.max(0.04, Math.min(point.x, point.y, 1 - point.x, 1 - point.y) || current.radius),
+  );
+  applyRoomPreviewSelection({
+    x: Math.min(1 - radius, Math.max(radius, point.x)),
+    y: Math.min(1 - radius, Math.max(radius, point.y)),
+    radius,
+  });
+  const selection = roomPreviewCircleSelection();
+  state.roomPreviewDrag = {
+    mode: "move",
+    pointerId: event.pointerId,
+    selection,
+    start: {
+      clientX: event.clientX,
+      clientY: event.clientY,
+      x: selection.x,
+      y: selection.y,
+      radius: selection.radius,
+    },
+  };
+  markRoomPreviewSelectionChanged();
+  updateRoomPreviewToolButtons();
+}
+
+function startRoomPreviewPathMove(event, point) {
+  pushRoomPreviewUndoSnapshot();
+  state.roomPreviewDrag = {
+    mode: "movePath",
+    pointerId: event.pointerId,
+    startPoint: point,
+    points: cloneRoomPreviewPoints(state.roomPreviewPathPoints),
+  };
+  roomPreviewStage?.classList.add("is-moving-selection");
+  markRoomPreviewSelectionChanged();
+  requestRoomPreviewSelectionRender();
+}
+
+function startRoomPreviewPathDraw(event, point) {
+  pushRoomPreviewUndoSnapshot();
+  state.roomPreviewTool = "draw";
+  state.roomPreviewPathPoints = [];
+  state.roomPreviewDraftPoints = [point];
+  state.roomPreviewDrag = {
+    mode: "drawPath",
+    pointerId: event.pointerId,
+  };
+  markRoomPreviewSelectionChanged();
+  updateRoomPreviewToolButtons();
+  requestRoomPreviewSelectionRender();
+  triggerHaptic("selection");
+}
+
+function handleRoomPreviewStagePointerDown(event) {
+  if (!roomClaimPreviewDialog.open) return;
+  if (event.button !== undefined && event.button !== 0) return;
+  if (event.target === roomPreviewHandle || roomPreviewCircle?.contains(event.target)) return;
+
+  const point = roomPreviewPointFromClient(event.clientX, event.clientY);
+  if (!point) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  roomPreviewStage?.setPointerCapture?.(event.pointerId);
+
+  if (state.roomPreviewTool === "circle") {
+    startRoomPreviewCircleMove(event, point);
+    return;
+  }
+
+  if (state.roomPreviewPathPoints.length >= 3 && roomPreviewPointInPolygon(point, state.roomPreviewPathPoints)) {
+    startRoomPreviewPathMove(event, point);
+    return;
+  }
+
+  startRoomPreviewPathDraw(event, point);
+}
+
+function appendRoomPreviewDraftPoint(point) {
+  const lastPoint = state.roomPreviewDraftPoints[state.roomPreviewDraftPoints.length - 1];
+  if (!lastPoint || pointDistance(lastPoint, point) >= ROOM_SELECTION_MIN_DISTANCE) {
+    state.roomPreviewDraftPoints.push(point);
+  }
+}
+
+function updateRoomPreviewPathMove(point) {
+  const drag = state.roomPreviewDrag;
+  if (!drag?.points?.length || !point) return;
+  const bounds = roomPreviewPointBounds(drag.points);
+  const rawDeltaX = point.x - drag.startPoint.x;
+  const rawDeltaY = point.y - drag.startPoint.y;
+  const deltaX = Math.min(1 - bounds.maxX, Math.max(-bounds.minX, rawDeltaX));
+  const deltaY = Math.min(1 - bounds.maxY, Math.max(-bounds.minY, rawDeltaY));
+  state.roomPreviewPathPoints = drag.points.map((sourcePoint) => ({
+    x: sourcePoint.x + deltaX,
+    y: sourcePoint.y + deltaY,
+  }));
 }
 
 function handleRoomPreviewPointerMove(event) {
@@ -6689,12 +7185,63 @@ function handleRoomPreviewPointerMove(event) {
     return;
   }
   if (!state.roomPreviewDrag) return;
+  if (state.roomPreviewDrag.pointerId !== undefined && event.pointerId !== state.roomPreviewDrag.pointerId) return;
+
+  if (state.roomPreviewDrag.mode === "drawPath") {
+    roomPreviewEventPoints(event).forEach(appendRoomPreviewDraftPoint);
+    requestRoomPreviewSelectionRender();
+    event.preventDefault();
+    return;
+  }
+
+  if (state.roomPreviewDrag.mode === "movePath") {
+    updateRoomPreviewPathMove(roomPreviewPointFromClient(event.clientX, event.clientY));
+    requestRoomPreviewSelectionRender();
+    event.preventDefault();
+    return;
+  }
+
   updateRoomPreviewPointer(event.clientX, event.clientY, state.roomPreviewDrag.mode);
+  event.preventDefault();
 }
 
-function handleRoomPreviewPointerUp() {
+function finishRoomPreviewPathDraw() {
+  const cleaned = cleanupRoomPreviewPath(state.roomPreviewDraftPoints);
+  const bounds = roomPreviewPointBounds(cleaned);
+  if (cleaned.length >= 3 && bounds.maxX - bounds.minX >= 0.015 && bounds.maxY - bounds.minY >= 0.015) {
+    state.roomPreviewPathPoints = cleaned;
+  } else {
+    const startPoint = state.roomPreviewDraftPoints[0] || { x: 0.5, y: 0.5 };
+    state.roomPreviewPathPoints = [];
+    state.roomPreviewTool = "circle";
+    applyRoomPreviewSelection({
+      x: startPoint.x,
+      y: startPoint.y,
+      radius: 0.08,
+    });
+  }
+  state.roomPreviewDraftPoints = [];
+  markRoomPreviewSelectionChanged();
+}
+
+function handleRoomPreviewPointerUp(event) {
   endLayoutResize();
+  if (state.roomPreviewDrag?.pointerId !== undefined && event?.pointerId !== undefined && event.pointerId !== state.roomPreviewDrag.pointerId) return;
+  if (state.roomPreviewDrag?.mode === "drawPath") {
+    roomPreviewEventPoints(event).forEach(appendRoomPreviewDraftPoint);
+    finishRoomPreviewPathDraw();
+    triggerHaptic("selection");
+  } else if (state.roomPreviewDrag?.mode === "movePath" || state.roomPreviewDrag?.mode === "move" || state.roomPreviewDrag?.mode === "resize") {
+    markRoomPreviewSelectionChanged();
+  }
+  const pointerId = state.roomPreviewDrag?.pointerId;
   state.roomPreviewDrag = null;
+  if (pointerId !== undefined) {
+    roomPreviewStage?.releasePointerCapture?.(pointerId);
+    roomPreviewCircle?.releasePointerCapture?.(pointerId);
+  }
+  updateRoomPreviewToolButtons();
+  requestRoomPreviewSelectionRender();
 }
 
 async function analyzeRoomPreview() {
@@ -7030,8 +7577,14 @@ function bindEvents() {
     [roomPreviewCancelButton, "click", closeRoomClaimPreview, "cancel room preview"],
     [roomAnalyzeButton, "click", analyzeRoomPreview, "analyze room preview"],
     [roomConfirmButton, "click", confirmRoomPreviewSelection, "confirm room preview"],
+    [roomDrawButton, "click", () => setRoomPreviewTool("draw"), "room preview draw tool"],
+    [roomCircleToolButton, "click", () => setRoomPreviewTool("circle"), "room preview circle tool"],
+    [roomUndoSelectionButton, "click", undoRoomPreviewSelection, "room preview undo selection"],
+    [roomClearSelectionButton, "click", clearRoomPreviewSelection, "room preview clear selection"],
+    [roomPreviewStage, "pointerdown", handleRoomPreviewStagePointerDown, "room preview freehand draw"],
     [roomPreviewCircle, "pointerdown", handleRoomPreviewPointerDown, "room preview drag circle"],
     [roomPreviewHandle, "pointerdown", handleRoomPreviewPointerDown, "room preview drag handle"],
+    [roomPreviewImage, "load", scheduleRoomPreviewLayerSync, "room preview image loaded"],
     [cancelConfirmButton, "click", closeConfirmModal, "cancel confirm"],
     [closeConfirmDialog, "click", closeConfirmModal, "close confirm dialog"],
     [closeImagePreviewDialog, "click", closeImagePreview, "close image preview"],
@@ -7160,6 +7713,7 @@ function bindEvents() {
 
   bindListener(window, "pointermove", handleRoomPreviewPointerMove, { label: "window room preview pointer move" });
   bindListener(window, "pointerup", handleRoomPreviewPointerUp, { label: "window room preview pointer up" });
+  bindListener(window, "pointercancel", handleRoomPreviewPointerUp, { label: "window room preview pointer cancel" });
   bindListener(confirmForm, "submit", async (event) => {
     event.preventDefault();
     if (!state.confirmState?.onConfirm) return;
@@ -7202,13 +7756,18 @@ function bindEvents() {
       void activateRoute(readRoute());
     }
   }, { label: "window hashchange" });
-  bindListener(window, "resize", scheduleLayoutSync, { label: "window resize" });
+  bindListener(window, "resize", () => {
+    scheduleLayoutSync();
+    scheduleRoomPreviewLayerSync();
+  }, { label: "window resize" });
   bindListener(window, "orientationchange", () => {
     window.setTimeout(scheduleLayoutSync, 80);
+    window.setTimeout(scheduleRoomPreviewLayerSync, 80);
   }, { label: "window orientation change" });
   if (window.visualViewport) {
     bindListener(window.visualViewport, "resize", () => {
       scheduleLayoutSync();
+      scheduleRoomPreviewLayerSync();
       ensureQueryComposerVisible();
     }, { label: "visual viewport resize" });
     bindListener(window.visualViewport, "scroll", scheduleTutorialSpotlightUpdate, {

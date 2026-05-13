@@ -2430,26 +2430,98 @@ body.tutorial-open {
   overflow: hidden;
   border-radius: calc(var(--radius-md) - 6px);
   background: rgba(0, 0, 0, 0.22);
+  cursor: crosshair;
+  overscroll-behavior: contain;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .room-preview-stage img {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  pointer-events: none;
   user-select: none;
+  -webkit-user-drag: none;
+}
+
+.room-preview-stage.is-moving-selection {
+  cursor: grabbing;
+}
+
+.room-preview-stage.is-circle-tool {
+  cursor: grab;
+}
+
+.room-preview-stage.is-drawing-selection {
+  cursor: crosshair;
+}
+
+.room-preview-selection-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  touch-action: none;
+  will-change: left, top, width, height;
+}
+
+.room-preview-selection-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.room-preview-selection-path {
+  fill: rgba(255, 83, 73, 0.2);
+  stroke: rgba(255, 115, 106, 0.96);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 7px rgba(255, 83, 73, 0.48));
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-standard), fill var(--motion-fast) var(--ease-standard);
+}
+
+.room-preview-stage.has-freehand-selection .room-preview-selection-path {
+  opacity: 1;
+  animation: selectionGlow 1.8s ease-in-out infinite;
+}
+
+.room-preview-stage.is-drawing-selection .room-preview-selection-path {
+  fill: rgba(255, 83, 73, 0.08);
+  opacity: 1;
+  animation: none;
 }
 
 .room-preview-circle {
   position: absolute;
   border: 3px solid #ff5349;
   border-radius: 999px;
-  box-shadow: 0 0 0 9999px rgba(5, 7, 10, 0.22);
+  background: rgba(255, 83, 73, 0.12);
+  box-shadow:
+    0 0 0 9999px rgba(5, 7, 10, 0.2),
+    0 0 16px rgba(255, 83, 73, 0.42);
   cursor: grab;
   touch-action: none;
+  pointer-events: auto;
+  transition: box-shadow var(--motion-fast) var(--ease-standard), opacity var(--motion-fast) var(--ease-standard);
+  will-change: left, top, width, height;
 }
 
 .room-preview-circle:active {
   cursor: grabbing;
+}
+
+.room-preview-stage.has-freehand-selection .room-preview-circle {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .room-preview-handle {
@@ -2470,8 +2542,31 @@ body.tutorial-open {
   gap: 14px;
 }
 
+.room-preview-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.room-preview-tools .small-button {
+  min-height: 36px;
+  padding-inline: 12px;
+}
+
+.room-preview-tools .is-active {
+  border-color: var(--line-accent);
+  color: var(--accent-strong);
+  background: var(--surface-info);
+}
+
 .room-preview-actions {
   justify-content: flex-start;
+}
+
+@keyframes selectionGlow {
+  50% {
+    filter: drop-shadow(0 0 11px rgba(255, 83, 73, 0.62));
+  }
 }
 
 @keyframes spin {

@@ -245,6 +245,42 @@ class BlockingFlowTests(unittest.TestCase):
         self.assertEqual(self.db.query(Claim).count(), 1)
         self.assertEqual(self.db.query(AIInspectionLog).count(), 2)
 
+    def test_claim_preview_accepts_freehand_region(self) -> None:
+        if backend_app.Image is None:
+            self.skipTest("Pillow is not installed")
+
+        image_path = backend_app.safe_upload_path(".png")
+        backend_app.Image.new("RGB", (120, 90), (25, 80, 120)).save(image_path)
+        upload_url = backend_app.upload_url_for_path(image_path)
+        self.created_upload_paths.append(upload_url)
+        self.item.image_path = upload_url
+        self.db.commit()
+
+        payload = backend_app.ClaimPreviewPayload(
+            selection=backend_app.CircleSelectionPayload(
+                type="path",
+                points=[
+                    [0.2, 0.25],
+                    [0.78, 0.22],
+                    [0.72, 0.76],
+                    [0.24, 0.7],
+                ],
+            ),
+        )
+
+        with patch(
+            "backend.backend.debug_image_request",
+            return_value={"raw_response": '{"description":"blue label area","tags":["blue","label"]}'},
+        ):
+            response = backend_app.preview_claim_region(self.item.id, payload, self.user, self.db)
+
+        preview = response["preview"]
+        self.assertEqual(preview["selection"]["type"], "path")
+        self.assertEqual(len(preview["selection"]["points"]), 4)
+        self.assertEqual(preview["description"], "blue label area")
+        self.assertEqual(preview["tags"], ["blue", "label"])
+        self.assertGreater(preview["bounding_box"]["right"], preview["bounding_box"]["left"])
+
     def test_save_upload_bytes_rejects_extension_spoof(self) -> None:
         with self.assertRaises(HTTPException) as exc:
             backend_app.save_upload_bytes(

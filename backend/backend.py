@@ -7,6 +7,7 @@ import hmac
 import io
 import json
 import logging
+import math
 import os
 import re
 import requests
@@ -269,7 +270,7 @@ class ClaimPayload(BaseModel):
     item_description: str
     lost_location: str
     identifying_info: str
-    visual_selection: Optional[dict[str, float]] = None
+    visual_selection: Optional[dict[str, Any]] = None
     visual_summary: str = ""
     visual_tags: list[str] = []
 
@@ -331,9 +332,12 @@ class RoomUploadPayload(BaseModel):
 
 
 class CircleSelectionPayload(BaseModel):
-    x: float
-    y: float
-    radius: float
+    x: Optional[float] = None
+    y: Optional[float] = None
+    radius: Optional[float] = None
+    type: str = "circle"
+    points: Optional[list[list[float]]] = None
+    bounding_box: Optional[dict[str, float]] = None
 
 
 class ClaimPreviewPayload(BaseModel):
@@ -1379,9 +1383,12 @@ def parse_region_analysis(raw_response: str) -> dict[str, Any]:
 
 
 def validate_circle_selection(selection: CircleSelectionPayload) -> dict[str, float]:
-    x = float(selection.x)
-    y = float(selection.y)
-    radius = float(selection.radius)
+    try:
+        x = float(selection.x)
+        y = float(selection.y)
+        radius = float(selection.radius)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Circle selection requires x, y, and radius values.")
     if not 0.0 <= x <= 1.0 or not 0.0 <= y <= 1.0:
         raise HTTPException(status_code=400, detail="Selection coordinates must be normalized between 0 and 1.")
     if not 0.04 <= radius <= 0.48:
@@ -1391,6 +1398,72 @@ def validate_circle_selection(selection: CircleSelectionPayload) -> dict[str, fl
         "y": round(y, 4),
         "radius": round(radius, 4),
     }
+
+
+def _normalized_selection_type(selection: CircleSelectionPayload) -> str:
+    return str(selection.type or "circle").strip().lower()
+
+
+def _normalized_polygon_bounds(points: list[list[float]]) -> dict[str, float]:
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    return {
+        "left": round(min(xs), 4),
+        "top": round(min(ys), 4),
+        "right": round(max(xs), 4),
+        "bottom": round(max(ys), 4),
+    }
+
+
+def validate_path_selection(selection: CircleSelectionPayload) -> dict[str, Any]:
+    raw_points = selection.points or []
+    if not isinstance(raw_points, list) or len(raw_points) < 3:
+        raise HTTPException(status_code=400, detail="Freehand selection requires at least three points.")
+    if len(raw_points) > 600:
+        raise HTTPException(status_code=400, detail="Freehand selection has too many points.")
+
+    normalized_points: list[list[float]] = []
+    for raw_point in raw_points:
+        if not isinstance(raw_point, (list, tuple)) or len(raw_point) < 2:
+            raise HTTPException(status_code=400, detail="Freehand selection points must be coordinate pairs.")
+        try:
+            x = float(raw_point[0])
+            y = float(raw_point[1])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Freehand selection points must be numeric.")
+        if not 0.0 <= x <= 1.0 or not 0.0 <= y <= 1.0:
+            raise HTTPException(status_code=400, detail="Freehand selection points must be normalized between 0 and 1.")
+        rounded = [round(x, 4), round(y, 4)]
+        if not normalized_points or normalized_points[-1] != rounded:
+            normalized_points.append(rounded)
+
+    if len(normalized_points) > 2 and normalized_points[0] == normalized_points[-1]:
+        normalized_points.pop()
+    if len(normalized_points) < 3:
+        raise HTTPException(status_code=400, detail="Freehand selection requires at least three unique points.")
+
+    bounds = _normalized_polygon_bounds(normalized_points)
+    if bounds["right"] - bounds["left"] < 0.015 or bounds["bottom"] - bounds["top"] < 0.015:
+        raise HTTPException(status_code=400, detail="Freehand selection is too small to analyze.")
+
+    return {
+        "type": "path",
+        "points": normalized_points,
+        "bounding_box": bounds,
+    }
+
+
+def validate_region_selection(selection: CircleSelectionPayload) -> dict[str, Any]:
+    if _normalized_selection_type(selection) in {"path", "freehand", "polygon"}:
+        return validate_path_selection(selection)
+    return validate_circle_selection(selection)
+
+
+def _resampling_filter() -> Any:
+    resampling = getattr(Image, "Resampling", None) if Image is not None else None
+    if resampling is not None and hasattr(resampling, "LANCZOS"):
+        return resampling.LANCZOS
+    return getattr(Image, "LANCZOS", getattr(Image, "ANTIALIAS", 1))
 
 
 def analyze_item_region(item: LostFoundItem, selection: CircleSelectionPayload) -> dict[str, Any]:
@@ -1403,25 +1476,51 @@ def analyze_item_region(item: LostFoundItem, selection: CircleSelectionPayload) 
     if not source_path or not source_path.exists():
         raise HTTPException(status_code=404, detail="The stored image for this item is missing.")
 
-    normalized = validate_circle_selection(selection)
+    normalized = validate_region_selection(selection)
     output_path = safe_upload_path(".png")
     try:
         with Image.open(source_path) as image:
             image.load()
             prepared = image.convert("RGBA")
             width, height = prepared.size
-            center_x = int(width * normalized["x"])
-            center_y = int(height * normalized["y"])
-            radius_px = max(18, int(min(width, height) * normalized["radius"]))
-            left = max(0, center_x - radius_px)
-            top = max(0, center_y - radius_px)
-            right = min(width, center_x + radius_px)
-            bottom = min(height, center_y + radius_px)
-            cropped = prepared.crop((left, top, right, bottom))
+            if normalized.get("type") == "path":
+                pixel_points = [
+                    (point[0] * width, point[1] * height)
+                    for point in normalized["points"]
+                ]
+                padding = max(6, int(min(width, height) * 0.012))
+                left = max(0, math.floor(min(point[0] for point in pixel_points)) - padding)
+                top = max(0, math.floor(min(point[1] for point in pixel_points)) - padding)
+                right = min(width, math.ceil(max(point[0] for point in pixel_points)) + padding)
+                bottom = min(height, math.ceil(max(point[1] for point in pixel_points)) + padding)
+                cropped = prepared.crop((left, top, right, bottom))
 
-            mask = Image.new("L", cropped.size, 0)
-            draw = ImageDraw.Draw(mask)
-            draw.ellipse((0, 0, cropped.size[0] - 1, cropped.size[1] - 1), fill=255)
+                scale = 3
+                mask_size = (max(1, cropped.size[0] * scale), max(1, cropped.size[1] * scale))
+                mask = Image.new("L", mask_size, 0)
+                draw = ImageDraw.Draw(mask)
+                draw.polygon(
+                    [
+                        ((point[0] - left) * scale, (point[1] - top) * scale)
+                        for point in pixel_points
+                    ],
+                    fill=255,
+                )
+                mask = mask.resize(cropped.size, _resampling_filter())
+            else:
+                center_x = int(width * normalized["x"])
+                center_y = int(height * normalized["y"])
+                radius_px = max(18, int(min(width, height) * normalized["radius"]))
+                left = max(0, center_x - radius_px)
+                top = max(0, center_y - radius_px)
+                right = min(width, center_x + radius_px)
+                bottom = min(height, center_y + radius_px)
+                cropped = prepared.crop((left, top, right, bottom))
+
+                mask = Image.new("L", cropped.size, 0)
+                draw = ImageDraw.Draw(mask)
+                draw.ellipse((0, 0, cropped.size[0] - 1, cropped.size[1] - 1), fill=255)
+
             output = Image.new("RGBA", cropped.size, (255, 255, 255, 255))
             output.paste(cropped, (0, 0), mask)
             output.save(output_path, format="PNG", optimize=True)
