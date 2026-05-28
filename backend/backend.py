@@ -28,7 +28,7 @@ from uuid import uuid4
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 try:
@@ -55,7 +55,7 @@ except ImportError:  # pragma: no cover - Unix-only runtime helper
 
 from backend.ai_assistant import AI_MODEL, analyze_claim_match, analyze_evidence, analyze_report_abuse, model_size_label, normalize_language
 from backend.ai_moderation import classify_user_input
-from backend.database import AIInspectionLog, AuditLog, Claim, ItemQuery, LostFoundItem, Notification, QueryMessage, ReturnedItemDispute, SessionLocal, User, UserSession, init_db
+from backend.database import AIInspectionLog, AuditLog, Claim, ItemQuery, LostFoundItem, Notification, QueryMessage, ReturnedItemDispute, SessionLocal, UploadObject, User, UserSession, init_db
 from backend.moderation import BLOCKED_WORDS, clean_text, validate_class_of, validate_initials, validate_text_input
 from backend.ollama_tagger import (
     build_search_text,
@@ -81,12 +81,24 @@ app.add_middleware(
 )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+UPLOAD_STORAGE_BACKEND = os.getenv(
+    "UPLOAD_STORAGE_BACKEND",
+    "database" if os.getenv("DATABASE_URL") else "filesystem",
+).strip().lower()
+if UPLOAD_STORAGE_BACKEND not in {"database", "filesystem"}:
+    UPLOAD_STORAGE_BACKEND = "database" if os.getenv("DATABASE_URL") else "filesystem"
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", BASE_DIR / "uploads")).expanduser().resolve()
+UPLOAD_CACHE_DIR = Path(os.getenv("UPLOAD_CACHE_DIR", "/tmp/lostfound-uploads")).expanduser().resolve()
 FRONTEND_DIR = BASE_DIR / "frontend"
 LOG_DIR = Path(os.getenv("LOG_DIR", BASE_DIR / "data")).expanduser().resolve()
+LOG_TO_STDOUT = os.getenv("LOG_TO_STDOUT", "").strip().lower() in {"1", "true", "yes", "on"}
 
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-LOG_DIR.mkdir(parents=True, exist_ok=True)
+if UPLOAD_STORAGE_BACKEND == "database":
+    UPLOAD_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+else:
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+if not LOG_TO_STDOUT:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 CLAIMS_LOG_PATH = LOG_DIR / "claims.log"
 ADMIN_LOG_PATH = LOG_DIR / "admin_actions.log"
@@ -96,9 +108,6 @@ BOOTSTRAP_ADMIN_ENV_KEYS = (
     "ADMIN_USERNAME",
     "ADMIN_PASSWORD",
 )
-
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
-
 
 @app.on_event("startup")
 def check_optional_ollama_on_startup() -> None:
@@ -114,9 +123,18 @@ def check_optional_ollama_on_startup() -> None:
         status.get("models", []),
     )
 
+def build_log_handler(path: Path) -> logging.Handler:
+    handler: logging.Handler
+    if LOG_TO_STDOUT:
+        handler = logging.StreamHandler(sys.stdout)
+    else:
+        handler = logging.FileHandler(path)
+    return handler
+
+
 claims_logger = logging.getLogger("claims")
 if not claims_logger.handlers:
-    handler = logging.FileHandler(CLAIMS_LOG_PATH)
+    handler = build_log_handler(CLAIMS_LOG_PATH)
     handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
     claims_logger.addHandler(handler)
 claims_logger.setLevel(logging.INFO)
@@ -128,31 +146,31 @@ admin_logger = logging.getLogger("admin_actions")
 block_logger = logging.getLogger("blocked_actions")
 security_logger = logging.getLogger("security")
 if not report_logger.handlers:
-    report_handler = logging.FileHandler(REPORT_LOG_PATH)
+    report_handler = build_log_handler(REPORT_LOG_PATH)
     report_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     report_logger.addHandler(report_handler)
 report_logger.setLevel(logging.INFO)
 report_logger.propagate = False
 if not llava_trace_logger.handlers:
-    llava_handler = logging.FileHandler(REPORT_LOG_PATH)
+    llava_handler = build_log_handler(REPORT_LOG_PATH)
     llava_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     llava_trace_logger.addHandler(llava_handler)
 llava_trace_logger.setLevel(logging.INFO)
 llava_trace_logger.propagate = False
 if not admin_logger.handlers:
-    admin_handler = logging.FileHandler(ADMIN_LOG_PATH)
+    admin_handler = build_log_handler(ADMIN_LOG_PATH)
     admin_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
     admin_logger.addHandler(admin_handler)
 admin_logger.setLevel(logging.INFO)
 admin_logger.propagate = False
 if not block_logger.handlers:
-    block_handler = logging.FileHandler(ADMIN_LOG_PATH)
+    block_handler = build_log_handler(ADMIN_LOG_PATH)
     block_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
     block_logger.addHandler(block_handler)
 block_logger.setLevel(logging.INFO)
 block_logger.propagate = False
 if not security_logger.handlers:
-    security_handler = logging.FileHandler(SECURITY_LOG_PATH)
+    security_handler = build_log_handler(SECURITY_LOG_PATH)
     security_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     security_logger.addHandler(security_handler)
 security_logger.setLevel(logging.INFO)
@@ -361,6 +379,33 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+if UPLOAD_STORAGE_BACKEND == "filesystem":
+    app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
+
+@app.get("/uploads/{upload_path:path}")
+def serve_database_upload(upload_path: str, db: Session = Depends(get_db)) -> Response:
+    if UPLOAD_STORAGE_BACKEND != "database":
+        raise HTTPException(status_code=404, detail="Upload not found.")
+
+    normalized_path = normalize_upload_url_path(f"/uploads/{upload_path}")
+    if not normalized_path:
+        raise HTTPException(status_code=404, detail="Upload not found.")
+
+    upload_object = db.query(UploadObject).filter(UploadObject.path == normalized_path).first()
+    if not upload_object:
+        raise HTTPException(status_code=404, detail="Upload not found.")
+
+    return Response(
+        content=bytes(upload_object.content),
+        media_type=upload_object.content_type or "application/octet-stream",
+        headers={
+            "Cache-Control": "public, max-age=86400",
+            "Content-Length": str(upload_object.size or len(upload_object.content)),
+        },
+    )
 
 
 def get_client_ip(request: Request) -> str:
@@ -726,6 +771,94 @@ def normalized_upload_subdirectory(subdirectory: Optional[str] = None) -> list[s
     return parts
 
 
+def upload_url_for_relative_path(relative_path: str) -> str:
+    return f"/uploads/{relative_path.strip('/')}"
+
+
+def safe_upload_relative_path(extension: str, *, subdirectory: Optional[str] = None) -> str:
+    parts = normalized_upload_subdirectory(subdirectory)
+    parts.append(f"{uuid4().hex}{extension}")
+    return "/".join(parts)
+
+
+def database_upload_cache_path(upload_path: Optional[str]) -> Optional[Path]:
+    raw_path = normalize_upload_url_path(upload_path)
+    if not raw_path:
+        return None
+
+    cache_path = (UPLOAD_CACHE_DIR / raw_path[len("/uploads/"):]).resolve()
+    try:
+        cache_path.relative_to(UPLOAD_CACHE_DIR)
+    except ValueError:
+        report_logger.warning("Rejected upload cache path outside cache: %s", raw_path)
+        return None
+    return cache_path
+
+
+def store_upload_object(
+    *,
+    original_name: str,
+    extension: str,
+    file_bytes: bytes,
+    mime_type: str,
+    upload_subdir: Optional[str] = None,
+) -> dict:
+    relative_path = safe_upload_relative_path(extension, subdirectory=upload_subdir)
+    upload_path = upload_url_for_relative_path(relative_path)
+    db = SessionLocal()
+    try:
+        db.add(
+            UploadObject(
+                path=upload_path,
+                original_name=Path(original_name or "").name,
+                content_type=mime_type or "application/octet-stream",
+                size=len(file_bytes),
+                content=file_bytes,
+            )
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+    cache_path = database_upload_cache_path(upload_path)
+    if cache_path:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_bytes(file_bytes)
+
+    return {
+        "original_name": Path(original_name or "").name,
+        "stored_name": Path(relative_path).name,
+        "path": upload_path,
+        "size": len(file_bytes),
+        "mime_type": mime_type,
+        "extension": extension,
+    }
+
+
+def materialize_database_upload(upload_path: Optional[str]) -> Optional[Path]:
+    raw_path = normalize_upload_url_path(upload_path)
+    if not raw_path:
+        return None
+
+    db = SessionLocal()
+    try:
+        upload_object = db.query(UploadObject).filter(UploadObject.path == raw_path).first()
+        if not upload_object:
+            return None
+        cache_path = database_upload_cache_path(raw_path)
+        if not cache_path:
+            return None
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        if not cache_path.exists() or cache_path.stat().st_size != upload_object.size:
+            cache_path.write_bytes(bytes(upload_object.content))
+        return cache_path
+    finally:
+        db.close()
+
+
 def upload_url_for_path(destination: Path) -> str:
     relative_path = destination.resolve().relative_to(UPLOAD_DIR).as_posix()
     return f"/uploads/{relative_path}"
@@ -819,6 +952,62 @@ async def save_upload_file(
 ) -> dict:
     upload_types = allowed_types or ALLOWED_UPLOAD_TYPES
     extension = validate_upload_metadata(upload.filename or "", expected_extensions, allowed_types=upload_types)
+    if UPLOAD_STORAGE_BACKEND == "database":
+        total_size = 0
+        first_chunk = b""
+        content = bytearray()
+        client_mime_type = (upload.content_type or "").strip().lower()
+        try:
+            while True:
+                chunk = await upload.read(UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                if not first_chunk:
+                    first_chunk = chunk[: min(len(chunk), 8192)]
+                total_size += len(chunk)
+                if total_size > MAX_UPLOAD_SIZE:
+                    security_log(
+                        "blocked_upload",
+                        level=logging.WARNING,
+                        reason="file_too_large",
+                        filename=Path(upload.filename or "").name,
+                        size=total_size,
+                    )
+                    raise HTTPException(status_code=413, detail="Uploaded file exceeds the 5 MB limit.")
+                content.extend(chunk)
+        finally:
+            await upload.close()
+
+        detected_mime_type = sniff_file_type(first_chunk)
+        if not detected_mime_type:
+            security_log(
+                "blocked_upload",
+                level=logging.WARNING,
+                reason="unverified_type",
+                filename=Path(upload.filename or "").name,
+            )
+            raise HTTPException(status_code=415, detail="Could not verify the uploaded file type.")
+
+        validate_detected_mime(extension, detected_mime_type, allowed_types=upload_types)
+        if client_mime_type and client_mime_type not in upload_types[extension]["mime_types"]:
+            security_log(
+                "blocked_upload",
+                level=logging.WARNING,
+                reason="client_mime_mismatch",
+                filename=Path(upload.filename or "").name,
+                client_mime_type=client_mime_type,
+                detected_mime_type=detected_mime_type,
+            )
+            raise HTTPException(status_code=415, detail="Client MIME type does not match the allowed file type.")
+
+        return store_upload_object(
+            original_name=upload.filename or "",
+            extension=extension,
+            file_bytes=bytes(content),
+            mime_type=detected_mime_type,
+            upload_subdir=upload_subdir,
+        )
+
     destination = safe_upload_path(extension, subdirectory=upload_subdir)
     total_size = 0
     first_chunk = b""
@@ -952,6 +1141,15 @@ def save_upload_bytes(
             detected_mime_type=detected_mime_type,
         )
         raise HTTPException(status_code=415, detail="Client MIME type does not match the allowed file type.")
+
+    if UPLOAD_STORAGE_BACKEND == "database":
+        return store_upload_object(
+            original_name=working_filename,
+            extension=extension,
+            file_bytes=working_bytes,
+            mime_type=detected_mime_type,
+            upload_subdir=upload_subdir,
+        )
 
     destination = safe_upload_path(extension, subdirectory=upload_subdir)
     destination.write_bytes(working_bytes)
@@ -1104,6 +1302,9 @@ def resolve_upload_path(upload_path: Optional[str]) -> Optional[Path]:
     if not raw_path:
         return None
 
+    if UPLOAD_STORAGE_BACKEND == "database":
+        return materialize_database_upload(raw_path)
+
     absolute_path = (UPLOAD_DIR / raw_path[len("/uploads/"):]).resolve()
     try:
         absolute_path.relative_to(UPLOAD_DIR)
@@ -1114,6 +1315,30 @@ def resolve_upload_path(upload_path: Optional[str]) -> Optional[Path]:
 
 
 def delete_uploaded_path(upload_path: Optional[str]) -> None:
+    if UPLOAD_STORAGE_BACKEND == "database":
+        raw_path = normalize_upload_url_path(upload_path)
+        if not raw_path:
+            return
+        db = SessionLocal()
+        try:
+            upload_object = db.query(UploadObject).filter(UploadObject.path == raw_path).first()
+            if upload_object:
+                db.delete(upload_object)
+                db.commit()
+        except Exception:
+            db.rollback()
+            report_logger.warning("Could not delete upload object: %s", upload_path, exc_info=True)
+        finally:
+            db.close()
+
+        cache_path = database_upload_cache_path(raw_path)
+        try:
+            if cache_path and cache_path.exists():
+                cache_path.unlink()
+        except OSError:
+            report_logger.warning("Could not delete upload cache path: %s", upload_path, exc_info=True)
+        return
+
     absolute_path = resolve_upload_path(upload_path)
     if not absolute_path:
         return
@@ -1168,6 +1393,20 @@ def cleanup_deleted_item_uploads(item_id: int, *, delay_seconds: int = SOFT_DELE
 
 
 def latest_uploaded_image_path() -> Optional[Path]:
+    if UPLOAD_STORAGE_BACKEND == "database":
+        filters = [UploadObject.path.like(f"%{extension}") for extension in IMAGE_UPLOAD_EXTENSIONS]
+        db = SessionLocal()
+        try:
+            upload_object = (
+                db.query(UploadObject)
+                .filter(or_(*filters))
+                .order_by(UploadObject.created_at.desc())
+                .first()
+            )
+            return materialize_database_upload(upload_object.path) if upload_object else None
+        finally:
+            db.close()
+
     image_candidates = [
         path for path in UPLOAD_DIR.iterdir()
         if path.is_file() and path.suffix.lower() in IMAGE_UPLOAD_EXTENSIONS

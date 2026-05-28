@@ -1,191 +1,693 @@
 # School Lost and Found
 
-A local FastAPI-based lost-and-found system for school use. The backend serves the API and frontend together, stores data in SQLite, saves uploaded files locally, and can optionally connect to Ollama for AI-assisted tagging and chat.
+FastAPI lost-and-found app designed for a Raspberry Pi Docker Swarm cluster.
 
-## Requirements
+This README explains the full beginner deployment path: what Swarm does, why the app can run on multiple Pis, why PostgreSQL is separate, how to deploy the stack, and how to verify that the replicas are actually running.
 
-- Python 3.10 or newer
-- `pip`
-- Docker and Docker Compose plugin for container deployment (optional)
-- Ollama for AI features (optional)
-- Node.js is not required for the current frontend
+## Mental Model
 
-## Project Structure
+Docker Swarm is a cluster manager for containers.
+
+That means Swarm can take one service, such as this web app, and run multiple copies of it across several Raspberry Pis. Those copies are called replicas.
 
 ```text
-backend/
-frontend/
-data/
-uploads/
-logs/
-tests/
-Dockerfile
-docker-compose.yml
-deploy.sh
-deploy.ps1
-lostfound.service
-nginx.conf
-requirements.txt
-start.sh
+Users
+  |
+  v
+Swarm Routing Mesh
+  |
+  v
+web replicas across Pis
+  |
+  v
+shared PostgreSQL database
 ```
 
-Runtime data is stored in:
+In this project:
 
-- `data/lost_found.db` for SQLite
-- `uploads/` for user files
-- `logs/` for runtime logs
+- Swarm replicates the `web` containers across Raspberry Pis.
+- Swarm load balances traffic automatically through its routing mesh.
+- The web app is stateless, meaning a web container does not need to keep permanent data on its own local filesystem.
+- PostgreSQL is the shared state layer, meaning it stores users, sessions, items, claims, uploads, and other important data.
+- Users can hit different Pis and still see the same data because every web replica connects to the same PostgreSQL database service named `db`.
 
-## Quick Start
+Swarm's job is to place containers, restart containers, and route traffic. PostgreSQL's job is to store the data. Swarm is not a database, and PostgreSQL is not the traffic router.
+
+Example:
+
+```text
+User A opens http://192.168.1.101:8000
+User B opens http://192.168.1.102:8000
+
+Swarm may send those requests to different web replicas.
+Both replicas read and write the same PostgreSQL database.
+Both users see the same lost-and-found data.
+```
+
+Login sessions work the same way. The browser keeps a session token, and any web replica can check that token against the shared PostgreSQL database. Uploaded images are stored through the database-backed upload path too, so a user does not lose access just because a different replica handles the next request.
+
+Swarm does not sync files or databases between Pis. Swarm moves and restarts containers. PostgreSQL stores the shared data.
+
+## What This Stack Runs
+
+```text
+backend/              FastAPI app, database models, AI helpers
+frontend/             Static frontend served by FastAPI
+tests/                Python unit tests
+Dockerfile            ARM-compatible Python app image
+docker-compose.yml    Docker Swarm stack file
+requirements.txt      Python dependencies
+.env.example          Local development defaults
+```
+
+The Swarm stack contains:
+
+- `web`: the replicated FastAPI/Gunicorn service.
+- `db`: one PostgreSQL database service.
+- `lostfound_net`: an overlay network that lets containers talk across Pis.
+- `db_data`: a Docker volume for PostgreSQL data.
+
+Local-only runtime directories such as `data/`, `uploads/`, and `logs/` are not part of the Swarm architecture.
+
+## Before You Start
+
+You need:
+
+1. At least two Raspberry Pis on the same network.
+2. 64-bit Raspberry Pi OS, because the image command below builds for `linux/arm64`.
+3. SSH access to each Pi.
+4. A stable LAN IP for the manager Pi, such as `192.168.1.100`.
+5. A Docker Hub account or another container registry that every Pi can pull from.
+
+In the examples below:
+
+- Manager Pi IP: `192.168.1.100`
+- Stack name: `mystack`
+- Docker image: `yourname/lostfound-web:latest`
+
+Replace those values with your real values.
+
+## Step 1: Install Docker On Every Pi
+
+Do this on the manager Pi and on every worker Pi.
+
+This is the simple beginner/lab install path. For a stricter production install, use Docker's official apt repository instructions for Debian/Raspberry Pi OS.
 
 ```bash
-git clone <https://github.com/Jasonilization/Lost-and-found>
-cd Lost-and-found
-chmod +x deploy.sh
-./deploy.sh
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+sudo usermod -aG docker $USER
 ```
 
-`deploy.sh` will:
+Log out and back in, or reboot:
 
-- create `.env` from `.env.example` if it does not exist
-- create `.venv` if needed
-- install Python dependencies
-- create `uploads/`, `logs/`, and `data/`
-- initialize the SQLite database safely
-- start the backend with Gunicorn
-
-The app will then be available on `http://localhost:8000` unless you change `PORT` in `.env`.
-
-## Environment
-
-The app reads deployment settings from `.env`. A starter file is included in `.env.example`.
-
-Important variables:
-
-```env
-PORT=8000
-WEB_CONCURRENCY=2
-HOST=0.0.0.0
-DATA_DIR=./data
-DATABASE_PATH=./data/lost_found.db
-UPLOAD_DIR=./uploads
-LOG_DIR=./logs
-ADMIN_USERNAME=
-ADMIN_PASSWORD=
-OLLAMA_HOST=http://localhost:11434
-OLLAMA_MODEL=llama3:8b
-OLLAMA_TEXT_MODEL=llama3:8b
-OLLAMA_IMAGE_MODEL=llava
-AI_CHAT_MODEL=llama3:8b
+```bash
+sudo reboot
 ```
 
-If `ADMIN_USERNAME` and `ADMIN_PASSWORD` are set and no admin exists yet, the backend will bootstrap the first admin account on startup.
+After reconnecting, check Docker:
 
-For LAN or external Ollama servers, set `OLLAMA_HOST` to the reachable server URL, such as `http://192.168.1.20:11434`. For Docker on a host-running Ollama, set it to the host address reachable from the container. The app detects downloaded models through Ollama's HTTP API instead of local model paths.
+```bash
+docker version
+docker run hello-world
+```
 
-## Docker Run
+If `docker version` says permission denied, your user group change has not taken effect yet. Log out and back in again.
+
+## Step 2: Initialize Swarm On The Manager Pi
+
+Pick one Pi to be the manager.
+
+The manager is the control node. It stores the Swarm cluster state and decides where services should run. It can also run containers unless you later tell Docker not to.
+
+Run this only on the manager Pi:
+
+```bash
+docker swarm init --advertise-addr 192.168.1.100
+```
+
+Use the manager Pi's real LAN IP after `--advertise-addr`.
+
+Do not use `127.0.0.1`.
+Do not use a temporary IP that may change tomorrow.
+For a home or school network, it is best to reserve the manager Pi's IP in your router.
+
+## Step 3: Join Worker Pis
+
+On the manager Pi, print the worker join command:
+
+```bash
+docker swarm join-token worker
+```
+
+Docker will print a command that looks like this:
+
+```bash
+docker swarm join --token SWMTKN-1-exampletoken 192.168.1.100:2377
+```
+
+Copy the command Docker prints.
+
+Then run that copied command on each worker Pi.
+
+A worker Pi runs containers when the manager asks it to. A worker does not control the cluster.
+
+Do not run `docker swarm init` on worker Pis. Workers use `docker swarm join`.
+
+## Step 4: Verify The Cluster
+
+Run this on the manager Pi:
+
+```bash
+docker node ls
+```
+
+You should see one row for each Pi.
+
+Important words in the output:
+
+- `Ready`: Docker can talk to that node.
+- `Active`: Swarm is allowed to run containers on that node.
+- `Leader`: this manager is currently leading the Swarm control plane.
+- `Worker`: a node that runs containers but does not manage the cluster. In `docker node ls`, workers usually have an empty `MANAGER STATUS` column.
+
+If a worker is missing, it probably did not join successfully or cannot reach the manager on the network.
+
+## Step 5: Choose The Pi That Stores PostgreSQL Data
+
+The database is intentionally separate from the web replicas.
+
+The web replicas are disposable. Swarm may restart them, replace them, or move them to another Pi. The database should live on one known Pi with persistent storage.
+
+Pick the Pi that should hold the PostgreSQL Docker volume. A Pi with an SSD is better than a Pi using only an SD card.
+
+First, find the node name:
+
+```bash
+docker node ls
+```
+
+Then label that node:
+
+```bash
+docker node update --label-add lostfound.db=true <DB_NODE_NAME>
+```
+
+Example:
+
+```bash
+docker node update --label-add lostfound.db=true pi-manager
+```
+
+The `docker-compose.yml` file requires this label. Without it, the `db` service will stay pending because Swarm does not know which Pi is allowed to run PostgreSQL.
+
+## Step 6: Build And Push The Web Image
+
+This part is very important:
+
+Swarm does not build images automatically.
+
+When you run `docker stack deploy`, Swarm tells each node to run an image. Every node must be able to pull that same image.
+
+Recommended approach:
+
+1. Build the image for Raspberry Pi ARM64.
+2. Push it to Docker Hub or another registry.
+3. Tell the stack to use that image.
+
+From the project root, run:
+
+```bash
+docker login
+docker buildx build --platform linux/arm64 \
+  -t yourname/lostfound-web:latest \
+  --push .
+```
+
+Replace `yourname` with your Docker Hub username or registry namespace.
+
+Why `linux/arm64` matters:
+
+- Raspberry Pi OS 64-bit runs ARM64.
+- Many laptops build `linux/amd64` images by default.
+- An AMD64 image will not run correctly on a Raspberry Pi.
+- `docker buildx build --platform linux/arm64 --push` builds the Pi-compatible image and pushes it where the Pis can pull it.
+
+For a private registry or private Docker Hub image, make sure every node can pull the image. You may need to log in on each Pi or deploy with `--with-registry-auth`.
+
+## Step 7: Set Environment Variables
+
+Run these on the manager Pi before deploying the stack:
+
+```bash
+export APP_IMAGE='yourname/lostfound-web:latest'
+export POSTGRES_PASSWORD='change-this-to-a-long-random-database-password'
+export ADMIN_USERNAME='admin'
+export ADMIN_PASSWORD='change-this-admin-password'
+export WEB_REPLICAS=2
+export PUBLISHED_PORT=8000
+```
+
+What each variable means:
+
+- `APP_IMAGE`: the web image every Pi will pull. This comes from the image you pushed in the previous step.
+- `POSTGRES_PASSWORD`: the PostgreSQL password. The `db` service uses it, and the `web` service uses it in `DATABASE_URL` to connect to `db`.
+- `ADMIN_USERNAME`: the first admin username. The app uses this only to bootstrap an admin when no admin exists yet.
+- `ADMIN_PASSWORD`: the first admin password. Use a real password, not the example value.
+- `WEB_REPLICAS`: how many web containers Swarm should run.
+- `PUBLISHED_PORT`: the port users open in their browser on any Swarm node.
+
+Important:
+
+- Set `POSTGRES_PASSWORD` before the first deploy.
+- Do not casually change `POSTGRES_PASSWORD` after PostgreSQL has already created its database volume.
+- This stack has `max_replicas_per_node: 1` for the web service, so `WEB_REPLICAS=2` needs at least two available nodes. `WEB_REPLICAS=5` needs at least five available nodes unless you edit that placement rule.
+
+## Step 8: Deploy The Stack
+
+Run this on the manager Pi from the project directory:
+
+```bash
+docker stack deploy -c docker-compose.yml mystack
+```
+
+If the image is private, use:
+
+```bash
+docker stack deploy --with-registry-auth -c docker-compose.yml mystack
+```
+
+This command creates:
+
+- An overlay network named `mystack_lostfound_net`.
+- A PostgreSQL service named `mystack_db`.
+- A replicated web service named `mystack_web`.
+- The published app port on the Swarm routing mesh.
+
+Swarm then distributes the web replicas across available Pis automatically.
+
+## Step 9: Open The App
+
+Open the app from any Swarm node IP:
+
+```text
+http://<ANY_SWARM_NODE_IP>:8000
+```
+
+Examples:
+
+```text
+http://192.168.1.100:8000
+http://192.168.1.101:8000
+http://192.168.1.102:8000
+```
+
+The Pi you connect to does not have to be the Pi that is running the web replica that handles your request.
+
+That is Swarm's routing mesh:
+
+1. A user connects to port `8000` on any Pi in the Swarm.
+2. Swarm accepts the request.
+3. Swarm forwards the request to a healthy `web` replica.
+4. The `web` replica reads or writes data in the shared PostgreSQL database.
+
+That is why users can hit different Pis and still see the same data.
+
+## Step 10: Verify The Deployment
+
+Run these on the manager Pi.
+
+List services:
+
+```bash
+docker service ls
+```
+
+Look for:
+
+```text
+mystack_web   2/2
+mystack_db    1/1
+```
+
+List all stack tasks:
+
+```bash
+docker stack ps mystack
+```
+
+See which Pi runs each web replica:
+
+```bash
+docker service ps mystack_web
+```
+
+Cleaner view:
+
+```bash
+docker service ps mystack_web --format 'table {{.Name}}\t{{.Node}}\t{{.CurrentState}}\t{{.Error}}'
+```
+
+See where PostgreSQL is running:
+
+```bash
+docker service ps mystack_db --format 'table {{.Name}}\t{{.Node}}\t{{.CurrentState}}\t{{.Error}}'
+```
+
+Read web logs from all replicas:
+
+```bash
+docker service logs mystack_web
+```
+
+Read database logs:
+
+```bash
+docker service logs mystack_db
+```
+
+Check the app health endpoint:
+
+```bash
+curl http://<ANY_SWARM_NODE_IP>:8000/health
+```
+
+Confirm the web service connects to PostgreSQL by service name:
+
+```bash
+docker service inspect mystack_web --format '{{range .Spec.TaskTemplate.ContainerSpec.Env}}{{println .}}{{end}}' | grep DATABASE_URL
+```
+
+It should contain:
+
+```text
+@db:5432/lostfound
+```
+
+It should not contain:
+
+```text
+localhost
+```
+
+Inside a container, `localhost` means that same container, not the database service.
+
+## Step 11: Scale Web Replicas
+
+To run five web replicas:
+
+```bash
+docker service scale mystack_web=5
+```
+
+Then check placement:
+
+```bash
+docker service ps mystack_web --format 'table {{.Name}}\t{{.Node}}\t{{.CurrentState}}\t{{.Error}}'
+```
+
+Swarm will create or remove web containers until the actual replica count matches the desired replica count.
+
+Swarm will also redistribute replicas automatically when nodes are available.
+
+Remember:
+
+- Scaling `mystack_web` adds more web app containers.
+- It does not create more databases.
+- All web replicas still use the same shared PostgreSQL database.
+- Because this stack uses `max_replicas_per_node: 1`, five web replicas need five available Swarm nodes unless you change that rule.
+
+## Step 12: Test Failover
+
+A simple failover test:
+
+1. Make sure you have more available nodes than required web replicas.
+2. Turn off one worker Pi that is running a web replica.
+3. Wait for Swarm to notice the node is down.
+4. Check where the web replicas are running now.
+
+Run:
+
+```bash
+docker service ps mystack_web
+```
+
+You should see Swarm start a replacement replica on another available Pi.
+
+If a replacement stays `Pending`, check whether there is another available node that is allowed to run a web replica. With `max_replicas_per_node: 1`, Swarm will not place two web replicas on the same Pi.
+
+The important idea:
+
+- A web container can disappear.
+- Swarm can create a new one somewhere else.
+- Users still see the same data because the data is in PostgreSQL, not inside the web container.
+
+## Important Warnings
+
+Read these before changing the stack:
+
+- Do not store uploads on the local container filesystem in Swarm.
+- Do not use SQLite for replicated web replicas.
+- Swarm does not sync files automatically between Pis.
+- Database state must be shared.
+- Containers may move between Pis at any time.
+- Do not scale `mystack_db` like the web service. This compose file is designed for one PostgreSQL database service with one persistent volume.
+- Back up the PostgreSQL volume. Swarm scheduling is not the same thing as database backup.
+
+Why these warnings matter:
+
+- If replica A saves a file on Pi 1, replica B on Pi 2 will not automatically have that file.
+- If each replica uses its own SQLite file, users will see different data depending on which replica handled the request.
+- If a container is recreated, files stored only inside that container can disappear.
+
+This project avoids those problems in Swarm by using:
+
+- `DATABASE_URL=postgresql+psycopg://...@db:5432/lostfound`
+- `UPLOAD_STORAGE_BACKEND=database`
+- `LOG_TO_STDOUT=1`
+
+## Beginner Troubleshooting
+
+### Worker stuck joining
+
+Symptoms:
+
+- `docker swarm join ...` hangs or fails.
+- The worker does not appear in `docker node ls`.
+
+Check:
+
+```bash
+docker swarm join-token worker
+docker node ls
+```
+
+Common fixes:
+
+- Make sure the worker can ping the manager IP.
+- Make sure you used the manager's real LAN IP, not `127.0.0.1`.
+- Make sure the manager allows port `2377/tcp`.
+- Make sure the worker and manager are on the same network or can route to each other.
+
+### Required Swarm ports are blocked
+
+Swarm needs these ports between nodes:
+
+```text
+2377/tcp   cluster management, mainly workers talking to managers
+7946/tcp   node discovery and control traffic
+7946/udp   node discovery and control traffic
+4789/udp   overlay network traffic
+```
+
+If you use `ufw`, examples are:
+
+```bash
+sudo ufw allow 2377/tcp
+sudo ufw allow 7946/tcp
+sudo ufw allow 7946/udp
+sudo ufw allow 4789/udp
+```
+
+Port `2377/tcp` is required on manager nodes. The other Swarm ports are needed between Swarm nodes.
+
+### Wrong advertise IP
+
+Symptoms:
+
+- Workers cannot join.
+- Nodes joined before, but now cannot communicate.
+- You initialized Swarm with the wrong network interface or an IP that changed.
+
+Check the manager IP:
+
+```bash
+ip addr
+docker node ls
+```
+
+For a fresh lab cluster, the simplest fix is often to recreate the Swarm with the correct stable IP. Do this only if you are okay removing the current Swarm setup:
+
+```bash
+docker stack rm mystack
+docker swarm leave --force
+docker swarm init --advertise-addr 192.168.1.100
+```
+
+Then rejoin the workers using a fresh `docker swarm join-token worker` command.
+
+### Image pull failures
+
+Symptoms:
+
+- `mystack_web` shows `0/2`, `1/2`, or tasks restarting.
+- `docker service ps mystack_web` shows image pull errors.
+
+Check:
+
+```bash
+docker service ps mystack_web --no-trunc
+docker service logs mystack_web
+```
+
+Common fixes:
+
+- Confirm the image name in `APP_IMAGE` is correct.
+- Confirm the image was pushed to Docker Hub or your registry.
+- Confirm the image supports Raspberry Pi ARM64.
+- If the image is private, run `docker login` and redeploy with `--with-registry-auth`.
+- Try pulling the image directly on a worker Pi:
+
+```bash
+docker pull yourname/lostfound-web:latest
+```
+
+### Replicas not starting
+
+Check service state:
+
+```bash
+docker service ls
+docker stack ps mystack
+docker service ps mystack_web --no-trunc
+docker service ps mystack_db --no-trunc
+```
+
+Common causes:
+
+- The database node label is missing.
+- `POSTGRES_PASSWORD` was not set before deploy.
+- The image cannot be pulled.
+- There are not enough nodes for `WEB_REPLICAS` because `max_replicas_per_node: 1` is enabled.
+- The database is still starting.
+
+Check whether the database label exists:
+
+```bash
+docker node inspect <DB_NODE_NAME> --format '{{json .Spec.Labels}}'
+```
+
+If needed, add it:
+
+```bash
+docker node update --label-add lostfound.db=true <DB_NODE_NAME>
+```
+
+### App opens on one Pi but not another
+
+Check:
+
+- The app port is `PUBLISHED_PORT`, default `8000`.
+- Your firewall allows that port on the Pi you are trying to open.
+- The node is still in the Swarm and is `Ready`.
+
+Commands:
+
+```bash
+docker node ls
+docker service ls
+curl http://<ANY_SWARM_NODE_IP>:8000/health
+```
+
+### How to check logs
+
+Web logs:
+
+```bash
+docker service logs mystack_web
+```
+
+Database logs:
+
+```bash
+docker service logs mystack_db
+```
+
+Follow logs live:
+
+```bash
+docker service logs -f mystack_web
+```
+
+See detailed task errors:
+
+```bash
+docker service ps mystack_web --no-trunc
+```
+
+## Rolling Updates
+
+Build and push a new ARM image tag:
+
+```bash
+docker buildx build --platform linux/arm64 \
+  -t yourname/lostfound-web:2026-05-28 \
+  --push .
+```
+
+Update the web service:
+
+```bash
+docker service update --image yourname/lostfound-web:2026-05-28 mystack_web
+docker service ps mystack_web
+docker service logs mystack_web
+```
+
+## Local Development
+
+Local development can still use SQLite and filesystem uploads:
 
 ```bash
 cp .env.example .env
-docker-compose up --build
-```
-
-The compose setup:
-
-- builds the app from `Dockerfile`
-- exposes port `8000`
-- persists `uploads/`
-- persists `logs/`
-- persists `data/` so the database survives restarts
-
-## Dev Mode
-
-For local development with Uvicorn:
-
-```bash
-./start.sh
-```
-
-Or manually:
-
-```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
-export HOST=0.0.0.0
-export PORT=8000
 uvicorn backend.backend:app --host 0.0.0.0 --port 8000
 ```
 
-The frontend is served by the backend at `/`.
-
-## Production Notes
-
-- `deploy.sh` is the simplest Linux deployment path.
-- `lostfound.service` is included as a systemd starting point and is recommended for persistent service management.
-- `nginx.conf` is optional and can be used as a reverse proxy in front of Gunicorn.
-- `/uploads` can be served directly by Nginx if you use the sample config.
-- Ollama is optional. If it is not running, the app still starts and falls back to non-AI behavior where supported.
-
-## Systemd
-
-Example service install flow:
-
-```bash
-sudo cp lostfound.service /etc/systemd/system/lostfound.service
-sudo systemctl daemon-reload
-sudo systemctl enable lostfound
-sudo systemctl start lostfound
-```
-
-Update `WorkingDirectory`, `EnvironmentFile`, and `ExecStart` inside `lostfound.service` to match your server path.
-
-## Nginx
-
-The included `nginx.conf` proxies requests to `127.0.0.1:8000` and serves `/uploads/` directly.
-
-Typical flow:
-
-```bash
-sudo cp nginx.conf /etc/nginx/sites-available/lostfound
-sudo ln -s /etc/nginx/sites-available/lostfound /etc/nginx/sites-enabled/lostfound
-sudo nginx -t
-sudo systemctl reload nginx
-```
-
-Update the uploads alias path to match your deployment directory.
-
-## Testing
+Run tests:
 
 ```bash
 .venv/bin/python -m unittest discover -s tests
 ```
 
-## Troubleshooting
+SQLite is for local development only. Do not use SQLite for a replicated Swarm deployment.
 
-If port `8000` is already in use:
+## Ollama
 
-- change `PORT` in `.env`
-- or stop the process already using that port
+AI features are optional.
 
-If Ollama is not running:
+In Swarm, `OLLAMA_HOST=http://localhost:11434` is usually wrong because `localhost` means the web container itself.
 
-- the app should still boot
-- AI tagging and AI chat features may fall back or be limited
-- set `OLLAMA_HOST` for LAN/external servers, or start local Ollama with `ollama serve`
+Use one of these instead:
 
-If uploaded images do not appear:
+```bash
+export OLLAMA_HOST=http://<OLLAMA_NODE_LAN_IP>:11434
+```
 
-- confirm `UPLOAD_DIR` exists
-- confirm `uploads/background.png` and other user files are present where the backend expects them
-- if using Docker, confirm `./uploads:/app/uploads` is mounted
+or deploy an Ollama service on the overlay network and use:
 
-If the database seems to reset:
-
-- confirm `DATABASE_PATH` points into `data/`
-- if using Docker, confirm `./data:/app/data` is mounted
-
-If logs are missing:
-
-- confirm `LOG_DIR` exists
-- confirm the process user can write to `logs/`
+```bash
+export OLLAMA_HOST=http://ollama:11434
+```

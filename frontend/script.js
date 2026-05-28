@@ -7,6 +7,8 @@ const SIDEBAR_MODE_STORAGE_KEY = "lostfound_sidebar_mode";
 const SIDEBAR_WIDTH_STORAGE_KEY = "lostfound_sidebar_width";
 const ADVANCED_MODE_STORAGE_KEY = "lostfound_advanced_mode";
 const TUTORIAL_STORAGE_KEY = "lostfound_tutorial_seen";
+const ACTIVITY_STORAGE_KEY = "lostfound_activity_tracker";
+const ACTIVITY_DISMISSED_STORAGE_KEY = "lostfound_activity_dismissed";
 const INITIALS_PATTERN = /^[a-z]+(?:\.[a-z]+)+$/;
 const THEME_MODES = ["dark", "light"];
 const SUPPORTED_LANGUAGES = ["en", "zh-CN", "th"];
@@ -59,11 +61,57 @@ const HAPTIC_PATTERNS = {
 const ROOM_SELECTION_MIN_DISTANCE = 0.004;
 const ROOM_SELECTION_SMOOTHING_EPSILON = 0.006;
 const ROOM_SELECTION_MAX_POINTS = 240;
+const ACTIVITY_HISTORY_LIMIT = 12;
+const ACTIVITY_COMPLETED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const ACTIVITY_STALE_RUNNING_MS = 90 * 60 * 1000;
 const savedSidebarMode = localStorage.getItem(SIDEBAR_MODE_STORAGE_KEY);
 const savedSidebarWidth = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY) || "");
 const initialSidebarWidth = Number.isFinite(savedSidebarWidth)
   ? Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(savedSidebarWidth)))
   : SIDEBAR_DEFAULT_WIDTH;
+
+function safeParseStoredJson(key, fallback) {
+  try {
+    const rawValue = localStorage.getItem(key);
+    if (!rawValue) return fallback;
+    const parsed = JSON.parse(rawValue);
+    return parsed ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function loadStoredActivities() {
+  const stored = safeParseStoredJson(ACTIVITY_STORAGE_KEY, []);
+  if (!Array.isArray(stored)) return [];
+  const now = Date.now();
+  return stored
+    .filter((activity) => activity && typeof activity === "object")
+    .map((activity) => {
+      const updatedAt = Date.parse(activity.updatedAt || activity.createdAt || "") || now;
+      if (activity.status === "running" && now - updatedAt > ACTIVITY_STALE_RUNNING_MS) {
+        return {
+          ...activity,
+          status: "warning",
+          stage: activity.stage || "Paused",
+          detail: activity.detail || "This task was still running when the page was reopened.",
+          completedAt: activity.completedAt || new Date(updatedAt).toISOString(),
+        };
+      }
+      return activity;
+    })
+    .filter((activity) => {
+      if (!activity.completedAt) return true;
+      const completedAt = Date.parse(activity.completedAt);
+      return Number.isNaN(completedAt) || now - completedAt <= ACTIVITY_COMPLETED_RETENTION_MS;
+    })
+    .slice(0, ACTIVITY_HISTORY_LIMIT);
+}
+
+function loadDismissedActivityKeys() {
+  const stored = safeParseStoredJson(ACTIVITY_DISMISSED_STORAGE_KEY, []);
+  return new Set(Array.isArray(stored) ? stored.filter((value) => typeof value === "string") : []);
+}
 
 const translations = {
   en: {
@@ -101,6 +149,7 @@ const translations = {
     "theme.aurora": "Aurora",
     "theme.transparent": "Transparent",
     "nav.reports": "Reports",
+    "nav.dashboard": "Dashboard",
     "nav.room": "Lost & Found Room",
     "nav.returned": "Recently Returned",
     "nav.query": "Query",
@@ -232,6 +281,7 @@ const translations = {
     "theme.aurora": "极光",
     "theme.transparent": "透明",
     "nav.reports": "报告",
+    "nav.dashboard": "仪表盘",
     "nav.room": "失物招领室",
     "nav.returned": "最近归还",
     "nav.query": "聊天",
@@ -432,6 +482,7 @@ const translationEnhancements = {
     "theme.aurora": "ออโรรา",
     "theme.transparent": "โปร่งใส",
     "nav.reports": "รายงาน",
+    "nav.dashboard": "แดชบอร์ด",
     "nav.room": "ห้องของหายและของพบ",
     "nav.returned": "เพิ่งถูกรับคืน",
     "nav.query": "สนทนา",
@@ -660,6 +711,9 @@ const state = {
   notifications: [],
   notificationsLoadedOnce: false,
   unreadNotifications: 0,
+  activities: loadStoredActivities(),
+  dismissedActivityKeys: loadDismissedActivityKeys(),
+  activityCollapsed: true,
   claims: [],
   adminUsers: [],
   adminItems: [],
@@ -677,7 +731,7 @@ const state = {
   avatarVersion: Date.now(),
   searchTimer: null,
   activeClaimItem: null,
-  currentView: "reports",
+  currentView: "dashboard",
   currentItemId: Number(localStorage.getItem(CURRENT_ITEM_STORAGE_KEY) || "") || null,
   currentQueryItem: null,
   queryItems: [],
@@ -732,6 +786,17 @@ const state = {
     report: null,
     query: null,
     profile: null,
+    claim: null,
+    room: null,
+    analysis: null,
+  },
+  progressActivityIds: {
+    report: null,
+    query: null,
+    profile: null,
+    claim: null,
+    room: null,
+    analysis: null,
   },
 };
 
@@ -752,6 +817,7 @@ const authSubmitLabel = document.querySelector("#authSubmitLabel");
 const loginTab = document.querySelector("#loginTab");
 const registerTab = document.querySelector("#registerTab");
 
+const showDashboardButton = document.querySelector("#showDashboardButton");
 const showReportsButton = document.querySelector("#showReportsButton");
 const showReportItemButton = document.querySelector("#showReportItemButton");
 const showRoomButton = document.querySelector("#showRoomButton");
@@ -764,6 +830,15 @@ const showAdminButton = document.querySelector("#showAdminButton");
 const newWindowButton = document.querySelector("#newWindowButton");
 const newWindowMenu = document.querySelector("#newWindowMenu");
 const newWindowMenuButtons = Array.from(document.querySelectorAll("[data-new-window-target]"));
+const topbarCurrentSection = document.querySelector("#topbarCurrentSection");
+const topbarBreadcrumbs = document.querySelector("#topbarBreadcrumbs");
+const sidebarCurrentSection = document.querySelector("#sidebarCurrentSection");
+const sidebarBreadcrumbs = document.querySelector("#sidebarBreadcrumbs");
+const topbarReportButton = document.querySelector("#topbarReportButton");
+const topbarRefreshButton = document.querySelector("#topbarRefreshButton");
+const topbarAccountButton = document.querySelector("#topbarAccountButton");
+const topbarAccountAvatar = document.querySelector("#topbarAccountAvatar");
+const topbarAccountName = document.querySelector("#topbarAccountName");
 let workspaceLayout = document.querySelector("#workspace");
 let windowWorkspace = document.querySelector("#windowWorkspace");
 let sidebarLauncherButton = document.querySelector("#sidebarLauncherButton");
@@ -797,6 +872,7 @@ const notificationHome = notificationWrap
   : null;
 const mobileNotificationSlot = document.querySelector("#mobileNotificationSlot");
 const weeklyReturnedCount = document.querySelector("#weeklyReturnedCount");
+let dashboardSection = document.querySelector("#dashboardSection");
 let reportsSection = document.querySelector("#reportsSection");
 let reportsPanel = document.querySelector("#reportsPanel");
 let roomSection = document.querySelector("#roomSection");
@@ -840,6 +916,20 @@ const searchInput = document.querySelector("#searchInput");
 const searchLoading = document.querySelector("#searchLoading");
 const searchWarningCard = document.querySelector("#searchWarningCard");
 const refreshButton = document.querySelector("#refreshButton");
+
+const dashboardReportsToday = document.querySelector("#dashboardReportsToday");
+const dashboardReportsTodayMeta = document.querySelector("#dashboardReportsTodayMeta");
+const dashboardPendingClaims = document.querySelector("#dashboardPendingClaims");
+const dashboardReturnedWeek = document.querySelector("#dashboardReturnedWeek");
+const dashboardRecoveredTotal = document.querySelector("#dashboardRecoveredTotal");
+const dashboardActiveQueries = document.querySelector("#dashboardActiveQueries");
+const dashboardNotifications = document.querySelector("#dashboardNotifications");
+const dashboardApprovalRate = document.querySelector("#dashboardApprovalRate");
+const dashboardActiveReports = document.querySelector("#dashboardActiveReports");
+const dashboardActivityList = document.querySelector("#dashboardActivityList");
+const dashboardReportButton = document.querySelector("#dashboardReportButton");
+const dashboardRefreshButton = document.querySelector("#dashboardRefreshButton");
+const dashboardLinkButtons = Array.from(document.querySelectorAll("[data-dashboard-target]"));
 
 const roomAdminPanel = document.querySelector("#roomAdminPanel");
 const roomLabelInput = document.querySelector("#roomLabelInput");
@@ -981,6 +1071,12 @@ const claimSuccessTitle = document.querySelector("#claimSuccessTitle");
 const claimSuccessMessage = document.querySelector("#claimSuccessMessage");
 const claimSuccessViewButton = document.querySelector("#claimSuccessViewButton");
 const claimSuccessDismissButton = document.querySelector("#claimSuccessDismissButton");
+const activityTracker = document.querySelector("#activityTracker");
+const activityTrackerToggle = document.querySelector("#activityTrackerToggle");
+const activityTrackerSummary = document.querySelector("#activityTrackerSummary");
+const activityTrackerCount = document.querySelector("#activityTrackerCount");
+const activityClearButton = document.querySelector("#activityClearButton");
+const activityList = document.querySelector("#activityList");
 const confirmDialog = document.querySelector("#confirmDialog");
 const confirmForm = document.querySelector("#confirmForm");
 const confirmTitle = document.querySelector("#confirmTitle");
@@ -1045,6 +1141,7 @@ let panelElements = {};
 function refreshPanelElements() {
   panelElements = {
     sidebar: sidebarPanel,
+    dashboard: dashboardSection,
     reports: reportsPanel,
     room: roomSection,
     returned: returnedSection,
@@ -1064,6 +1161,7 @@ function cacheLayoutDomReferences() {
   sidebarSplitter = document.querySelector("#sidebarSplitter");
   contentSplitter = document.querySelector("#contentSplitter");
   secondaryStack = document.querySelector("#secondaryStack");
+  dashboardSection = document.querySelector("#dashboardSection");
   reportsSection = document.querySelector("#reportsSection");
   reportsPanel = document.querySelector("#reportsPanel");
   roomSection = document.querySelector("#roomSection");
@@ -1218,8 +1316,9 @@ function ensureLayoutStructure() {
 }
 
 const secondaryPanelNames = ["room", "returned", "claims", "notifications", "account", "admin", "query"];
-const simpleModeSections = new Set(["reports", "room", "claims", "notifications", "account"]);
-const advancedModeSections = new Set(["returned", "query", "admin"]);
+const primaryPanelNames = ["dashboard", "reports"];
+const simpleModeSections = new Set(["dashboard", "reports", "room", "returned", "query", "claims", "notifications", "account"]);
+const advancedModeSections = new Set(["admin"]);
 const LAYOUT_BREAKPOINT = 900;
 const PHONE_LAYOUT_BREAKPOINT = 600;
 const REPORTS_MIN_HEIGHT = 260;
@@ -1236,6 +1335,10 @@ function currentResponsiveMode() {
 
 function currentSidebarMode() {
   return "left";
+}
+
+function isPrimaryPanel(section) {
+  return primaryPanelNames.includes(section);
 }
 
 function sidebarParticipatesInSideLayout() {
@@ -1283,6 +1386,7 @@ function renderDefaultLayout() {
 
   syncAllPanels(Object.keys(state.panelState).length === 0);
   openPanel("sidebar");
+  openPanel("dashboard");
   openPanel("reports");
 
   syncWorkspaceLayout();
@@ -1326,7 +1430,7 @@ function sectionAvailableInCurrentMode(section) {
   }
   if (simpleModeSections.has(section)) return true;
   if (advancedModeSections.has(section)) return state.advancedMode;
-  return section === "reports";
+  return isPrimaryPanel(section);
 }
 
 function syncModeLabels() {
@@ -1334,14 +1438,17 @@ function syncModeLabels() {
     if (button) button.dataset.shortLabel = value;
   };
   if (state.advancedMode) {
+    showDashboardButton.textContent = t("nav.dashboard");
     showReportsButton.textContent = t("nav.reports");
     showReportItemButton.textContent = langText({ en: "Report item", "zh-CN": "提交报告", th: "ส่งรายงาน" });
     showRoomButton.textContent = t("nav.room");
+    showDashboardButton.dataset.navIcon = "D";
     showReportsButton.dataset.navIcon = "R";
     showRoomButton.dataset.navIcon = "L";
     showClaimsButton.textContent = t("nav.claims");
     showNotificationsButton.textContent = t("notifications.title");
     showAccountButton.textContent = t("nav.account");
+    setShortLabel(showDashboardButton, t("nav.dashboard"));
     setShortLabel(showReportsButton, t("nav.reports"));
     setShortLabel(showReportItemButton, langText({ en: "Report", "zh-CN": "报告", th: "รายงาน" }));
     setShortLabel(showRoomButton, langText({ en: "Room", "zh-CN": "招领室", th: "ห้อง" }));
@@ -1353,15 +1460,18 @@ function syncModeLabels() {
     return;
   }
 
+  showDashboardButton.textContent = t("nav.dashboard");
   showReportsButton.textContent = langText({ en: "Claim item", "zh-CN": "认领物品", th: "รับของคืน" });
   showReportItemButton.textContent = langText({ en: "Report", "zh-CN": "报告", th: "รายงาน" });
   showRoomButton.textContent = langText({ en: "Lost & Found Room", "zh-CN": "失物招领室", th: "ห้องของหาย" });
+  showDashboardButton.dataset.navIcon = "D";
   showReportsButton.dataset.navIcon = "C";
   showReportItemButton.dataset.navIcon = "+";
   showRoomButton.dataset.navIcon = "L";
   showClaimsButton.textContent = langText({ en: "Claims", "zh-CN": "认领", th: "คำขอ" });
   showNotificationsButton.textContent = t("notifications.title");
   showAccountButton.textContent = langText({ en: "Profile", "zh-CN": "个人资料", th: "โปรไฟล์" });
+  setShortLabel(showDashboardButton, t("nav.dashboard"));
   setShortLabel(showReportsButton, langText({ en: "Claim", "zh-CN": "认领", th: "รับคืน" }));
   setShortLabel(showReportItemButton, langText({ en: "Report", "zh-CN": "报告", th: "รายงาน" }));
   setShortLabel(showRoomButton, langText({ en: "Room", "zh-CN": "招领室", th: "ห้อง" }));
@@ -1385,8 +1495,8 @@ function syncModeUi({ navigateIfNeeded = false } = {}) {
   const showAdvancedNav = state.advancedMode;
   showReportItemButton?.classList.toggle("is-hidden", showAdvancedNav);
   showRoomButton?.classList.remove("is-hidden");
-  showReturnedButton?.classList.toggle("is-hidden", !showAdvancedNav);
-  showQueryButton?.classList.toggle("is-hidden", !showAdvancedNav);
+  showReturnedButton?.classList.remove("is-hidden");
+  showQueryButton?.classList.remove("is-hidden");
   showAdminButton?.classList.toggle("is-hidden", !(showAdvancedNav && currentUserCanAdmin()));
   logoutButton?.classList.toggle("is-hidden", !showAdvancedNav);
   roomAdminPanel?.classList.toggle("is-hidden", !(showAdvancedNav && currentUserCanAdmin()));
@@ -1400,7 +1510,7 @@ function syncModeUi({ navigateIfNeeded = false } = {}) {
   }
 
   if (navigateIfNeeded && state.user && !sectionAvailableInCurrentMode(state.currentView)) {
-    navigateTo("reports");
+    navigateTo("dashboard");
   }
 }
 
@@ -1420,7 +1530,7 @@ function setAdvancedMode(enabled, { persist = true, navigateIfNeeded = true } = 
 
 function defaultPanelLayout(name) {
   return {
-    closed: !["sidebar", "reports"].includes(name),
+    closed: !["sidebar", "dashboard", "reports"].includes(name),
     minimized: false,
     collapsed: name === "sidebar" ? false : undefined,
   };
@@ -1503,8 +1613,7 @@ function syncWorkspaceLayout() {
   const tabletLayout = responsiveMode === "tablet";
 
   sidebarState.closed = false;
-  sidebarState.collapsed = false;
-  state.layoutSizes.sidebarWidth = STABLE_SIDEBAR_WIDTH;
+  state.layoutSizes.sidebarWidth = sidebarState.collapsed ? SIDEBAR_COLLAPSED_WIDTH : STABLE_SIDEBAR_WIDTH;
 
   if (phoneLayout) {
     sidebarState.closed = false;
@@ -1516,7 +1625,9 @@ function syncWorkspaceLayout() {
   }
 
   const sidebarVisible = phoneLayout ? true : !sidebarState.closed;
-  const reportsVisible = phoneLayout ? state.currentView === "reports" : !reportsState.closed;
+  const primaryVisible = phoneLayout ? isPrimaryPanel(state.currentView) : !reportsState.closed;
+  const dashboardVisible = primaryVisible && state.currentView === "dashboard";
+  const reportsVisible = primaryVisible && !dashboardVisible;
   const secondaryVisible = phoneLayout
     ? Boolean(secondaryPanel && secondaryName && state.currentView !== "reports")
     : Boolean(secondaryPanel && secondaryState && !secondaryState.closed);
@@ -1544,8 +1655,7 @@ function syncWorkspaceLayout() {
   sidebarPanel?.classList.toggle("is-top-mode", sidebarMode === "top");
   sidebarPanel?.classList.toggle("is-bottom-mode", sidebarMode === "bottom");
   sidebarPanel?.classList.toggle("is-minimal-mode", sidebarMode === "minimal");
-  sidebarState.collapsed = sidebarMode === "minimal" ? true : Boolean(sidebarState.collapsed && sidebarMode === "left");
-  sidebarState.collapsed = false;
+  sidebarState.collapsed = !phoneLayout && sidebarMode === "left" ? Boolean(sidebarState.collapsed) : false;
   applyPanelLayout("sidebar");
   sidebarPanel?.classList.toggle("is-hidden", false);
   sidebarLauncherButton?.classList.toggle("is-hidden", true);
@@ -1555,9 +1665,11 @@ function syncWorkspaceLayout() {
   contentSplitter?.classList.toggle("is-vertical", splitContentSideBySide);
   contentSplitter?.classList.toggle("is-horizontal", !splitContentSideBySide);
   contentSplitter?.setAttribute("aria-orientation", splitContentSideBySide ? "vertical" : "horizontal");
+  dashboardSection?.classList.toggle("is-hidden", !dashboardVisible);
   reportsSection?.classList.toggle("is-hidden", !reportsVisible);
   secondaryStack?.classList.toggle("is-hidden", !secondaryVisible);
   windowWorkspace.classList.toggle("has-secondary", secondaryVisible);
+  windowWorkspace.classList.toggle("is-dashboard-view", dashboardVisible);
   windowWorkspace.classList.toggle("is-reports-hidden", !reportsVisible);
   windowWorkspace.classList.toggle("is-reports-minimized", !phoneLayout && reportsState.minimized);
   windowWorkspace.classList.toggle("is-secondary-minimized", !phoneLayout && Boolean(secondaryState?.minimized));
@@ -1570,7 +1682,7 @@ function syncWorkspaceLayout() {
   updatePanelActiveState();
 
   if (sidebarVisible && sidebarParticipatesInSideLayout()) {
-    const sidebarWidth = STABLE_SIDEBAR_WIDTH;
+    const sidebarWidth = sidebarState.collapsed ? SIDEBAR_COLLAPSED_WIDTH : STABLE_SIDEBAR_WIDTH;
     workspaceLayout.style.setProperty("--sidebar-width", `${sidebarWidth}px`);
     sidebarSplitter?.setAttribute("aria-valuenow", String(sidebarWidth));
   } else {
@@ -1630,7 +1742,7 @@ function updatePanelActiveState() {
 }
 
 function focusActivePanel() {
-  const panelName = state.currentView === "reports" ? "reports" : currentSecondaryPanelName();
+  const panelName = isPrimaryPanel(state.currentView) ? state.currentView : currentSecondaryPanelName();
   const panel = panelElements[panelName];
   if (!panel || panel.classList.contains("is-hidden")) return;
   if (!panel.hasAttribute("tabindex")) {
@@ -1650,7 +1762,7 @@ function shouldMinimizeReportsForSecondary(section) {
 
 function applyNavigationLayoutPolicy(section) {
   const reportsState = ensurePanelState("reports");
-  if (section === "reports") {
+  if (isPrimaryPanel(section)) {
     reportsState.closed = false;
     reportsState.minimized = false;
     state.autoMinimizedReports = false;
@@ -1694,7 +1806,7 @@ function closePanel(name) {
     return;
   }
   if (secondaryPanelNames.includes(name) && state.currentView === name) {
-    navigateTo("reports");
+    navigateTo("dashboard");
     return;
   }
   const panelState = ensurePanelState(name);
@@ -1715,7 +1827,10 @@ function togglePanelMinimize(name) {
 }
 
 function toggleSidebarCollapse() {
-  setSidebarMode("left");
+  const sidebarState = ensurePanelState("sidebar");
+  sidebarState.collapsed = !sidebarState.collapsed;
+  applyPanelLayout("sidebar");
+  syncWorkspaceLayout();
 }
 
 function beginLayoutResize(event) {
@@ -1908,6 +2023,8 @@ function applyTranslations() {
   if (statEyebrow) statEyebrow.textContent = langText({ en: "Trust builder", "zh-CN": "信任指标", th: "ตัวชี้วัดความน่าเชื่อถือ" });
   if (statCopy) statCopy.textContent = langText({ en: "Items returned this week", "zh-CN": "本周归还物品", th: "สิ่งของที่ส่งคืนสัปดาห์นี้" });
   syncModeLabels();
+  updateLocationBar();
+  renderDashboard();
   renderNotifications(state.notifications);
 }
 
@@ -1981,6 +2098,496 @@ function setLoadingLine(element, isLoading) {
 function setWarningCard(element, message = "") {
   element.textContent = message;
   element.classList.toggle("is-hidden", !message);
+}
+
+function activityTimestamp() {
+  return new Date().toISOString();
+}
+
+function activityStatusIsComplete(status) {
+  return ["success", "error", "warning"].includes(String(status || ""));
+}
+
+function activityDismissKey(sourceKey, status) {
+  return `${sourceKey || ""}:${String(status || "").toLowerCase()}`;
+}
+
+function persistDismissedActivityKeys() {
+  localStorage.setItem(ACTIVITY_DISMISSED_STORAGE_KEY, JSON.stringify(Array.from(state.dismissedActivityKeys).slice(-80)));
+}
+
+function hasDismissedActivity(sourceKey, status) {
+  if (!sourceKey) return false;
+  return state.dismissedActivityKeys.has(activityDismissKey(sourceKey, status));
+}
+
+function rememberDismissedActivity(activity) {
+  if (!activity?.sourceKey) return;
+  state.dismissedActivityKeys.add(activity.dismissKey || activityDismissKey(activity.sourceKey, activity.sourceStatus || activity.status));
+  persistDismissedActivityKeys();
+}
+
+function activityTitleForType(type) {
+  const labels = {
+    report: langText({ en: "Report", "zh-CN": "报告", th: "รายงาน" }),
+    claim: langText({ en: "Claim", "zh-CN": "认领", th: "คำขอ" }),
+    query: langText({ en: "Query", "zh-CN": "咨询", th: "ข้อความ" }),
+    upload: langText({ en: "Upload", "zh-CN": "上传", th: "อัปโหลด" }),
+    analysis: langText({ en: "AI analysis", "zh-CN": "AI 分析", th: "วิเคราะห์ AI" }),
+    notification: t("notifications.title"),
+  };
+  return labels[type] || langText({ en: "Activity", "zh-CN": "活动", th: "กิจกรรม" });
+}
+
+function activityStatusCopy(status) {
+  const value = String(status || "running");
+  const labels = {
+    running: langText({ en: "Running", "zh-CN": "进行中", th: "กำลังทำงาน" }),
+    waiting: langText({ en: "Waiting", "zh-CN": "等待中", th: "รออยู่" }),
+    success: langText({ en: "Complete", "zh-CN": "完成", th: "เสร็จสิ้น" }),
+    error: langText({ en: "Needs attention", "zh-CN": "需要处理", th: "ต้องตรวจสอบ" }),
+    warning: langText({ en: "Paused", "zh-CN": "已暂停", th: "หยุดชั่วคราว" }),
+  };
+  return labels[value] || titleCase(value);
+}
+
+function normalizeActivity(activity) {
+  const now = activityTimestamp();
+  const status = activity.status || "running";
+  return {
+    id: activity.id || `activity-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    sourceKey: activity.sourceKey || "",
+    sourceStatus: activity.sourceStatus || status,
+    dismissKey: activity.dismissKey || (activity.sourceKey ? activityDismissKey(activity.sourceKey, activity.sourceStatus || status) : ""),
+    type: activity.type || "activity",
+    title: activity.title || activityTitleForType(activity.type),
+    stage: activity.stage || activityStatusCopy(status),
+    detail: activity.detail || "",
+    progress: Math.max(0, Math.min(100, Math.round(Number(activity.progress) || 0))),
+    status,
+    target: activity.target || "dashboard",
+    itemId: activity.itemId || null,
+    claimId: activity.claimId || null,
+    notificationId: activity.notificationId || null,
+    createdAt: activity.createdAt || now,
+    updatedAt: activity.updatedAt || now,
+    completedAt: activity.completedAt || (activityStatusIsComplete(status) ? now : null),
+    expanded: Boolean(activity.expanded),
+    history: Array.isArray(activity.history) && activity.history.length
+      ? activity.history.slice(-5)
+      : [{ stage: activity.stage || activityStatusCopy(status), at: now }],
+  };
+}
+
+function sortedActivities() {
+  return [...state.activities].sort((first, second) => {
+    const firstActive = activityStatusIsComplete(first.status) ? 0 : 1;
+    const secondActive = activityStatusIsComplete(second.status) ? 0 : 1;
+    if (firstActive !== secondActive) return secondActive - firstActive;
+    return (Date.parse(second.updatedAt || second.createdAt || "") || 0)
+      - (Date.parse(first.updatedAt || first.createdAt || "") || 0);
+  });
+}
+
+function pruneActivities() {
+  const now = Date.now();
+  const active = [];
+  const completed = [];
+  state.activities.forEach((activity) => {
+    const completedAt = Date.parse(activity.completedAt || "");
+    if (activity.completedAt && !Number.isNaN(completedAt) && now - completedAt > ACTIVITY_COMPLETED_RETENTION_MS) {
+      return;
+    }
+    if (activityStatusIsComplete(activity.status)) {
+      completed.push(activity);
+    } else {
+      active.push(activity);
+    }
+  });
+  completed.sort((first, second) => (Date.parse(second.updatedAt || "") || 0) - (Date.parse(first.updatedAt || "") || 0));
+  state.activities = [...active, ...completed.slice(0, Math.max(0, ACTIVITY_HISTORY_LIMIT - active.length))];
+}
+
+function persistActivities() {
+  pruneActivities();
+  localStorage.setItem(ACTIVITY_STORAGE_KEY, JSON.stringify(sortedActivities().slice(0, ACTIVITY_HISTORY_LIMIT)));
+}
+
+function findActivityBySource(sourceKey) {
+  return sourceKey ? state.activities.find((activity) => activity.sourceKey === sourceKey) || null : null;
+}
+
+function findActivityById(activityId) {
+  return state.activities.find((activity) => activity.id === activityId) || null;
+}
+
+function createActivity(activityInput) {
+  const normalized = normalizeActivity(activityInput);
+  const existing = findActivityBySource(normalized.sourceKey);
+  if (existing) {
+    updateActivity(existing.id, normalized);
+    return existing.id;
+  }
+  if (hasDismissedActivity(normalized.sourceKey, normalized.sourceStatus || normalized.status)) {
+    return null;
+  }
+  state.activities.unshift(normalized);
+  state.activityCollapsed = false;
+  persistActivities();
+  renderActivityTracker();
+  return normalized.id;
+}
+
+function updateActivity(activityId, patch = {}) {
+  if (!activityId) return null;
+  const activity = findActivityById(activityId);
+  if (!activity) return null;
+  const previousStage = activity.stage;
+  const nextStatus = patch.status || activity.status || "running";
+  const updatedAt = activityTimestamp();
+  Object.assign(activity, {
+    ...patch,
+    status: nextStatus,
+    progress: typeof patch.progress === "undefined"
+      ? activity.progress
+      : Math.max(0, Math.min(100, Math.round(Number(patch.progress) || 0))),
+    updatedAt,
+  });
+  activity.sourceStatus = patch.sourceStatus || activity.sourceStatus || nextStatus;
+  activity.dismissKey = activity.sourceKey ? activityDismissKey(activity.sourceKey, activity.sourceStatus || nextStatus) : "";
+  if (patch.stage && patch.stage !== previousStage) {
+    activity.history = [
+      ...(Array.isArray(activity.history) ? activity.history : []),
+      { stage: patch.stage, at: updatedAt },
+    ].slice(-5);
+  }
+  if (activityStatusIsComplete(nextStatus) && !activity.completedAt) {
+    activity.completedAt = updatedAt;
+  }
+  if (!activityStatusIsComplete(nextStatus)) {
+    activity.completedAt = null;
+  }
+  persistActivities();
+  renderActivityTracker();
+  return activity;
+}
+
+function completeActivity(activityId, patch = {}) {
+  return updateActivity(activityId, {
+    progress: 100,
+    status: "success",
+    stage: progressCopy("complete"),
+    ...patch,
+  });
+}
+
+function failActivity(activityId, error, patch = {}) {
+  const message = error?.message || String(error || "");
+  return updateActivity(activityId, {
+    status: "error",
+    stage: langText({ en: "Action needed", "zh-CN": "需要处理", th: "ต้องตรวจสอบ" }),
+    detail: message,
+    ...patch,
+  });
+}
+
+function clearProgressActivity(kind) {
+  if (state.progressActivityIds && Object.prototype.hasOwnProperty.call(state.progressActivityIds, kind)) {
+    state.progressActivityIds[kind] = null;
+  }
+}
+
+function activityTargetLabel(activity) {
+  if (activity.target === "query" && activity.itemId) {
+    return langText({ en: "Open chat", "zh-CN": "打开聊天", th: "เปิดแชต" });
+  }
+  if (activity.target === "claims") {
+    return langText({ en: "Open claims", "zh-CN": "查看认领", th: "เปิดคำขอ" });
+  }
+  if (activity.target === "notifications") {
+    return t("notifications.title");
+  }
+  if (activity.target === "room") {
+    return t("nav.room");
+  }
+  return langText({ en: "Open", "zh-CN": "打开", th: "เปิด" });
+}
+
+function renderActivityTracker() {
+  if (!activityTracker || !activityList) return;
+  const activities = sortedActivities();
+  const activeCount = activities.filter((activity) => !activityStatusIsComplete(activity.status)).length;
+  activityTracker.classList.toggle("is-hidden", !activities.length);
+  activityTracker.classList.toggle("has-active-activity", activeCount > 0);
+  activityTracker.classList.toggle("is-collapsed", activities.length > 0 && state.activityCollapsed && activeCount === 0);
+  activityTrackerToggle?.setAttribute("aria-expanded", activityTracker.classList.contains("is-collapsed") ? "false" : "true");
+  if (activityTrackerCount) activityTrackerCount.textContent = String(activeCount || activities.length);
+  if (activityTrackerSummary) {
+    activityTrackerSummary.textContent = activeCount
+      ? langText({
+          en: `${activeCount} active task${activeCount === 1 ? "" : "s"}`,
+          "zh-CN": `${activeCount} 个任务进行中`,
+          th: `${activeCount} งานกำลังทำงาน`,
+        })
+      : langText({
+          en: `${activities.length} recent item${activities.length === 1 ? "" : "s"}`,
+          "zh-CN": `${activities.length} 条最近记录`,
+          th: `${activities.length} รายการล่าสุด`,
+        });
+  }
+  activityClearButton?.classList.toggle("is-hidden", !activities.some((activity) => activityStatusIsComplete(activity.status)));
+  activityList.replaceChildren();
+  activities.forEach((activity) => {
+    const card = document.createElement("article");
+    card.className = `activity-card is-${activity.status || "running"}`;
+    card.dataset.activityId = activity.id;
+
+    const top = document.createElement("button");
+    top.className = "activity-card-main";
+    top.type = "button";
+    top.dataset.activityToggle = activity.id;
+
+    const statusDot = document.createElement("span");
+    statusDot.className = "activity-status-dot";
+    statusDot.setAttribute("aria-hidden", "true");
+
+    const copy = document.createElement("span");
+    copy.className = "activity-card-copy";
+    const title = document.createElement("strong");
+    title.textContent = activity.title || activityTitleForType(activity.type);
+    const stage = document.createElement("span");
+    stage.textContent = activity.stage || activityStatusCopy(activity.status);
+    copy.append(title, stage);
+
+    const value = document.createElement("span");
+    value.className = "activity-progress-value";
+    value.textContent = `${Math.round(Number(activity.progress) || 0)}%`;
+
+    top.append(statusDot, copy, value);
+
+    const progress = document.createElement("div");
+    progress.className = "activity-progress-track";
+    const fill = document.createElement("span");
+    fill.style.width = `${Math.max(0, Math.min(100, Number(activity.progress) || 0))}%`;
+    progress.append(fill);
+
+    card.append(top, progress);
+
+    if (activity.expanded) {
+      const details = document.createElement("div");
+      details.className = "activity-card-detail";
+      const detailText = document.createElement("p");
+      detailText.textContent = activity.detail || activityStatusCopy(activity.status);
+      const meta = document.createElement("p");
+      meta.className = "activity-meta";
+      meta.textContent = `${activityStatusCopy(activity.status)} • ${formatDateTime(activity.updatedAt)}`;
+      details.append(detailText, meta);
+
+      if (activity.expanded && Array.isArray(activity.history) && activity.history.length > 1) {
+        const history = document.createElement("ol");
+        history.className = "activity-history";
+        activity.history.forEach((entry) => {
+          const row = document.createElement("li");
+          row.textContent = `${entry.stage} • ${formatDateTime(entry.at)}`;
+          history.append(row);
+        });
+        details.append(history);
+      }
+
+      const actions = document.createElement("div");
+      actions.className = "activity-actions";
+      if (activity.target) {
+        const openButton = document.createElement("button");
+        openButton.className = "ghost-button small-button";
+        openButton.type = "button";
+        openButton.dataset.activityOpen = activity.id;
+        openButton.textContent = activityTargetLabel(activity);
+        actions.append(openButton);
+      }
+      if (activityStatusIsComplete(activity.status)) {
+        const dismissButton = document.createElement("button");
+        dismissButton.className = "ghost-button small-button";
+        dismissButton.type = "button";
+        dismissButton.dataset.activityDismiss = activity.id;
+        dismissButton.textContent = langText({ en: "Dismiss", "zh-CN": "关闭", th: "ปิด" });
+        actions.append(dismissButton);
+      }
+      if (actions.children.length) {
+        details.append(actions);
+      }
+      card.append(details);
+    }
+
+    activityList.append(card);
+  });
+}
+
+function toggleActivityTracker() {
+  state.activityCollapsed = !state.activityCollapsed;
+  renderActivityTracker();
+}
+
+async function openActivity(activity) {
+  if (!activity) return;
+  if (activity.notificationId) {
+    await markNotificationRead(activity.notificationId, { reload: false });
+    await loadNotifications();
+  }
+  if (activity.target === "query") {
+    navigateTo("query", activity.itemId || null);
+    return;
+  }
+  navigateTo(activity.target || "dashboard");
+}
+
+function handleActivityListClick(event) {
+  const dismissButton = event.target?.closest?.("[data-activity-dismiss]");
+  if (dismissButton) {
+    dismissActivity(dismissButton.dataset.activityDismiss);
+    return;
+  }
+
+  const openButton = event.target?.closest?.("[data-activity-open]");
+  if (openButton) {
+    void openActivity(findActivityById(openButton.dataset.activityOpen));
+    return;
+  }
+
+  const toggleButton = event.target?.closest?.("[data-activity-toggle]");
+  if (toggleButton) {
+    const activity = findActivityById(toggleButton.dataset.activityToggle);
+    if (!activity) return;
+    activity.expanded = !activity.expanded;
+    persistActivities();
+    renderActivityTracker();
+  }
+}
+
+function dismissActivity(activityId) {
+  const activity = findActivityById(activityId);
+  if (!activity || !activityStatusIsComplete(activity.status)) return;
+  rememberDismissedActivity(activity);
+  state.activities = state.activities.filter((entry) => entry.id !== activity.id);
+  persistActivities();
+  renderActivityTracker();
+}
+
+function dismissCompletedActivities() {
+  state.activities
+    .filter((activity) => activityStatusIsComplete(activity.status))
+    .forEach(rememberDismissedActivity);
+  state.activities = state.activities.filter((activity) => !activityStatusIsComplete(activity.status));
+  persistActivities();
+  renderActivityTracker();
+}
+
+function claimStatusActivityCopy(claim) {
+  const status = String(claim?.status || "pending").toLowerCase();
+  const itemTitle = claim?.item?.title || langText({ en: "Item", "zh-CN": "物品", th: "สิ่งของ" });
+  if (status === "approved") {
+    const collectionLocation = localizeValue("Lost & Found Room");
+    return {
+      title: langText({ en: `Claim: ${itemTitle}`, "zh-CN": `认领：${itemTitle}`, th: `คำขอ: ${itemTitle}` }),
+      stage: langText({ en: "Approved - Ready for pickup", "zh-CN": "已通过 - 可领取", th: "อนุมัติแล้ว - พร้อมรับคืน" }),
+      detail: langText({
+        en: `Approved - Collect at ${collectionLocation}.`,
+        "zh-CN": `已通过 - 请到${collectionLocation}领取。`,
+        th: `อนุมัติแล้ว - โปรดรับที่${collectionLocation}`,
+      }),
+      status: "success",
+      progress: 100,
+    };
+  }
+  if (status === "rejected") {
+    return {
+      title: langText({ en: `Claim: ${itemTitle}`, "zh-CN": `认领：${itemTitle}`, th: `คำขอ: ${itemTitle}` }),
+      stage: langText({ en: "Rejected", "zh-CN": "已拒绝", th: "ถูกปฏิเสธ" }),
+      detail: langText({
+        en: "Admin reviewed the claim. Open claims for details.",
+        "zh-CN": "管理员已审核这条认领。打开认领记录查看详情。",
+        th: "ผู้ดูแลตรวจสอบคำขอแล้ว เปิดหน้าคำขอเพื่อดูรายละเอียด",
+      }),
+      status: "error",
+      progress: 100,
+    };
+  }
+  return {
+    title: langText({ en: `Claim: ${itemTitle}`, "zh-CN": `认领：${itemTitle}`, th: `คำขอ: ${itemTitle}` }),
+    stage: langText({ en: "Pending review", "zh-CN": "等待审核", th: "รอตรวจสอบ" }),
+    detail: langText({
+      en: "Awaiting admin review. You can keep using the app.",
+      "zh-CN": "正在等待管理员审核。你可以继续使用应用。",
+      th: "กำลังรอผู้ดูแลตรวจสอบ คุณสามารถใช้งานแอปต่อได้",
+    }),
+    status: "waiting",
+    progress: 68,
+  };
+}
+
+function syncClaimActivities(claims = state.claims) {
+  claims.slice(0, 8).forEach((claim) => {
+    const status = String(claim?.status || "pending").toLowerCase();
+    const sourceKey = claim?.id ? `claim:${claim.id}` : "";
+    const copy = claimStatusActivityCopy(claim);
+    if (!sourceKey || (!findActivityBySource(sourceKey) && hasDismissedActivity(sourceKey, status))) return;
+    createActivity({
+      sourceKey,
+      sourceStatus: status,
+      dismissKey: activityDismissKey(sourceKey, status),
+      type: "claim",
+      title: copy.title,
+      stage: copy.stage,
+      detail: copy.detail,
+      status: copy.status,
+      progress: copy.progress,
+      target: "claims",
+      itemId: claim.item_id || claim.item?.id || null,
+      claimId: claim.id || null,
+      createdAt: claim.timestamp || activityTimestamp(),
+      updatedAt: claim.updated_at || claim.timestamp || activityTimestamp(),
+    });
+  });
+}
+
+function notificationActivityTarget(notification) {
+  const eventType = String(notification?.event_type || "").toLowerCase();
+  if (notification?.related_claim_id || eventType.includes("claim")) return "claims";
+  if (eventType.includes("query")) return "query";
+  if (eventType.includes("room")) return "room";
+  if (eventType.includes("report") || eventType.includes("match") || eventType.includes("dispute")) return "reports";
+  return "notifications";
+}
+
+function syncNotificationActivities(notifications = state.notifications) {
+  notifications
+    .filter((notification) => !notification.read || isClaimApprovedNotification(notification))
+    .slice(0, 8)
+    .forEach((notification) => {
+      const sourceKey = `notification:${notification.id}`;
+      const eventType = String(notification.event_type || "").toLowerCase();
+      const status = eventType.includes("rejected") || eventType.includes("verification") ? "error" : "success";
+      if (!findActivityBySource(sourceKey) && hasDismissedActivity(sourceKey, status)) return;
+      const approvedCopy = isClaimApprovedNotification(notification) ? claimApprovalCopy(notification) : null;
+      createActivity({
+        sourceKey,
+        sourceStatus: status,
+        dismissKey: activityDismissKey(sourceKey, status),
+        type: "notification",
+        title: approvedCopy?.eyebrow || notification.title || t("notifications.title"),
+        stage: approvedCopy
+          ? langText({ en: "Approved - Ready for pickup", "zh-CN": "已通过 - 可领取", th: "อนุมัติแล้ว - พร้อมรับคืน" })
+          : notificationCategory(notification).label,
+        detail: approvedCopy?.message || notification.message || "",
+        status,
+        progress: 100,
+        target: notificationActivityTarget(notification),
+        itemId: notification.related_item_id || null,
+        claimId: notification.related_claim_id || null,
+        notificationId: notification.id || null,
+        createdAt: notification.created_at || activityTimestamp(),
+        updatedAt: notification.created_at || activityTimestamp(),
+      });
+    });
 }
 
 function ensureGlobalBackground() {
@@ -2404,10 +3011,19 @@ function clearProgressTimer(kind) {
 }
 
 function setProgress(kind, value, label = "", visible = true) {
+  const percent = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+  const activityId = state.progressActivityIds?.[kind] || null;
+  if (activityId && visible) {
+    updateActivity(activityId, {
+      progress: percent,
+      stage: label || activityStatusCopy("running"),
+      status: percent >= 100 ? "success" : "running",
+    });
+  }
+
   const handle = progressHandles[kind];
   if (!handle) return;
 
-  const percent = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
   handle.root.classList.toggle("is-hidden", !visible);
   handle.root.dataset.progress = String(percent);
   handle.fill.style.width = `${percent}%`;
@@ -2673,7 +3289,11 @@ function resetReportModalState() {
   prefillReporter();
   updateLocationUi();
   updateReportSubmitState();
-  hideProgress("report");
+  if (state.progressActivityIds?.report) {
+    reportProgress?.classList.add("is-hidden");
+  } else {
+    hideProgress("report");
+  }
   setMessage(uploadMessage, "");
   setWarningCard(reportWarningCard, "");
 }
@@ -3426,7 +4046,11 @@ function applyFreshUser(user, version = Date.now()) {
 function renderCurrentAccountChip() {
   if (!state.user) return;
   applyAvatar(accountChipAvatar, accountAvatarSource(), userAvatarLabel(state.user));
+  applyAvatar(topbarAccountAvatar, accountAvatarSource(), userAvatarLabel(state.user));
   accountName.textContent = userDisplayName(state.user);
+  if (topbarAccountName) {
+    topbarAccountName.textContent = userDisplayName(state.user);
+  }
   accountMeta.textContent = currentUserCanAdmin()
     ? langText({ en: "Admin access", "zh-CN": "管理员权限", th: "สิทธิ์ผู้ดูแล" })
     : `@${state.user.username}`;
@@ -3462,6 +4086,7 @@ function selectProfileImage(file) {
   state.profilePreviewUrl = URL.createObjectURL(file);
   applyAvatar(accountAvatar, state.profilePreviewUrl, userAvatarLabel(state.user));
   applyAvatar(accountChipAvatar, state.profilePreviewUrl, userAvatarLabel(state.user));
+  applyAvatar(topbarAccountAvatar, state.profilePreviewUrl, userAvatarLabel(state.user));
   setMessage(profileImageMessage, langText({
     en: `Preview ready: ${file.name} (${formatFileSize(file.size)}).`,
     "zh-CN": `预览已就绪：${file.name}（${formatFileSize(file.size)}）。`,
@@ -3773,6 +4398,9 @@ function findItemById(itemId) {
 }
 
 function buildHash(section, itemId = null) {
+  if (section === "dashboard") {
+    return "#dashboard";
+  }
   if (section === "query") {
     return itemId ? `#query-${itemId}` : "#query";
   }
@@ -3783,7 +4411,7 @@ function readRoute() {
   const raw = window.location.hash.replace(/^#/, "").trim();
   if (!raw) {
     return {
-      section: "reports",
+      section: "dashboard",
       itemId: state.currentItemId,
     };
   }
@@ -3794,10 +4422,10 @@ function readRoute() {
     const itemId = Number(raw.slice("query-".length)) || null;
     return { section: "query", itemId };
   }
-  if (["reports", "room", "returned", "claims", "notifications", "account", "admin"].includes(raw)) {
+  if (["dashboard", "reports", "room", "returned", "claims", "notifications", "account", "admin"].includes(raw)) {
     return { section: raw, itemId: state.currentItemId };
   }
-  return { section: "reports", itemId: state.currentItemId };
+  return { section: "dashboard", itemId: state.currentItemId };
 }
 
 function navigateTo(section, itemId = null, options = {}) {
@@ -3841,14 +4469,66 @@ function openNewWindowTarget(section) {
   if (!section) return;
   closeNewWindowMenu();
   if (section === "admin" && !currentUserCanAdmin()) {
-    navigateTo("reports");
+    navigateTo("dashboard");
     return;
   }
   navigateTo(section, null, { multitask: state.advancedMode });
 }
 
+function sectionLabel(section = state.currentView) {
+  const labels = {
+    dashboard: t("nav.dashboard"),
+    reports: t("nav.reports"),
+    room: t("nav.room"),
+    returned: t("nav.returned"),
+    query: t("nav.query"),
+    claims: t("nav.claims"),
+    notifications: t("notifications.title"),
+    account: t("nav.account"),
+    admin: t("nav.admin"),
+  };
+  return labels[section] || titleCase(section || "dashboard");
+}
+
+function breadcrumbLabel(section = state.currentView) {
+  const parts = [t("nav.dashboard")];
+  if (section && section !== "dashboard") {
+    parts.push(sectionLabel(section));
+  }
+  if (section === "query" && (state.currentQueryItem?.id || state.currentItemId)) {
+    parts.push(`Item #${state.currentQueryItem?.id || state.currentItemId}`);
+  }
+  return parts.join(" > ");
+}
+
+function updateLocationBar() {
+  const section = sectionLabel(state.currentView);
+  const breadcrumbs = breadcrumbLabel(state.currentView);
+  if (topbarCurrentSection) {
+    topbarCurrentSection.textContent = section;
+  }
+  if (topbarBreadcrumbs) {
+    topbarBreadcrumbs.textContent = breadcrumbs;
+  }
+  if (sidebarCurrentSection) {
+    sidebarCurrentSection.textContent = section;
+  }
+  if (sidebarBreadcrumbs) {
+    sidebarBreadcrumbs.textContent = breadcrumbs;
+  }
+}
+
 function updateTopbarState() {
-  const toggle = (button, active) => button.classList.toggle("is-active", active);
+  const toggle = (button, active) => {
+    if (!button) return;
+    button.classList.toggle("is-active", active);
+    if (active) {
+      button.setAttribute("aria-current", "page");
+    } else {
+      button.removeAttribute("aria-current");
+    }
+  };
+  toggle(showDashboardButton, state.currentView === "dashboard");
   toggle(showReportsButton, state.currentView === "reports");
   toggle(showReportItemButton, false);
   toggle(showRoomButton, state.currentView === "room");
@@ -3858,13 +4538,15 @@ function updateTopbarState() {
   toggle(showNotificationsButton, state.currentView === "notifications");
   toggle(showAccountButton, state.currentView === "account");
   toggle(showAdminButton, state.currentView === "admin");
+  updateLocationBar();
   syncModeUi();
   syncNewWindowMenu();
 }
 
 function switchSection(section) {
   state.currentView = section;
-  if (section === "reports") {
+  if (isPrimaryPanel(section)) {
+    openPanel("dashboard", { unminimize: true });
     openPanel("reports", { unminimize: true });
   } else if (secondaryPanelNames.includes(section)) {
     if (state.advancedMode && (state.multitaskRequested || state.multitaskActive)) {
@@ -3884,9 +4566,9 @@ function switchSection(section) {
 async function activateRoute(route = readRoute()) {
   if (!state.user) return;
 
-  const section = route.section || "reports";
+  const section = route.section || "dashboard";
   if (!sectionAvailableInCurrentMode(section)) {
-    navigateTo("reports");
+    navigateTo("dashboard");
     return;
   }
   if (section !== "query" && state.currentView === "query") {
@@ -3927,7 +4609,7 @@ async function activateRoute(route = readRoute()) {
 
   if (section === "admin") {
     if (!currentUserCanAdmin()) {
-      navigateTo("reports");
+      navigateTo("dashboard");
       return;
     }
     switchSection("admin");
@@ -3940,6 +4622,12 @@ async function activateRoute(route = readRoute()) {
   if (section === "query") {
     switchSection("query");
     await loadQueryPage(route.itemId || null);
+    return;
+  }
+
+  if (section === "dashboard") {
+    switchSection("dashboard");
+    renderDashboard();
     return;
   }
 
@@ -4228,7 +4916,9 @@ async function loadNotifications() {
       triggerHaptic("notification");
     }
     state.notificationsLoadedOnce = true;
+    syncNotificationActivities(state.notifications);
     renderNotifications(state.notifications);
+    renderDashboard();
   } catch (error) {
     logClientError("loading notifications failed", error);
   } finally {
@@ -4240,6 +4930,203 @@ function renderStatsSummary() {
   const count = Number(state.statsSummary?.items_returned_this_week || 0);
   if (weeklyReturnedCount) {
     weeklyReturnedCount.textContent = String(count);
+  }
+  renderDashboard();
+}
+
+function dateFromItem(item, fields = ["created_at", "event_date", "updated_at"]) {
+  for (const field of fields) {
+    const value = item?.[field];
+    if (!value) continue;
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+  return null;
+}
+
+function isSameLocalDay(date, reference = new Date()) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return false;
+  return date.getFullYear() === reference.getFullYear()
+    && date.getMonth() === reference.getMonth()
+    && date.getDate() === reference.getDate();
+}
+
+function isWithinDays(date, days, reference = new Date()) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return false;
+  const diffMs = reference.getTime() - date.getTime();
+  return diffMs >= 0 && diffMs <= days * 24 * 60 * 60 * 1000;
+}
+
+function dashboardStats() {
+  const now = new Date();
+  const reportsToday = state.items.filter((item) => {
+    const created = dateFromItem(item, ["created_at", "event_date"]);
+    return isSameLocalDay(created, now);
+  }).length;
+  const reportsThisWeek = state.items.filter((item) => isWithinDays(dateFromItem(item, ["created_at", "event_date"]), 7, now)).length;
+  const pendingClaims = state.claims.filter((claim) => String(claim.status || "").toLowerCase() === "pending").length;
+  const returnedThisWeek = Number(state.statsSummary?.items_returned_this_week || 0)
+    || state.returnedItems.filter((item) => isWithinDays(dateFromItem(item, ["returned_at", "updated_at", "created_at"]), 7, now)).length;
+  const recoveredTotal = Math.max(
+    state.returnedItems.length,
+    state.items.filter((item) => item.claimed || String(item.status || "").toLowerCase() === "claimed").length,
+  );
+  const activeQueries = state.notifications.filter((notification) => {
+    const eventType = String(notification.event_type || "").toLowerCase();
+    return eventType.includes("query") && !notification.read;
+  }).length;
+  const approvedClaims = state.claims.filter((claim) => String(claim.status || "").toLowerCase() === "approved").length;
+  const reviewedClaims = state.claims.filter((claim) => ["approved", "rejected"].includes(String(claim.status || "").toLowerCase())).length;
+  const approvalRate = reviewedClaims ? Math.round((approvedClaims / reviewedClaims) * 100) : 0;
+  const activeReports = state.items.filter((item) => {
+    const status = String(item.status || "").toLowerCase();
+    return !item.claimed && !["claimed", "archived", "returned"].includes(status);
+  }).length;
+  return {
+    reportsToday,
+    reportsThisWeek,
+    pendingClaims,
+    returnedThisWeek,
+    recoveredTotal,
+    activeQueries,
+    unreadNotifications: Number(state.unreadNotifications || 0),
+    approvalRate,
+    activeReports,
+  };
+}
+
+function setDashboardText(element, value) {
+  if (element) element.textContent = String(value);
+}
+
+function addDashboardActivity({ title, meta, badge, target, tone = "" }) {
+  if (!dashboardActivityList) return;
+  const item = document.createElement("button");
+  item.className = `dashboard-activity-item ${tone}`.trim();
+  item.type = "button";
+  item.dataset.dashboardTarget = target || "reports";
+
+  const copy = document.createElement("span");
+  copy.className = "dashboard-activity-copy";
+  const titleElement = document.createElement("strong");
+  titleElement.textContent = title;
+  const metaElement = document.createElement("span");
+  metaElement.textContent = meta;
+  copy.append(titleElement, metaElement);
+
+  const badgeElement = document.createElement("span");
+  badgeElement.className = "dashboard-activity-badge";
+  badgeElement.textContent = badge;
+  item.append(copy, badgeElement);
+  item.addEventListener("click", () => navigateTo(item.dataset.dashboardTarget || "reports"));
+  dashboardActivityList.append(item);
+}
+
+function renderDashboardActivity(stats = dashboardStats()) {
+  if (!dashboardActivityList) return;
+  dashboardActivityList.replaceChildren();
+
+  if (stats.pendingClaims > 0) {
+    addDashboardActivity({
+      title: langText({ en: "Claims pending review", "zh-CN": "待审核认领", th: "คำขอรอตรวจสอบ" }),
+      meta: langText({ en: "Review ownership evidence", "zh-CN": "审核所有权证据", th: "ตรวจสอบหลักฐานความเป็นเจ้าของ" }),
+      badge: String(stats.pendingClaims),
+      target: "claims",
+      tone: "is-gold",
+    });
+  }
+
+  if (stats.unreadNotifications > 0) {
+    addDashboardActivity({
+      title: t("notifications.title"),
+      meta: langText({ en: "Unread school updates", "zh-CN": "未读校园更新", th: "อัปเดตที่ยังไม่ได้อ่าน" }),
+      badge: String(stats.unreadNotifications),
+      target: "notifications",
+      tone: "is-green",
+    });
+  }
+
+  addDashboardActivity({
+    title: langText({ en: "Open item reports", "zh-CN": "开放物品报告", th: "รายงานที่เปิดอยู่" }),
+    meta: langText({ en: `${stats.reportsThisWeek} report${stats.reportsThisWeek === 1 ? "" : "s"} this week`, "zh-CN": `本周 ${stats.reportsThisWeek} 条报告`, th: `${stats.reportsThisWeek} รายงานในสัปดาห์นี้` }),
+    badge: String(stats.activeReports),
+    target: "reports",
+  });
+
+  addDashboardActivity({
+    title: langText({ en: "Items returned", "zh-CN": "已归还物品", th: "สิ่งของที่รับคืนแล้ว" }),
+    meta: langText({ en: "Recovered this week", "zh-CN": "本周找回", th: "รับคืนในสัปดาห์นี้" }),
+    badge: String(stats.returnedThisWeek),
+    target: "returned",
+    tone: "is-green",
+  });
+}
+
+function renderDashboard() {
+  if (!dashboardSection) return;
+  const stats = dashboardStats();
+  setDashboardText(dashboardReportsToday, stats.reportsToday);
+  setDashboardText(
+    dashboardReportsTodayMeta,
+    langText({
+      en: `${stats.reportsThisWeek} this week`,
+      "zh-CN": `本周 ${stats.reportsThisWeek}`,
+      th: `${stats.reportsThisWeek} ในสัปดาห์นี้`,
+    }),
+  );
+  setDashboardText(dashboardPendingClaims, stats.pendingClaims);
+  setDashboardText(dashboardReturnedWeek, stats.returnedThisWeek);
+  setDashboardText(dashboardRecoveredTotal, stats.recoveredTotal);
+  setDashboardText(dashboardActiveQueries, stats.activeQueries);
+  setDashboardText(dashboardNotifications, stats.unreadNotifications);
+  setDashboardText(dashboardApprovalRate, `${stats.approvalRate}%`);
+  setDashboardText(dashboardActiveReports, stats.activeReports);
+  renderDashboardActivity(stats);
+}
+
+async function refreshCurrentView() {
+  if (!state.user) return;
+  if (state.currentView === "dashboard") {
+    await Promise.all([
+      loadItems(),
+      loadClaims(),
+      loadNotifications(),
+      loadStatsSummary(),
+      loadReturnedItems(),
+    ]);
+    renderDashboard();
+    return;
+  }
+  if (state.currentView === "reports") {
+    await loadItems();
+    return;
+  }
+  if (state.currentView === "room") {
+    await loadRoomItems();
+    return;
+  }
+  if (state.currentView === "returned") {
+    await loadReturnedItems();
+    return;
+  }
+  if (state.currentView === "claims") {
+    await loadClaims();
+    return;
+  }
+  if (state.currentView === "notifications") {
+    await loadNotifications();
+    return;
+  }
+  if (state.currentView === "query") {
+    await loadQueryPage(state.currentQueryItem?.id || null);
+    return;
+  }
+  if (state.currentView === "admin" && currentUserCanAdmin()) {
+    await loadAdminSurface();
+    return;
+  }
+  if (state.currentView === "account") {
+    renderAccount();
   }
 }
 
@@ -4497,6 +5384,7 @@ async function loadReturnedItems() {
       renderStatsSummary();
     }
     renderReturnedItems(state.returnedItems);
+    renderDashboard();
   } catch (error) {
     returnedList.replaceChildren();
     setWarningCard(returnedWarningCard, error.message);
@@ -4537,6 +5425,7 @@ async function loadItems() {
     state.searchCache.set(cacheKey, data);
     state.items = data.items || [];
     renderItems(state.items);
+    renderDashboard();
     if (state.currentView === "query") {
       renderQueryItemSelector(state.currentQueryItem?.id || state.currentItemId || null);
     }
@@ -4570,6 +5459,8 @@ async function loadClaims() {
     const data = await apiFetch("/claims/history");
     state.claims = data.claims || [];
     renderClaims(state.claims);
+    syncClaimActivities(state.claims);
+    renderDashboard();
   } catch (error) {
     claimsList.replaceChildren();
     const message = document.createElement("p");
@@ -5784,7 +6675,11 @@ function clearQueryState() {
   setWarningCard(queryWarningCard, "");
   setMessage(queryMessage, "");
   setLoadingLine(queryLoading, false);
-  hideProgress("query");
+  if (state.progressActivityIds?.query) {
+    queryProgress?.classList.add("is-hidden");
+  } else {
+    hideProgress("query");
+  }
   renderQueryContextImage(null);
   syncQueryAdminActions();
 }
@@ -6198,7 +7093,13 @@ async function submitQuery(event) {
   const itemId = state.currentQueryItem?.id || null;
 
   const value = queryInput.value.trim();
-  const fileValidationMessage = validateChatFile(state.selectedQueryFile);
+  const queryDraft = {
+    itemId,
+    item: state.currentQueryItem || null,
+    message: value,
+    file: state.selectedQueryFile,
+  };
+  const fileValidationMessage = validateChatFile(queryDraft.file);
   if (fileValidationMessage) {
     setMessage(queryMessage, fileValidationMessage, true);
     setWarningCard(queryWarningCard, fileValidationMessage);
@@ -6215,20 +7116,41 @@ async function submitQuery(event) {
     return;
   }
 
+  const activityId = createActivity({
+    type: "query",
+    title: queryDraft.item
+      ? langText({
+          en: `Query: ${queryDraft.item.title || "item"}`,
+          "zh-CN": `咨询：${queryDraft.item.title || "物品"}`,
+          th: `ข้อความ: ${queryDraft.item.title || "สิ่งของ"}`,
+        })
+      : langText({ en: "General query", "zh-CN": "一般咨询", th: "ข้อความทั่วไป" }),
+    stage: progressCopy("queryPrepare"),
+    detail: langText({
+      en: "Sending in the background. You can keep navigating.",
+      "zh-CN": "正在后台发送。你可以继续浏览。",
+      th: "กำลังส่งในพื้นหลัง คุณสามารถไปหน้าอื่นต่อได้",
+    }),
+    progress: 0,
+    status: "running",
+    target: "query",
+    itemId: queryDraft.itemId,
+  });
+  state.progressActivityIds.query = activityId;
   setButtonLoading(querySubmitButton, true);
   setProgress("query", 0, progressCopy("queryPrepare"), true);
   setMessage(queryMessage, langText({ en: "Sending your message...", "zh-CN": "正在发送消息...", th: "กำลังส่งข้อความ..." }));
   setWarningCard(queryWarningCard, "");
   try {
-    const path = itemId ? `/items/${itemId}/query` : "/query";
-    const uploadFile = await prepareUploadFile(state.selectedQueryFile, "query", {
+    const path = queryDraft.itemId ? `/items/${queryDraft.itemId}/query` : "/query";
+    const uploadFile = await prepareUploadFile(queryDraft.file, "query", {
       compress: progressCopy("queryCompress"),
       prepare: progressCopy("queryPrepare"),
     });
     let data;
     if (uploadFile) {
       const formData = new FormData();
-      formData.set("message", value);
+      formData.set("message", queryDraft.message);
       formData.set("language", currentLanguage());
       formData.set("file", uploadFile);
       data = await apiRequestWithProgress(path, {
@@ -6238,7 +7160,7 @@ async function submitQuery(event) {
         onUploadComplete: () => startProcessingProgress("query", progressCopy("queryProcess")),
       });
     } else {
-      const requestBody = JSON.stringify({ message: value, language: currentLanguage() });
+      const requestBody = JSON.stringify({ message: queryDraft.message, language: currentLanguage() });
       setProgress("query", 20, progressCopy("queryUpload"), true);
       data = await apiRequestWithProgress(path, {
         method: "POST",
@@ -6248,30 +7170,72 @@ async function submitQuery(event) {
         onUploadComplete: () => startProcessingProgress("query", progressCopy("queryProcess")),
       });
     }
-    queryInput.value = "";
-    clearSelectedQueryFile();
-    state.queryMessages = Array.isArray(data.queries) ? data.queries : [];
-    state.queryCache.set(itemId ? `item:${itemId}` : "general", {
-      itemData: { item: state.currentQueryItem || null },
-      queryData: { queries: state.queryMessages, suggestions: data.suggestions || [] },
+    const nextMessages = Array.isArray(data.queries) ? data.queries : [];
+    state.queryCache.set(queryDraft.itemId ? `item:${queryDraft.itemId}` : "general", {
+      itemData: { item: queryDraft.item || null },
+      queryData: { queries: nextMessages, suggestions: data.suggestions || [] },
     });
-    renderQueryMessages(state.queryMessages);
-    renderQuerySuggestions(data.suggestions || [], state.currentQueryItem, state.queryMessages);
+    const stillOnSameQuery = state.currentView === "query"
+      && ((state.currentQueryItem?.id || null) === (queryDraft.itemId || null));
+    if (stillOnSameQuery) {
+      queryInput.value = "";
+      clearSelectedQueryFile();
+      state.queryMessages = nextMessages;
+      renderQueryMessages(state.queryMessages);
+      renderQuerySuggestions(data.suggestions || [], state.currentQueryItem, state.queryMessages);
+    }
     await completeProgress("query");
-    setMessage(queryMessage, langText({ en: "Message sent successfully.", "zh-CN": "消息已发送成功。", th: "ส่งข้อความเรียบร้อยแล้ว" }));
+    completeActivity(activityId, {
+      title: queryDraft.item
+        ? langText({
+            en: `Query sent: ${queryDraft.item.title || "item"}`,
+            "zh-CN": `咨询已发送：${queryDraft.item.title || "物品"}`,
+            th: `ส่งข้อความแล้ว: ${queryDraft.item.title || "สิ่งของ"}`,
+          })
+        : langText({ en: "General query sent", "zh-CN": "一般咨询已发送", th: "ส่งข้อความทั่วไปแล้ว" }),
+      stage: langText({ en: "Message sent", "zh-CN": "消息已发送", th: "ส่งข้อความแล้ว" }),
+      detail: langText({
+        en: "Your message is saved in the conversation.",
+        "zh-CN": "你的消息已保存到对话中。",
+        th: "ข้อความของคุณถูกบันทึกในบทสนทนาแล้ว",
+      }),
+      target: "query",
+      itemId: queryDraft.itemId,
+    });
+    if (stillOnSameQuery) {
+      setMessage(queryMessage, langText({ en: "Message sent successfully.", "zh-CN": "消息已发送成功。", th: "ส่งข้อความเรียบร้อยแล้ว" }));
+    }
     triggerHaptic("success");
-    ensureQueryComposerVisible();
+    if (stillOnSameQuery) {
+      ensureQueryComposerVisible();
+    }
     await loadItems();
   } catch (error) {
+    const stillOnSameQuery = state.currentView === "query"
+      && ((state.currentQueryItem?.id || null) === (queryDraft.itemId || null));
     resetProgress("query");
-    setMessage(queryMessage, langText({
-      en: `Could not send your message: ${error.message}`,
-      "zh-CN": `消息发送失败：${error.message}`,
-      th: `ไม่สามารถส่งข้อความได้: ${error.message}`,
-    }), true);
-    setWarningCard(queryWarningCard, error.message);
-    logClientError("submitting query failed", error, { itemId });
+    failActivity(activityId, error, {
+      title: queryDraft.item
+        ? langText({
+            en: `Query failed: ${queryDraft.item.title || "item"}`,
+            "zh-CN": `咨询失败：${queryDraft.item.title || "物品"}`,
+            th: `ส่งข้อความไม่สำเร็จ: ${queryDraft.item.title || "สิ่งของ"}`,
+          })
+        : langText({ en: "General query failed", "zh-CN": "一般咨询失败", th: "ส่งข้อความทั่วไปไม่สำเร็จ" }),
+      target: "query",
+      itemId: queryDraft.itemId,
+    });
+    if (stillOnSameQuery) {
+      setMessage(queryMessage, langText({
+        en: `Could not send your message: ${error.message}`,
+        "zh-CN": `消息发送失败：${error.message}`,
+        th: `ไม่สามารถส่งข้อความได้: ${error.message}`,
+      }), true);
+      setWarningCard(queryWarningCard, error.message);
+    }
+    logClientError("submitting query failed", error, { itemId: queryDraft.itemId });
   } finally {
+    clearProgressActivity("query");
     setButtonLoading(querySubmitButton, false);
   }
 }
@@ -6378,12 +7342,41 @@ async function submitReport(event) {
   }
 
   const location = currentLocation();
+  const reportDraft = {
+    file: state.selectedFile,
+    reporterName: reporterInput.value.trim(),
+    title: titleInput.value.trim(),
+    description: descriptionInput.value.trim(),
+    evidenceDetails: evidenceDetailsInput.value.trim(),
+    locationValue: location.value,
+    locationMeta: location.meta,
+    category: categoryInput.value,
+    eventDate: dateInput.value,
+  };
+  const activityId = createActivity({
+    type: "report",
+    title: langText({
+      en: `Report: ${reportDraft.title}`,
+      "zh-CN": `报告：${reportDraft.title}`,
+      th: `รายงาน: ${reportDraft.title}`,
+    }),
+    stage: progressCopy("reportPrepare"),
+    detail: langText({
+      en: "Publishing in the background. You can close this window.",
+      "zh-CN": "正在后台发布。你可以关闭这个窗口。",
+      th: "กำลังเผยแพร่ในพื้นหลัง คุณสามารถปิดหน้าต่างนี้ได้",
+    }),
+    progress: 0,
+    status: "running",
+    target: "reports",
+  });
+  state.progressActivityIds.report = activityId;
 
   setButtonLoading(submitButton, true);
   setProgress("report", 0, progressCopy("reportPrepare"), true);
-    setMessage(uploadMessage, langText({ en: "Publishing your report...", "zh-CN": "正在发布你的报告...", th: "กำลังเผยแพร่รายงานของคุณ..." }));
+  setMessage(uploadMessage, langText({ en: "Publishing your report...", "zh-CN": "正在发布你的报告...", th: "กำลังเผยแพร่รายงานของคุณ..." }));
   try {
-    const uploadFile = await prepareUploadFile(state.selectedFile, "report", {
+    const uploadFile = await prepareUploadFile(reportDraft.file, "report", {
       compress: progressCopy("reportCompress"),
       prepare: progressCopy("reportPrepare"),
     });
@@ -6395,14 +7388,14 @@ async function submitReport(event) {
         }
       : null;
     const requestBody = {
-      reporter_name: reporterInput.value.trim(),
-      title: titleInput.value.trim(),
-      description: descriptionInput.value.trim(),
-      evidence_details: evidenceDetailsInput.value.trim(),
-      location: location.value,
-      secondary_location: location.meta,
-      category: categoryInput.value,
-      event_date: dateInput.value,
+      reporter_name: reportDraft.reporterName,
+      title: reportDraft.title,
+      description: reportDraft.description,
+      evidence_details: reportDraft.evidenceDetails,
+      location: reportDraft.locationValue,
+      secondary_location: reportDraft.locationMeta,
+      category: reportDraft.category,
+      event_date: reportDraft.eventDate,
       time_slot: "Unknown",
       student_id: "",
       contact_info: "",
@@ -6435,6 +7428,21 @@ async function submitReport(event) {
     updateLocationUi();
     updateReportSubmitState();
     await completeProgress("report");
+    completeActivity(activityId, {
+      title: langText({
+        en: `Report live: ${item?.title || reportDraft.title}`,
+        "zh-CN": `报告已发布：${item?.title || reportDraft.title}`,
+        th: `เผยแพร่รายงานแล้ว: ${item?.title || reportDraft.title}`,
+      }),
+      stage: langText({ en: "Report live", "zh-CN": "报告已发布", th: "รายงานเผยแพร่แล้ว" }),
+      detail: langText({
+        en: "Your report is live. AI review, matching, and notifications will continue in the background.",
+        "zh-CN": "你的报告已上线。AI 审核、匹配和通知会继续在后台进行。",
+        th: "รายงานเผยแพร่แล้ว การตรวจสอบ AI การจับคู่ และการแจ้งเตือนจะทำงานต่อในพื้นหลัง",
+      }),
+      target: "reports",
+      itemId: item?.id || null,
+    });
     setMessage(uploadMessage, langText({
       en: "Your report is now live. We'll notify you if a match is found.",
       "zh-CN": "你的报告已发布。如果发现匹配项，我们会通知你。",
@@ -6449,6 +7457,14 @@ async function submitReport(event) {
     await Promise.all([loadItems(), loadStatsSummary()]);
   } catch (error) {
     resetProgress("report");
+    failActivity(activityId, error, {
+      title: langText({
+        en: `Report failed: ${reportDraft.title}`,
+        "zh-CN": `报告失败：${reportDraft.title}`,
+        th: `รายงานไม่สำเร็จ: ${reportDraft.title}`,
+      }),
+      target: "reports",
+    });
     setMessage(uploadMessage, langText({
       en: `Could not submit your report: ${error.message}`,
       "zh-CN": `报告提交失败：${error.message}`,
@@ -6457,6 +7473,7 @@ async function submitReport(event) {
     setWarningCard(reportWarningCard, error.message);
     logClientError("submitting report failed", error);
   } finally {
+    clearProgressActivity("report");
     setButtonLoading(submitButton, false);
   }
 }
@@ -6474,6 +7491,20 @@ async function uploadProfileImage() {
     return;
   }
 
+  const activityId = createActivity({
+    type: "upload",
+    title: langText({ en: "Profile photo upload", "zh-CN": "头像上传", th: "อัปโหลดรูปโปรไฟล์" }),
+    stage: progressCopy("profileCompress"),
+    detail: langText({
+      en: "Uploading in the background.",
+      "zh-CN": "正在后台上传。",
+      th: "กำลังอัปโหลดในพื้นหลัง",
+    }),
+    progress: 0,
+    status: "running",
+    target: "account",
+  });
+  state.progressActivityIds.profile = activityId;
   setButtonLoading(profileImageButton, true);
   setProgress("profile", 0, progressCopy("profileCompress"), true);
   setMessage(profileImageMessage, langText({ en: "Uploading profile image...", "zh-CN": "正在上传头像...", th: "กำลังอัปโหลดรูปโปรไฟล์..." }));
@@ -6517,6 +7548,15 @@ async function uploadProfileImage() {
     renderAccount();
     renderCurrentAccountChip();
     await completeProgress("profile");
+    completeActivity(activityId, {
+      stage: langText({ en: "Photo updated", "zh-CN": "头像已更新", th: "อัปเดตรูปแล้ว" }),
+      detail: langText({
+        en: "Your account photo is updated.",
+        "zh-CN": "你的账号头像已更新。",
+        th: "รูปบัญชีของคุณอัปเดตแล้ว",
+      }),
+      target: "account",
+    });
     setMessage(profileImageMessage, data.message || langText({ en: "Profile image updated.", "zh-CN": "头像已更新。", th: "อัปเดตรูปโปรไฟล์แล้ว" }));
     triggerHaptic("success");
     invalidateSearchCache();
@@ -6536,9 +7576,14 @@ async function uploadProfileImage() {
     if (profileImageInput) profileImageInput.value = "";
   } catch (error) {
     resetProgress("profile");
+    failActivity(activityId, error, {
+      title: langText({ en: "Profile upload failed", "zh-CN": "头像上传失败", th: "อัปโหลดรูปไม่สำเร็จ" }),
+      target: "account",
+    });
     setMessage(profileImageMessage, error.message, true);
     logClientError("uploading profile image failed", error);
   } finally {
+    clearProgressActivity("profile");
     setButtonLoading(profileImageButton, false);
   }
 }
@@ -6554,6 +7599,24 @@ async function uploadRoomItems() {
     return;
   }
 
+  const activityId = createActivity({
+    type: "upload",
+    title: langText({
+      en: `Room upload (${files.length})`,
+      "zh-CN": `招领室上传（${files.length}）`,
+      th: `อัปโหลดเข้าห้อง (${files.length})`,
+    }),
+    stage: langText({ en: "Preparing room images", "zh-CN": "正在准备招领室图片", th: "กำลังเตรียมรูปภาพ" }),
+    detail: langText({
+      en: "Adding items to the Lost & Found Room in the background.",
+      "zh-CN": "正在后台添加物品到失物招领室。",
+      th: "กำลังเพิ่มสิ่งของเข้าห้องของหายในพื้นหลัง",
+    }),
+    progress: 8,
+    status: "running",
+    target: "room",
+  });
+  state.progressActivityIds.room = activityId;
   setButtonLoading(uploadRoomButton, true);
   setMessage(roomUploadMessage, langText({
     en: "Uploading room items...",
@@ -6563,7 +7626,15 @@ async function uploadRoomItems() {
 
   try {
     const images = [];
-    for (const file of files) {
+    for (const [index, file] of files.entries()) {
+      updateActivity(activityId, {
+        progress: 10 + Math.round((index / Math.max(1, files.length)) * 42),
+        stage: langText({
+          en: `Preparing image ${index + 1} of ${files.length}`,
+          "zh-CN": `正在准备第 ${index + 1}/${files.length} 张图片`,
+          th: `กำลังเตรียมรูป ${index + 1} จาก ${files.length}`,
+        }),
+      });
       const validationMessage = validateReportImageFile(file);
       if (validationMessage) {
         throw new Error(validationMessage);
@@ -6585,6 +7656,10 @@ async function uploadRoomItems() {
       });
     }
 
+    updateActivity(activityId, {
+      progress: 68,
+      stage: langText({ en: "Uploading to room", "zh-CN": "正在上传到招领室", th: "กำลังอัปโหลดเข้าห้อง" }),
+    });
     const data = await apiFetch("/admin/room/items", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -6598,10 +7673,24 @@ async function uploadRoomItems() {
     setMessage(roomUploadMessage, data.message || "Item added to Lost & Found Room");
     triggerHaptic("success");
     await refreshItemSurfaces({ includeAdmin: true, includeNotifications: true });
+    completeActivity(activityId, {
+      stage: langText({ en: "Room upload complete", "zh-CN": "招领室上传完成", th: "อัปโหลดเข้าห้องเสร็จแล้ว" }),
+      detail: data.message || langText({
+        en: "Items added to Lost & Found Room.",
+        "zh-CN": "物品已添加到失物招领室。",
+        th: "เพิ่มสิ่งของเข้าห้องของหายแล้ว",
+      }),
+      target: "room",
+    });
   } catch (error) {
+    failActivity(activityId, error, {
+      title: langText({ en: "Room upload failed", "zh-CN": "招领室上传失败", th: "อัปโหลดเข้าห้องไม่สำเร็จ" }),
+      target: "room",
+    });
     setMessage(roomUploadMessage, error.message, true);
     logClientError("uploading room items failed", error);
   } finally {
+    clearProgressActivity("room");
     setButtonLoading(uploadRoomButton, false);
   }
 }
@@ -7245,7 +8334,28 @@ function handleRoomPreviewPointerUp(event) {
 }
 
 async function analyzeRoomPreview() {
-  if (!state.activeRoomPreviewItem) return;
+  const previewItem = state.activeRoomPreviewItem;
+  if (!previewItem) return;
+  const selection = roomPreviewSelection();
+  const activityId = createActivity({
+    type: "analysis",
+    title: langText({
+      en: `AI analysis: ${previewItem.title || "room item"}`,
+      "zh-CN": `AI 分析：${previewItem.title || "招领室物品"}`,
+      th: `วิเคราะห์ AI: ${previewItem.title || "สิ่งของ"}`,
+    }),
+    stage: langText({ en: "Analyzing item", "zh-CN": "正在分析物品", th: "กำลังวิเคราะห์สิ่งของ" }),
+    detail: langText({
+      en: "Analyzing the selected area in the background.",
+      "zh-CN": "正在后台分析选中的区域。",
+      th: "กำลังวิเคราะห์บริเวณที่เลือกในพื้นหลัง",
+    }),
+    progress: 30,
+    status: "running",
+    target: "room",
+    itemId: previewItem.id,
+  });
+  state.progressActivityIds.analysis = activityId;
   roomConfirmButton.disabled = true;
   setButtonLoading(roomAnalyzeButton, true);
   setMessage(roomPreviewMessage, langText({
@@ -7255,25 +8365,56 @@ async function analyzeRoomPreview() {
   }));
 
   try {
-    const data = await apiFetch(`/items/${state.activeRoomPreviewItem.id}/claim-preview`, {
+    updateActivity(activityId, {
+      progress: 72,
+      stage: langText({ en: "Checking visual evidence", "zh-CN": "正在检查视觉证据", th: "กำลังตรวจสอบหลักฐานภาพ" }),
+    });
+    const data = await apiFetch(`/items/${previewItem.id}/claim-preview`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ selection: roomPreviewSelection() }),
+      body: JSON.stringify({ selection }),
     });
-    state.roomPreviewAnalysis = data.preview || null;
-    roomPreviewResult.textContent = data.preview?.description || "Selected area analyzed.";
-    renderTags(roomPreviewTags, data.preview?.tags || []);
-    roomConfirmButton.disabled = !state.roomPreviewAnalysis;
+    const stillOpen = roomClaimPreviewDialog.open && state.activeRoomPreviewItem?.id === previewItem.id;
+    if (stillOpen) {
+      state.roomPreviewAnalysis = data.preview || null;
+      roomPreviewResult.textContent = data.preview?.description || "Selected area analyzed.";
+      renderTags(roomPreviewTags, data.preview?.tags || []);
+      roomConfirmButton.disabled = !state.roomPreviewAnalysis;
+    }
+    completeActivity(activityId, {
+      stage: langText({ en: "Analysis ready", "zh-CN": "分析已完成", th: "วิเคราะห์พร้อมแล้ว" }),
+      detail: data.preview?.description || langText({
+        en: "Selected area analyzed. Reopen the room item if you want to continue claiming it.",
+        "zh-CN": "选区已分析。如果要继续认领，请重新打开招领室物品。",
+        th: "วิเคราะห์บริเวณที่เลือกแล้ว เปิดสิ่งของอีกครั้งหากต้องการยื่นคำขอต่อ",
+      }),
+      target: "room",
+      itemId: previewItem.id,
+    });
     triggerHaptic("success");
-    setMessage(roomPreviewMessage, langText({
-      en: "If this matches your item, confirm and continue to the claim form.",
-      "zh-CN": "如果这和你的物品一致，请确认并继续填写认领表单。",
-      th: "หากตรงกับสิ่งของของคุณ ให้ยืนยันและดำเนินการต่อไปยังแบบฟอร์มคำขอ",
-    }));
+    if (stillOpen) {
+      setMessage(roomPreviewMessage, langText({
+        en: "If this matches your item, confirm and continue to the claim form.",
+        "zh-CN": "如果这和你的物品一致，请确认并继续填写认领表单。",
+        th: "หากตรงกับสิ่งของของคุณ ให้ยืนยันและดำเนินการต่อไปยังแบบฟอร์มคำขอ",
+      }));
+    }
   } catch (error) {
-    setMessage(roomPreviewMessage, error.message, true);
-    logClientError("analyzing room preview failed", error, { itemId: state.activeRoomPreviewItem.id });
+    failActivity(activityId, error, {
+      title: langText({
+        en: `AI analysis failed: ${previewItem.title || "room item"}`,
+        "zh-CN": `AI 分析失败：${previewItem.title || "招领室物品"}`,
+        th: `วิเคราะห์ AI ไม่สำเร็จ: ${previewItem.title || "สิ่งของ"}`,
+      }),
+      target: "room",
+      itemId: previewItem.id,
+    });
+    if (roomClaimPreviewDialog.open && state.activeRoomPreviewItem?.id === previewItem.id) {
+      setMessage(roomPreviewMessage, error.message, true);
+    }
+    logClientError("analyzing room preview failed", error, { itemId: previewItem.id });
   } finally {
+    clearProgressActivity("analysis");
     setButtonLoading(roomAnalyzeButton, false);
   }
 }
@@ -7322,7 +8463,8 @@ function closeClaimModal() {
 
 async function submitClaim(event) {
   event.preventDefault();
-  if (!state.activeClaimItem) return;
+  const activeClaimItem = state.activeClaimItem;
+  if (!activeClaimItem) return;
 
   const validationMessage = validateClaimForm();
   if (validationMessage) {
@@ -7333,22 +8475,68 @@ async function submitClaim(event) {
     return;
   }
 
+  const claimDraft = {
+    item: activeClaimItem,
+    reason: claimReasonInput.value.trim(),
+    description: claimDescriptionInput.value.trim(),
+    lostLocation: claimLocationInput.value.trim(),
+    identifyingInfo: claimIdentifyingInput.value.trim(),
+    visualSelection: state.roomPreviewAnalysis?.selection || null,
+    visualSummary: state.roomPreviewAnalysis?.description || "",
+    visualTags: state.roomPreviewAnalysis?.tags || [],
+  };
+  const activityId = createActivity({
+    type: "claim",
+    title: langText({
+      en: `Claim: ${claimDraft.item.title || "item"}`,
+      "zh-CN": `认领：${claimDraft.item.title || "物品"}`,
+      th: `คำขอ: ${claimDraft.item.title || "สิ่งของ"}`,
+    }),
+    stage: langText({ en: "Submitting claim", "zh-CN": "正在提交认领", th: "กำลังส่งคำขอ" }),
+    detail: langText({
+      en: "Submitting in the background. You can close this form.",
+      "zh-CN": "正在后台提交。你可以关闭这个表单。",
+      th: "กำลังส่งในพื้นหลัง คุณสามารถปิดแบบฟอร์มนี้ได้",
+    }),
+    progress: 15,
+    status: "running",
+    target: "claims",
+    itemId: claimDraft.item.id,
+  });
+  state.progressActivityIds.claim = activityId;
   setButtonLoading(claimSubmitButton, true);
   setMessage(claimMessage, langText({ en: "Sending your claim for review...", "zh-CN": "正在发送认领审核...", th: "กำลังส่งคำขอเพื่อให้ผู้ดูแลตรวจสอบ..." }));
+  updateActivity(activityId, {
+    progress: 35,
+    stage: langText({ en: "Checking ownership details", "zh-CN": "正在核验所有权信息", th: "กำลังตรวจสอบรายละเอียดความเป็นเจ้าของ" }),
+  });
 
   try {
-    await apiFetch(`/items/${state.activeClaimItem.id}/claim`, {
+    const data = await apiFetch(`/items/${claimDraft.item.id}/claim`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        claim_reason: claimReasonInput.value.trim(),
-        item_description: claimDescriptionInput.value.trim(),
-        lost_location: claimLocationInput.value.trim(),
-        identifying_info: claimIdentifyingInput.value.trim(),
-        visual_selection: state.roomPreviewAnalysis?.selection || null,
-        visual_summary: state.roomPreviewAnalysis?.description || "",
-        visual_tags: state.roomPreviewAnalysis?.tags || [],
+        claim_reason: claimDraft.reason,
+        item_description: claimDraft.description,
+        lost_location: claimDraft.lostLocation,
+        identifying_info: claimDraft.identifyingInfo,
+        visual_selection: claimDraft.visualSelection,
+        visual_summary: claimDraft.visualSummary,
+        visual_tags: claimDraft.visualTags,
       }),
+    });
+    updateActivity(activityId, {
+      sourceKey: data.claim?.id ? `claim:${data.claim.id}` : "",
+      sourceStatus: "pending",
+      progress: 68,
+      status: "waiting",
+      stage: langText({ en: "Pending review", "zh-CN": "等待审核", th: "รอตรวจสอบ" }),
+      detail: langText({
+        en: "Awaiting admin review. We'll notify you when the decision is ready.",
+        "zh-CN": "正在等待管理员审核。决定完成后我们会通知你。",
+        th: "กำลังรอผู้ดูแลตรวจสอบ เราจะแจ้งให้ทราบเมื่อมีผลการตัดสิน",
+      }),
+      claimId: data.claim?.id || null,
     });
     setMessage(claimMessage, langText({
       en: "Your claim has been sent for review. You'll be notified when it's checked.",
@@ -7360,13 +8548,25 @@ async function submitClaim(event) {
     await Promise.all([loadClaims(), loadNotifications(), loadReturnedItems(), loadStatsSummary()]);
     window.setTimeout(closeClaimModal, 450);
   } catch (error) {
-    setMessage(claimMessage, langText({
-      en: `Could not submit your claim: ${error.message}`,
-      "zh-CN": `认领提交失败：${error.message}`,
-      th: `ไม่สามารถส่งคำขอได้: ${error.message}`,
-    }), true);
-    logClientError("submitting claim failed", error, { itemId: state.activeClaimItem.id });
+    failActivity(activityId, error, {
+      title: langText({
+        en: `Claim failed: ${claimDraft.item.title || "item"}`,
+        "zh-CN": `认领失败：${claimDraft.item.title || "物品"}`,
+        th: `ส่งคำขอไม่สำเร็จ: ${claimDraft.item.title || "สิ่งของ"}`,
+      }),
+      target: "claims",
+      itemId: claimDraft.item.id,
+    });
+    if (claimDialog.open) {
+      setMessage(claimMessage, langText({
+        en: `Could not submit your claim: ${error.message}`,
+        "zh-CN": `认领提交失败：${error.message}`,
+        th: `ไม่สามารถส่งคำขอได้: ${error.message}`,
+      }), true);
+    }
+    logClientError("submitting claim failed", error, { itemId: claimDraft.item.id });
   } finally {
+    clearProgressActivity("claim");
     setButtonLoading(claimSubmitButton, false);
   }
 }
@@ -7446,6 +8646,11 @@ function logout() {
   state.notifications = [];
   state.notificationsLoadedOnce = false;
   state.unreadNotifications = 0;
+  state.activities = [];
+  state.activityCollapsed = true;
+  state.dismissedActivityKeys = new Set();
+  localStorage.removeItem(ACTIVITY_STORAGE_KEY);
+  localStorage.removeItem(ACTIVITY_DISMISSED_STORAGE_KEY);
   state.queryItems = [];
   state.claims = [];
   state.adminUsers = [];
@@ -7505,6 +8710,8 @@ function logout() {
   hideProgress("report");
   hideProgress("query");
   hideProgress("profile");
+  Object.keys(state.progressActivityIds || {}).forEach(clearProgressActivity);
+  renderActivityTracker();
   form.reset();
   clearSelectedQueryFile();
   updateReportSubmitState();
@@ -7513,7 +8720,7 @@ function logout() {
   showAuthScreen();
   setAuthView("login");
   window.location.hash = "";
-  state.currentView = "reports";
+  state.currentView = "dashboard";
   renderDefaultLayout();
 }
 
@@ -7526,6 +8733,7 @@ function bindEvents() {
     [registerTab, "click", () => setAuthView("register"), "register tab"],
     [authPasswordToggle, "click", () => setAuthPasswordVisibility(authPassword?.type === "password"), "password visibility"],
     [authConfirmPasswordToggle, "click", () => setAuthConfirmPasswordVisibility(authConfirmPassword?.type === "password"), "confirm password visibility"],
+    [showDashboardButton, "click", () => navigateTo("dashboard"), "dashboard nav"],
     [showReportsButton, "click", () => navigateTo("reports"), "reports nav"],
     [showReportItemButton, "click", openReportModal, "report item nav"],
     [showRoomButton, "click", () => navigateTo("room"), "room nav"],
@@ -7536,12 +8744,17 @@ function bindEvents() {
     [showAccountButton, "click", () => navigateTo("account"), "account nav"],
     [showAdminButton, "click", () => navigateTo("admin"), "admin nav"],
     [newWindowButton, "click", toggleNewWindowMenu, "new window menu"],
+    [topbarReportButton, "click", openReportModal, "topbar report"],
+    [topbarRefreshButton, "click", () => { void refreshCurrentView(); }, "topbar refresh"],
+    [topbarAccountButton, "click", () => navigateTo("account"), "topbar account"],
     [sidebarLauncherButton, "click", () => openPanel("sidebar"), "sidebar launcher"],
     [sidebarCollapseButton, "click", toggleSidebarCollapse, "sidebar collapse"],
     [sidebarModeSelect, "change", () => setSidebarMode(sidebarModeSelect.value), "sidebar mode"],
     [queryBackButton, "click", () => navigateTo("reports"), "query back"],
     [themeToggleButton, "click", toggleThemeMode, "theme toggle"],
     [openReportModalButton, "click", openReportModal, "open report modal"],
+    [dashboardReportButton, "click", openReportModal, "dashboard report"],
+    [dashboardRefreshButton, "click", () => { void refreshCurrentView(); }, "dashboard refresh"],
     [closeReportDialog, "click", closeReportModal, "close report modal"],
     [logoutButton, "click", logout, "logout"],
     [form, "submit", submitReport, "report form submit"],
@@ -7608,6 +8821,9 @@ function bindEvents() {
         renderClaimSuccessBanner(null);
       }
     }, "claim success dismiss"],
+    [activityTrackerToggle, "click", toggleActivityTracker, "activity tracker toggle"],
+    [activityClearButton, "click", dismissCompletedActivities, "activity tracker clear completed"],
+    [activityList, "click", handleActivityListClick, "activity tracker card action"],
     [tutorialBackButton, "click", () => { void rewindTutorial(); }, "tutorial back"],
     [tutorialNextButton, "click", () => { void advanceTutorial(); }, "tutorial next"],
     [tutorialSkipButton, "click", () => {
@@ -7624,6 +8840,12 @@ function bindEvents() {
   newWindowMenuButtons.forEach((button) => {
     bindListener(button, "click", () => openNewWindowTarget(button.dataset.newWindowTarget || "reports"), {
       label: `new window ${button.dataset.newWindowTarget || "unknown"}`,
+    });
+  });
+
+  dashboardLinkButtons.forEach((button) => {
+    bindListener(button, "click", () => navigateTo(button.dataset.dashboardTarget || "reports"), {
+      label: `dashboard link ${button.dataset.dashboardTarget || "reports"}`,
     });
   });
 
@@ -7838,6 +9060,7 @@ async function initUI() {
   bindEvents();
   renderSelectedQueryFile();
   updateReportSubmitState();
+  renderActivityTracker();
   if (dateInput) {
     dateInput.value = todayIso();
   }

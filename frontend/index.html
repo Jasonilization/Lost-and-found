@@ -75,18 +75,25 @@
     </section>
 
     <div class="app-shell is-hidden" id="appShell">
-      <header class="app-topbar surface-card glass">
+      <header class="app-topbar dashboard-topbar surface-card">
         <div class="app-topbar-start">
-          <button class="sidebar-launcher glass is-hidden" id="sidebarLauncherButton" type="button" aria-label="Show navigation">☰</button>
+          <button class="sidebar-launcher is-hidden" id="sidebarLauncherButton" type="button" aria-label="Show navigation">☰</button>
           <div class="app-topbar-copy">
-            <p class="eyebrow" data-i18n="topbar.eyebrow">Local campus desk</p>
+            <p class="eyebrow">School dashboard</p>
             <p class="app-topbar-title" data-i18n="brand.title">SHR Lost &amp; Found System</p>
+          </div>
+          <div class="topbar-location" aria-label="Current location">
+            <strong id="topbarCurrentSection">Dashboard</strong>
+            <span id="topbarBreadcrumbs">Dashboard</span>
           </div>
         </div>
         <div class="app-topbar-end">
+          <button class="primary-button small-button topbar-action-button" id="topbarReportButton" type="button">Report item</button>
+          <button class="ghost-button small-button topbar-action-button" id="topbarRefreshButton" type="button">Refresh</button>
           <div class="new-window-wrap">
             <button class="ghost-button new-window-button" id="newWindowButton" type="button" aria-haspopup="menu" aria-expanded="false" title="New window" data-i18n="nav.newWindow">New window</button>
             <div class="new-window-menu surface-card glass is-hidden" id="newWindowMenu" role="menu" aria-label="Open panel">
+              <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="dashboard">Dashboard</button>
               <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="reports" data-i18n="nav.reports">Reports</button>
               <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="room" data-i18n="nav.room">Lost &amp; Found Room</button>
               <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="returned" data-i18n="nav.returned">Recently Returned</button>
@@ -106,8 +113,24 @@
               <option value="minimal">Minimal</option>
             </select>
           </label>
+          <div class="notification-wrap">
+            <button class="ghost-button notification-button" id="notificationButton" type="button" aria-haspopup="true" aria-expanded="false">
+              <span class="notification-button-label" data-i18n="notifications.button">Notifications</span>
+              <span class="notification-badge is-hidden" id="notificationBadge">0</span>
+            </button>
+            <div class="notification-dropdown surface-card is-hidden" id="notificationDropdown" role="menu">
+              <div class="notification-head">
+                <strong data-i18n="notifications.title">Notifications</strong>
+              </div>
+              <div class="notification-list" id="notificationList"></div>
+            </div>
+          </div>
           <div class="mobile-notification-slot" id="mobileNotificationSlot" aria-live="polite"></div>
-          <button class="theme-toggle glass" id="theme-toggle" type="button" aria-label="Use light mode" title="Toggle theme">
+          <button class="ghost-button topbar-profile-button" id="topbarAccountButton" type="button" aria-label="Open account">
+            <span class="mini-avatar" id="topbarAccountAvatar" aria-hidden="true">LF</span>
+            <span id="topbarAccountName">Account</span>
+          </button>
+          <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Use light mode" title="Toggle theme">
             <span class="theme-toggle-dot" id="theme-icon" aria-hidden="true"></span>
           </button>
         </div>
@@ -138,17 +161,10 @@
                   <span class="account-meta" id="accountMeta"></span>
                 </span>
               </div>
-              <div class="notification-wrap">
-                <button class="ghost-button notification-button" id="notificationButton" type="button" aria-haspopup="true" aria-expanded="false">
-                  <span class="notification-button-label" data-i18n="notifications.button">Notifications</span>
-                  <span class="notification-badge is-hidden" id="notificationBadge">0</span>
-                </button>
-                <div class="notification-dropdown surface-card is-hidden" id="notificationDropdown" role="menu">
-                  <div class="notification-head">
-                    <strong data-i18n="notifications.title">Notifications</strong>
-                  </div>
-                  <div class="notification-list" id="notificationList"></div>
-                </div>
+              <div class="sidebar-location-card surface-card" aria-label="Current workspace location">
+                <span class="sidebar-location-label">Current location</span>
+                <strong id="sidebarCurrentSection">Dashboard</strong>
+                <span id="sidebarBreadcrumbs">Dashboard</span>
               </div>
               <label class="theme-select-wrap">
                 <span data-i18n="topbar.language">Language</span>
@@ -160,6 +176,7 @@
               </label>
             </div>
             <div class="topbar-actions sidebar-nav-group">
+              <button class="ghost-button" id="showDashboardButton" type="button" data-nav-icon="D">Dashboard</button>
               <button class="ghost-button" id="showReportsButton" type="button" data-nav-icon="R" data-i18n="nav.reports">Reports</button>
               <button class="ghost-button" id="showReportItemButton" type="button" data-nav-icon="+">Report item</button>
               <button class="ghost-button" id="showRoomButton" type="button" data-nav-icon="L">Lost &amp; Found Room</button>
@@ -176,6 +193,88 @@
         <div class="layout-divider is-vertical" id="sidebarSplitter" data-layout-resize="sidebar" role="separator" aria-orientation="vertical" aria-label="Resize navigation"></div>
 
         <main class="page-stack main-content" id="windowWorkspace">
+          <section class="panel dashboard-panel surface-card window-panel" id="dashboardSection" data-panel="dashboard" aria-labelledby="dashboardTitle">
+            <div class="section-heading window-header">
+              <div>
+                <p class="eyebrow">Overview</p>
+                <h3 id="dashboardTitle">Dashboard</h3>
+              </div>
+              <div class="window-header-actions">
+                <button class="primary-button" id="dashboardReportButton" type="button">New report</button>
+                <button class="ghost-button" id="dashboardRefreshButton" type="button">Refresh dashboard</button>
+              </div>
+            </div>
+            <div class="window-body dashboard-body">
+              <section class="dashboard-metric-grid" aria-label="Lost and found summary">
+                <article class="dashboard-metric-card is-accent-green">
+                  <p class="eyebrow">Reports today</p>
+                  <strong id="dashboardReportsToday">0</strong>
+                  <span id="dashboardReportsTodayMeta">0 this week</span>
+                </article>
+                <article class="dashboard-metric-card is-accent-gold">
+                  <p class="eyebrow">Claims pending</p>
+                  <strong id="dashboardPendingClaims">0</strong>
+                  <span>Awaiting review</span>
+                </article>
+                <article class="dashboard-metric-card is-accent-green">
+                  <p class="eyebrow">Returned this week</p>
+                  <strong id="dashboardReturnedWeek">0</strong>
+                  <span>Items recovered</span>
+                </article>
+                <article class="dashboard-metric-card">
+                  <p class="eyebrow">Total recovered</p>
+                  <strong id="dashboardRecoveredTotal">0</strong>
+                  <span>Closed item records</span>
+                </article>
+                <article class="dashboard-metric-card">
+                  <p class="eyebrow">Active queries</p>
+                  <strong id="dashboardActiveQueries">0</strong>
+                  <span>Open conversations</span>
+                </article>
+                <article class="dashboard-metric-card is-accent-gold">
+                  <p class="eyebrow">Notifications</p>
+                  <strong id="dashboardNotifications">0</strong>
+                  <span>Unread updates</span>
+                </article>
+                <article class="dashboard-metric-card">
+                  <p class="eyebrow">Approval rate</p>
+                  <strong id="dashboardApprovalRate">0%</strong>
+                  <span>Reviewed claims</span>
+                </article>
+                <article class="dashboard-metric-card is-accent-green">
+                  <p class="eyebrow">Active reports</p>
+                  <strong id="dashboardActiveReports">0</strong>
+                  <span>Open item cases</span>
+                </article>
+              </section>
+
+              <section class="dashboard-work-grid">
+                <article class="dashboard-panel-card">
+                  <div class="section-heading compact">
+                    <div>
+                      <p class="eyebrow">Priority queue</p>
+                      <h4>Campus activity</h4>
+                    </div>
+                  </div>
+                  <div class="dashboard-activity-list" id="dashboardActivityList"></div>
+                </article>
+                <article class="dashboard-panel-card">
+                  <div class="section-heading compact">
+                    <div>
+                      <p class="eyebrow">Quick access</p>
+                      <h4>Workspace</h4>
+                    </div>
+                  </div>
+                  <div class="dashboard-action-grid">
+                    <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="reports">Reports</button>
+                    <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="room">Lost &amp; Found Room</button>
+                    <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="claims">Claims</button>
+                    <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="notifications">Notifications</button>
+                  </div>
+                </article>
+              </section>
+            </div>
+          </section>
           <section id="reportsSection">
           <div class="reports-stack">
             <section class="content-stack">
@@ -618,6 +717,20 @@
           <button class="ghost-button" id="claimSuccessDismissButton" type="button" data-i18n="common.close">Close</button>
         </div>
       </div>
+      <aside class="activity-tracker is-collapsed is-hidden" id="activityTracker" aria-live="polite" aria-label="Live activity tracker">
+        <div class="activity-tracker-head">
+          <button class="activity-tracker-toggle" id="activityTrackerToggle" type="button" aria-expanded="false">
+            <span class="activity-pulse" aria-hidden="true"></span>
+            <span>
+              <strong>Live activity</strong>
+              <small id="activityTrackerSummary">No active tasks</small>
+            </span>
+            <span class="activity-count" id="activityTrackerCount">0</span>
+          </button>
+          <button class="icon-button activity-clear-button" id="activityClearButton" type="button" aria-label="Dismiss completed activities">×</button>
+        </div>
+        <div class="activity-list" id="activityList"></div>
+      </aside>
       <button class="primary-button floating-report-button" id="openReportModalButton" type="button" aria-label="Open report form" title="Create a report">
         <span aria-hidden="true">+</span>
       </button>

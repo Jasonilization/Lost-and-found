@@ -4,6 +4,7 @@ Pillow
 pillow-heif
 pydantic
 psutil
+psycopg[binary]
 python-multipart
 requests
 sqlalchemy

@@ -5,20 +5,25 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, create_engine, inspect, text
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data")).expanduser().resolve()
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
-DB_PATH = Path(os.getenv("DATABASE_PATH", DATA_DIR / "lost_found.db")).expanduser().resolve()
-DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-DATABASE_URL = f"sqlite:///{DB_PATH}"
+if not DATABASE_URL:
+    DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data")).expanduser().resolve()
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    DB_PATH = Path(os.getenv("DATABASE_PATH", DATA_DIR / "lost_found.db")).expanduser().resolve()
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    DATABASE_URL = f"sqlite:///{DB_PATH}"
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
+
+POSTGRES_INIT_LOCK_ID = 911_800_404
 
 
 class LostFoundItem(Base):
@@ -299,6 +304,28 @@ class ReturnedItemDispute(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class UploadObject(Base):
+    __tablename__ = "upload_objects"
+
+    id = Column(Integer, primary_key=True, index=True)
+    path = Column(String, unique=True, index=True, nullable=False)
+    original_name = Column(String, default="", nullable=False)
+    content_type = Column(String, default="application/octet-stream", nullable=False)
+    size = Column(Integer, default=0, nullable=False)
+    content = Column(LargeBinary, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+def _dialect_column_sql(column_sql: str) -> str:
+    if engine.dialect.name != "postgresql":
+        return column_sql
+    return (
+        column_sql
+        .replace("BOOLEAN NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE")
+        .replace("DATETIME", "TIMESTAMP")
+    )
+
+
 def _add_column_if_missing(table_name: str, column_name: str, column_sql: str) -> None:
     inspector = inspect(engine)
     existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
@@ -306,7 +333,7 @@ def _add_column_if_missing(table_name: str, column_name: str, column_sql: str) -
         return
 
     with engine.begin() as connection:
-        connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}"))
+        connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {_dialect_column_sql(column_sql)}"))
 
 
 def _create_index_if_missing(index_name: str, table_name: str, column_name: str) -> None:
@@ -328,7 +355,7 @@ def _drop_table_if_exists(table_name: str) -> None:
         connection.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
 
 
-def init_db() -> None:
+def _init_db_unlocked() -> None:
     _drop_table_if_exists("ai_routing_audits")
     Base.metadata.create_all(bind=engine)
     _add_column_if_missing("lost_found_items", "claimed", "BOOLEAN NOT NULL DEFAULT 0")
@@ -391,3 +418,17 @@ def init_db() -> None:
     _create_index_if_missing("ix_lost_found_items_deleted_by_user_id", "lost_found_items", "deleted_by_user_id")
     _create_index_if_missing("ix_ai_inspection_logs_user_id", "ai_inspection_logs", "user_id")
     _create_index_if_missing("ix_ai_inspection_logs_feature", "ai_inspection_logs", "feature")
+
+
+def init_db() -> None:
+    if engine.dialect.name != "postgresql":
+        _init_db_unlocked()
+        return
+
+    with engine.connect() as connection:
+        connection.execute(text("SELECT pg_advisory_lock(:lock_id)"), {"lock_id": POSTGRES_INIT_LOCK_ID})
+        try:
+            _init_db_unlocked()
+        finally:
+            connection.execute(text("SELECT pg_advisory_unlock(:lock_id)"), {"lock_id": POSTGRES_INIT_LOCK_ID})
+            connection.commit()
