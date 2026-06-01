@@ -1,4 +1,16 @@
-const API_BASE = window.location.origin || "";
+function normalizeApiBaseUrl(value) {
+  const rawValue = String(value || "").trim();
+  if (!rawValue || rawValue === "null") return "";
+  return rawValue.replace(/\/+$/, "");
+}
+
+function sameOriginApiBase() {
+  return normalizeApiBaseUrl(window.location?.origin || "");
+}
+
+const RUNTIME_CONFIG = window.LOSTFOUND_CONFIG || {};
+const API_BASE = normalizeApiBaseUrl(RUNTIME_CONFIG.apiBaseUrl) || sameOriginApiBase();
+const API_DEBUG_ENABLED = RUNTIME_CONFIG.apiDebug !== false;
 const SESSION_STORAGE_KEY = "lostfound_session";
 const THEME_STORAGE_KEY = "theme";
 const CURRENT_ITEM_STORAGE_KEY = "lostfound_current_item";
@@ -14,12 +26,10 @@ const THEME_MODES = ["dark", "light"];
 const SUPPORTED_LANGUAGES = ["en", "zh-CN", "th"];
 const SIDEBAR_MODES = ["left", "top", "bottom", "minimal"];
 const CHAT_UPLOAD_LIMIT_BYTES = 5 * 1024 * 1024;
-const CHAT_ALLOWED_FILE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".pdf", ".txt"];
+const CHAT_ALLOWED_FILE_EXTENSIONS = [".png", ".jpg", ".jpeg"];
 const CHAT_ALLOWED_FILE_MIME_TYPES = [
   "image/png",
   "image/jpeg",
-  "application/pdf",
-  "text/plain",
 ];
 const REPORT_ALLOWED_IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".heic", ".heif"];
 const REPORT_ALLOWED_IMAGE_MIME_TYPES = [
@@ -38,10 +48,13 @@ const ADMIN_MONITOR_POLL_INTERVAL_MS = 5000;
 const NOTIFICATION_POLL_INTERVAL_MS = 25000;
 const SEARCH_DEBOUNCE_MS = 400;
 const QUERY_SUGGESTION_LIMIT = 6;
-const GLOBAL_BACKGROUND_URL = "/uploads/background.png";
+const LOGIN_BACKGROUND_URL = "/uploads/background.png";
+const LOGIN_LOADING_VIDEO_URL = "/uploads/loading.mp4";
+const LOGIN_LOADING_FALLBACK_MS = 20000;
 const TUTORIAL_CARD_MARGIN = 16;
 const TUTORIAL_VIEWPORT_PADDING = 12;
 const UI_DEBUG_PREFIX = "[LostFound UI]";
+const CHATBOT_DEBUG_PREFIX = "[CHATBOT DEBUG]";
 const SIDEBAR_MIN_WIDTH = 220;
 const SIDEBAR_MAX_WIDTH = 420;
 const SIDEBAR_DEFAULT_WIDTH = 280;
@@ -64,11 +77,228 @@ const ROOM_SELECTION_MAX_POINTS = 240;
 const ACTIVITY_HISTORY_LIMIT = 12;
 const ACTIVITY_COMPLETED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const ACTIVITY_STALE_RUNNING_MS = 90 * 60 * 1000;
+const MAP_IMAGE_URL = "/uploads/map.png";
+const MAP_IMAGE_RELOAD_PARAM = "v";
+const MAP_IMAGE_SOURCE_WIDTH = 4484;
+const MAP_IMAGE_SOURCE_HEIGHT = 3036;
+const MAP_CAMERA_TRANSITION_MS = 620;
+const MAP_WRAPPER_MIN_GAP = 0.008;
+const MAP_WRAPPER_MIN_SIZE = 0.045;
+const DEFAULT_ROOM_LABELS = [];
+const DEFAULT_SUB_LOCATION_LABELS = DEFAULT_ROOM_LABELS;
+const DEFAULT_SUB_LOCATIONS = DEFAULT_SUB_LOCATION_LABELS.map((label) => ({
+  id: label.toLowerCase(),
+  label,
+}));
+const ACADEMIC_ROOMS = [];
+const SPORTS_BUILDING_ROOMS = [
+  { id: "new-sports-hall", label: "New Sports Hall" },
+  { id: "sports-hall", label: "Sports Hall" },
+];
+const SPORTS_COMPLEX_ROOMS = [
+  { id: "changing-rooms", label: "Changing Rooms" },
+  { id: "strength-conditioning-room", label: "Strength & Conditioning Room" },
+];
+const ACADEMIC_FLOOR_COUNTS_BY_LOCATION_ID = {
+  "innovation-building": 5,
+  "senior-school": 4,
+  "prep-school": 4,
+  "pre-prep-school": 4,
+};
+const INVALID_LOCATION_CODE_MESSAGE = "Invalid location code for selected zone";
+
+function mapTextRegionFromPixels(x, y, width, height) {
+  return {
+    x: x / MAP_IMAGE_SOURCE_WIDTH,
+    y: y / MAP_IMAGE_SOURCE_HEIGHT,
+    width: width / MAP_IMAGE_SOURCE_WIDTH,
+    height: height / MAP_IMAGE_SOURCE_HEIGHT,
+  };
+}
+
+function createAcademicFloors(locationId) {
+  const floorCount = ACADEMIC_FLOOR_COUNTS_BY_LOCATION_ID[locationId] || 0;
+  return Array.from({ length: floorCount }, (_, index) => {
+    const floorNumber = index + 1;
+    const label = `Floor ${floorNumber}`;
+    return {
+      id: `floor-${floorNumber}`,
+      label,
+      subLocations: ACADEMIC_ROOMS,
+    };
+  });
+}
+
+const SCHOOL_MAP_STRUCTURE = [
+  {
+    id: "innovation-building",
+    name: "Innovation Building",
+    label: "Innovation Building",
+    x: 25,
+    y: 42,
+    metadata: { areaType: "Academic building", navigation: "floors" },
+    region: {
+      x: 0.069,
+      y: 0.257,
+      width: 0.219,
+      height: 0.043,
+      points: [],
+    },
+    floors: createAcademicFloors("innovation-building"),
+  },
+  {
+    id: "senior-school",
+    name: "Senior School",
+    label: "Senior School",
+    x: 49,
+    y: 32,
+    metadata: { areaType: "Academic building", navigation: "floors" },
+    region: {
+      x: 0.353,
+      y: 0.162,
+      width: 0.164,
+      height: 0.043,
+      points: [],
+    },
+    floors: createAcademicFloors("senior-school"),
+  },
+  {
+    id: "prep-school",
+    name: "Prep School",
+    label: "Prep School",
+    x: 63,
+    y: 32,
+    metadata: { areaType: "Academic building", navigation: "floors" },
+    region: {
+      ...mapTextRegionFromPixels(2391, 500, 564, 101),
+      points: [],
+    },
+    floors: createAcademicFloors("prep-school"),
+  },
+  {
+    id: "pre-prep-school",
+    name: "Pre-Prep School",
+    label: "Pre-Prep School",
+    x: 62,
+    y: 57,
+    metadata: { areaType: "Academic building", navigation: "floors" },
+    region: {
+      x: 0.565,
+      y: 0.515,
+      width: 0.170,
+      height: 0.045,
+      points: [],
+    },
+    floors: createAcademicFloors("pre-prep-school"),
+  },
+  {
+    id: "sports-building",
+    name: "Sports Building",
+    label: "Sports Building",
+    x: 50,
+    y: 57,
+    metadata: { areaType: "Sports building", navigation: "areas" },
+    subLocations: SPORTS_BUILDING_ROOMS,
+    region: {
+      ...mapTextRegionFromPixels(1637, 1533, 542, 100),
+      points: [],
+    },
+    floors: [],
+  },
+  {
+    id: "sports-complex",
+    name: "Sports Complex",
+    label: "Sports Complex",
+    x: 34,
+    y: 48,
+    metadata: { areaType: "Sports complex", navigation: "areas" },
+    subLocations: SPORTS_COMPLEX_ROOMS,
+    region: {
+      ...mapTextRegionFromPixels(864, 1336, 752, 88),
+      points: [],
+    },
+    floors: [],
+  },
+  {
+    id: "sports-fields-running-track",
+    name: "Sports Fields & Running Track",
+    label: "Sports Fields & Running Track",
+    x: 31,
+    y: 9,
+    metadata: { areaType: "Sports field", navigation: "standalone" },
+    subLocations: [],
+    region: {
+      x: 0.164,
+      y: 0.070,
+      width: 0.262,
+      height: 0.043,
+      points: [],
+    },
+    floors: [],
+  },
+  {
+    id: "morris-forum",
+    name: "Morris Forum",
+    label: "Morris Forum",
+    x: 60,
+    y: 44,
+    metadata: { areaType: "Forum", navigation: "standalone" },
+    subLocations: [],
+    region: {
+      x: 0.530,
+      y: 0.352,
+      width: 0.145,
+      height: 0.043,
+      points: [],
+    },
+    floors: [],
+  },
+];
+const SCHOOL_LOCATIONS = [
+  ...SCHOOL_MAP_STRUCTURE.map((location) => ({
+    ...location,
+    interactionRegions: [
+      {
+        id: `${location.id}-region`,
+        label: location.label || location.name,
+        x: location.region.x,
+        y: location.region.y,
+        width: location.region.width,
+        height: location.region.height,
+        points: [],
+        shape: "box",
+        type: "zone",
+      },
+    ],
+  })),
+];
+const SCHOOL_ZONES = SCHOOL_LOCATIONS.map((location) => location.name);
+const MANUAL_LOCATION_CODE_RULES = [
+  { prefix: "A", locationId: "innovation-building", minFloor: 1, maxFloor: 5, label: "Innovation" },
+  { prefix: "S", locationId: "senior-school", minFloor: 1, maxFloor: 4, label: "Senior" },
+  { prefix: "P", locationId: "pre-prep-school", minFloor: 1, maxFloor: 2, label: "Pre-Prep" },
+  { prefix: "P", locationId: "prep-school", minFloor: 3, maxFloor: 4, label: "Prep" },
+];
 const savedSidebarMode = localStorage.getItem(SIDEBAR_MODE_STORAGE_KEY);
 const savedSidebarWidth = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY) || "");
 const initialSidebarWidth = Number.isFinite(savedSidebarWidth)
   ? Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(savedSidebarWidth)))
   : SIDEBAR_DEFAULT_WIDTH;
+
+const LUCIDE_ICON_PATHS = {
+  archive: '<rect width="20" height="5" x="2" y="3" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path>',
+  "badge-check": '<path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.78 4.78 4 4 0 0 1-6.74 0 4 4 0 0 1-4.78-4.78 4 4 0 0 1 0-6.75Z"></path><path d="m9 12 2 2 4-4"></path>',
+  bell: '<path d="M10.27 21a2 2 0 0 0 3.46 0"></path><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path>',
+  "circle-plus": '<circle cx="12" cy="12" r="10"></circle><path d="M8 12h8"></path><path d="M12 8v8"></path>',
+  "clipboard-list": '<rect width="8" height="4" x="8" y="2" rx="1"></rect><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><path d="M12 11h4"></path><path d="M12 16h4"></path><path d="M8 11h.01"></path><path d="M8 16h.01"></path>',
+  "layout-dashboard": '<rect width="7" height="9" x="3" y="3" rx="1"></rect><rect width="7" height="5" x="14" y="3" rx="1"></rect><rect width="7" height="9" x="14" y="12" rx="1"></rect><rect width="7" height="5" x="3" y="16" rx="1"></rect>',
+  "log-out": '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><path d="M16 17l5-5-5-5"></path><path d="M21 12H9"></path>',
+  map: '<path d="M14.1 5.55a2 2 0 0 1 1.8 0l3.65 1.83A2 2 0 0 1 21 9.17v8.66a2 2 0 0 1-2.9 1.79l-3.65-1.83a2 2 0 0 0-1.8 0l-3.3 1.66a2 2 0 0 1-1.8 0L3.9 17.62A2 2 0 0 1 3 15.83V7.17a2 2 0 0 1 2.9-1.79l3.65 1.83a2 2 0 0 0 1.8 0Z"></path><path d="M9 6.5v13"></path><path d="M15 4.5v13"></path>',
+  "message-circle": '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path>',
+  "rotate-ccw": '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path>',
+  shield: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.5 3.8 17 5 19 5a1 1 0 0 1 1 1Z"></path>',
+  user: '<path d="M19 21a7 7 0 0 0-14 0"></path><circle cx="12" cy="7" r="4"></circle>',
+};
 
 function safeParseStoredJson(key, fallback) {
   try {
@@ -130,7 +360,7 @@ const translations = {
     "status.systemWarning": "Ollama down",
     "status.systemCritical": "Backend or database down",
     "auth.eyebrow": "School account",
-    "auth.hero": "Sign in to report lost items, track claims, and move item questions into a dedicated chat page.",
+    "auth.hero": "Sign in to report lost items, track claims, and ask structured item lookup questions.",
     "auth.tabs": "Authentication tabs",
     "auth.login": "Login",
     "auth.register": "Register",
@@ -141,7 +371,7 @@ const translations = {
     "auth.initials": "Initials",
     "auth.classOf": "Class of",
     "topbar.eyebrow": "Local campus desk",
-    "topbar.hero": "Reports stay local, admin actions stay guarded, and item questions live in their own chat page.",
+    "topbar.hero": "Reports stay local, admin actions stay guarded, and item questions return structured matches.",
     "topbar.theme": "Theme",
     "topbar.language": "Language",
     "theme.dark": "Dark",
@@ -152,7 +382,7 @@ const translations = {
     "nav.dashboard": "Dashboard",
     "nav.room": "Lost & Found Room",
     "nav.returned": "Recently Returned",
-    "nav.query": "Query",
+    "nav.query": "Question Board",
     "nav.claims": "My Claims",
     "nav.account": "Account",
     "nav.admin": "Admin Panel",
@@ -202,21 +432,21 @@ const translations = {
     "admin.role": "Role",
     "admin.created": "Created",
     "admin.actions": "Actions",
-    "query.eyebrow": "Item chat",
-    "query.title": "Query page",
+    "query.eyebrow": "Public lookup",
+    "query.title": "Question Board",
     "query.back": "Back to reports",
     "query.selectItem": "Select item",
     "query.generalInquiry": "General inquiry",
     "query.generalNote": "Use general inquiry for questions without a selected item.",
-    "query.messagingNote": "Messages stay in this conversation and never trigger automated replies.",
+    "query.messagingNote": "Questions are saved with any image context and return structured item matches.",
     "query.refreshItems": "Refresh item list",
     "query.selectAnItem": "Select an item",
-    "query.selectOrGeneral": "Select a report or use general inquiry mode.",
-    "query.noMessages": "No questions yet. Start with a message below.",
-    "query.emptyGeneral": "No general questions yet. Ask about recent reports or a missing item to get started.",
-    "query.emptyItem": "No questions for this item yet. Ask for location details, evidence, or claim guidance.",
-    "query.askAboutItem": "Ask about this item",
-    "query.send": "Send message",
+    "query.selectOrGeneral": "Select a report or use general lookup mode.",
+    "query.noMessages": "No lookup results yet.",
+    "query.emptyGeneral": "Ask about a missing item to see structured matches.",
+    "query.emptyItem": "Ask a question about this item to see structured matches.",
+    "query.askAboutItem": "Did anyone see my blue bottle?",
+    "query.send": "Ask Question",
     "tutorial.stepOf": "Step {current} of {total}",
     "tutorial.welcomeTitle": "Welcome to Lost and Found",
     "tutorial.welcomeBody": "This walkthrough points to the live interface so you can see where reports, claims, messaging, and admin tools live.",
@@ -226,8 +456,8 @@ const translations = {
     "tutorial.browseBody": "Use the report board to scan recent items, filter by category or location, and open a report before taking action.",
     "tutorial.claimsTitle": "Claim an Item",
     "tutorial.claimsBody": "Claim buttons live on report cards. Share specific details like color, brand, and unique marks so admins can review accurately.",
-    "tutorial.messagingTitle": "Send Messages",
-    "tutorial.messagingBody": "Messages are simple conversation records only. Pick a report for item-aware context, or stay in general inquiry for broader questions.",
+    "tutorial.messagingTitle": "Ask Questions",
+    "tutorial.messagingBody": "Use the question box to look up lost items with text, image upload, or a camera photo.",
     "tutorial.adminTitle": "Admin Overview",
     "tutorial.adminBody": "Admins can review users, items, claims, inspection logs, and system health from one place without exposing those tools to students.",
     "tutorial.back": "Back",
@@ -262,7 +492,7 @@ const translations = {
     "status.systemWarning": "Ollama 离线",
     "status.systemCritical": "后端或数据库异常",
     "auth.eyebrow": "校园账号",
-    "auth.hero": "登录后即可提交失物报告、追踪认领记录，并在独立聊天页中咨询物品问题。",
+    "auth.hero": "登录后即可提交失物报告、追踪认领记录，并提出结构化物品查询问题。",
     "auth.tabs": "身份验证标签",
     "auth.login": "登录",
     "auth.register": "注册",
@@ -273,7 +503,7 @@ const translations = {
     "auth.initials": "姓名缩写",
     "auth.classOf": "毕业年份",
     "topbar.eyebrow": "校园服务台",
-    "topbar.hero": "报告仅保存在本地，管理员操作受到保护，物品问题会进入独立聊天页。",
+    "topbar.hero": "报告仅保存在本地，管理员操作受到保护，物品问题会返回结构化匹配结果。",
     "topbar.theme": "主题",
     "topbar.language": "语言",
     "theme.dark": "深色",
@@ -284,7 +514,7 @@ const translations = {
     "nav.dashboard": "仪表盘",
     "nav.room": "失物招领室",
     "nav.returned": "最近归还",
-    "nav.query": "聊天",
+    "nav.query": "问题板",
     "nav.claims": "我的认领",
     "nav.account": "账号",
     "nav.admin": "管理面板",
@@ -334,21 +564,21 @@ const translations = {
     "admin.role": "角色",
     "admin.created": "创建时间",
     "admin.actions": "操作",
-    "query.eyebrow": "物品聊天",
-    "query.title": "咨询页面",
+    "query.eyebrow": "公开查询",
+    "query.title": "问题板",
     "query.back": "返回报告",
     "query.selectItem": "选择物品",
     "query.generalInquiry": "一般咨询",
     "query.generalNote": "未选择具体物品时可使用一般咨询。",
-    "query.messagingNote": "消息只会保存在当前会话中，不会触发自动回复。",
+    "query.messagingNote": "问题会与图片上下文一起保存，并返回结构化匹配结果。",
     "query.refreshItems": "刷新物品列表",
     "query.selectAnItem": "选择一个物品",
-    "query.selectOrGeneral": "选择一条报告，或使用一般咨询模式。",
-    "query.noMessages": "还没有提问。可以在下方开始。",
-    "query.emptyGeneral": "还没有一般咨询。你可以先问最近的报告或丢失物品线索。",
-    "query.emptyItem": "这个物品还没有提问记录。你可以询问地点、证据或认领方式。",
-    "query.askAboutItem": "询问这个物品",
-    "query.send": "发送消息",
+    "query.selectOrGeneral": "选择一条报告，或使用一般查询模式。",
+    "query.noMessages": "还没有查询结果。",
+    "query.emptyGeneral": "输入遗失物品问题即可查看结构化匹配结果。",
+    "query.emptyItem": "围绕这个物品提问即可查看结构化匹配结果。",
+    "query.askAboutItem": "有人看到我的蓝色水瓶吗？",
+    "query.send": "提交问题",
     "tutorial.stepOf": "第 {current} / {total} 步",
     "tutorial.welcomeTitle": "欢迎使用失物招领",
     "tutorial.welcomeBody": "这个引导会直接指向真实界面，帮助你快速找到报告、认领、消息和管理员工具的位置。",
@@ -358,8 +588,8 @@ const translations = {
     "tutorial.browseBody": "使用报告看板查看最新物品，并按分类或地点筛选，再决定是否继续操作。",
     "tutorial.claimsTitle": "认领物品",
     "tutorial.claimsBody": "认领按钮就在报告卡片上。尽量提供颜色、品牌和独特标记等具体信息，方便管理员核验。",
-    "tutorial.messagingTitle": "发送消息",
-    "tutorial.messagingBody": "这里现在是纯消息记录。你可以选择具体报告来保留物品上下文，或使用一般咨询。",
+    "tutorial.messagingTitle": "提交问题",
+    "tutorial.messagingBody": "使用问题框通过文字、图片上传或相机照片查询遗失物品。",
     "tutorial.adminTitle": "管理员总览",
     "tutorial.adminBody": "管理员可以在这里查看用户、物品、认领、检查日志和系统状态，普通用户不会看到这些工具。",
     "tutorial.back": "上一步",
@@ -385,6 +615,10 @@ const uiBindingStats = {
   attached: 0,
   missing: 0,
 };
+const chatbotDebugState = {
+  clickHandlerAttached: false,
+  modalStateChanged: false,
+};
 
 const translationEnhancements = {
   en: {
@@ -394,14 +628,14 @@ const translationEnhancements = {
     "notifications.markRead": "Mark as read",
     "admin.audit": "Audit log",
     "admin.auditTitle": "Sensitive activity",
-    "claim.eyebrow": "Ownership check",
-    "claim.title": "Claim item",
+    "claim.eyebrow": "Private draft",
+    "claim.title": "Claim Draft Builder",
     "claim.close": "Close claim form",
     "claim.reason": "Why are you claiming this item?",
     "claim.description": "Description of item",
     "claim.location": "Where did you lose it?",
     "claim.identifying": "Additional identifying info",
-    "claim.submit": "Claim Item",
+    "claim.submit": "Save Draft",
     "confirm.eyebrow": "Confirm action",
     "confirm.title": "Please confirm",
     "confirm.close": "Close confirmation",
@@ -414,8 +648,8 @@ const translationEnhancements = {
     "tutorial.searchBody": "Use the search bar to find reports with typo-tolerant matching across titles, tags, categories, and locations.",
     "tutorial.claimFlowTitle": "How Claims Work",
     "tutorial.claimFlowBody": "Use the claim button on a report and add specific identifying details so admins can review ownership safely.",
-    "tutorial.chatTitle": "How Chat Works",
-    "tutorial.chatBody": "The chat page stores non-AI messages only. Pick a report for item context or use general inquiry for broader questions.",
+    "tutorial.chatTitle": "How Lookup Works",
+    "tutorial.chatBody": "The question box saves lookup context and shows structured report matches.",
   },
   "zh-CN": {
     "notifications.button": "通知",
@@ -424,14 +658,14 @@ const translationEnhancements = {
     "notifications.markRead": "标记为已读",
     "admin.audit": "审计日志",
     "admin.auditTitle": "敏感操作记录",
-    "claim.eyebrow": "所有权核验",
-    "claim.title": "认领物品",
+    "claim.eyebrow": "私人草稿",
+    "claim.title": "认领草稿构建器",
     "claim.close": "关闭认领表单",
     "claim.reason": "你为什么认领这件物品？",
     "claim.description": "物品描述",
     "claim.location": "你在哪里丢失的？",
     "claim.identifying": "补充识别信息",
-    "claim.submit": "提交认领",
+    "claim.submit": "保存草稿",
     "confirm.eyebrow": "确认操作",
     "confirm.title": "请确认",
     "confirm.close": "关闭确认窗口",
@@ -444,8 +678,8 @@ const translationEnhancements = {
     "tutorial.searchBody": "使用搜索栏时，系统会按标题、标签、分类和地点进行容错匹配，支持轻微拼写错误。",
     "tutorial.claimFlowTitle": "认领流程",
     "tutorial.claimFlowBody": "在报告卡片上点击认领，并填写具体识别信息，管理员才能更安全地核验所有权。",
-    "tutorial.chatTitle": "消息说明",
-    "tutorial.chatBody": "聊天页只保存非 AI 消息。你可以选择具体报告保留物品上下文，或使用一般咨询。",
+    "tutorial.chatTitle": "查询说明",
+    "tutorial.chatBody": "问题框会保存查询上下文，并显示结构化报告匹配结果。",
   },
   th: {
     "page.title": "ระบบของหายและของพบในโรงเรียน",
@@ -463,7 +697,7 @@ const translationEnhancements = {
     "status.systemWarning": "Ollama ไม่พร้อมใช้งาน",
     "status.systemCritical": "ระบบหลังบ้านหรือฐานข้อมูลมีปัญหา",
     "auth.eyebrow": "บัญชีโรงเรียน",
-    "auth.hero": "ลงชื่อเข้าใช้เพื่อส่งรายงานของหาย ติดตามคำขอรับคืน และส่งข้อความเกี่ยวกับสิ่งของในหน้าสนทนาเฉพาะ",
+    "auth.hero": "ลงชื่อเข้าใช้เพื่อส่งรายงานของหาย ติดตามคำขอรับคืน และถามคำถามค้นหาสิ่งของแบบมีโครงสร้าง",
     "auth.tabs": "แท็บยืนยันตัวตน",
     "auth.login": "เข้าสู่ระบบ",
     "auth.register": "สมัครสมาชิก",
@@ -474,7 +708,7 @@ const translationEnhancements = {
     "auth.initials": "ชื่อย่อ",
     "auth.classOf": "รุ่นจบ",
     "topbar.eyebrow": "จุดบริการภายในโรงเรียน",
-    "topbar.hero": "รายงานจะอยู่ภายในระบบท้องถิ่น การดำเนินการของผู้ดูแลจะถูกควบคุม และคำถามเกี่ยวกับสิ่งของจะอยู่ในหน้าสนทนาเฉพาะ",
+    "topbar.hero": "รายงานจะอยู่ภายในระบบท้องถิ่น การดำเนินการของผู้ดูแลจะถูกควบคุม และคำถามเกี่ยวกับสิ่งของจะแสดงผลลัพธ์แบบโครงสร้าง",
     "topbar.theme": "ธีม",
     "topbar.language": "ภาษา",
     "theme.dark": "เข้ม",
@@ -485,7 +719,7 @@ const translationEnhancements = {
     "nav.dashboard": "แดชบอร์ด",
     "nav.room": "ห้องของหายและของพบ",
     "nav.returned": "เพิ่งถูกรับคืน",
-    "nav.query": "สนทนา",
+    "nav.query": "กระดานคำถาม",
     "nav.claims": "คำขอของฉัน",
     "nav.account": "บัญชี",
     "nav.admin": "แผงผู้ดูแล",
@@ -537,21 +771,21 @@ const translationEnhancements = {
     "admin.actions": "การดำเนินการ",
     "admin.audit": "บันทึกตรวจสอบ",
     "admin.auditTitle": "กิจกรรมที่มีความอ่อนไหว",
-    "query.eyebrow": "สนทนาเรื่องสิ่งของ",
-    "query.title": "หน้าสนทนา",
+    "query.eyebrow": "ค้นหาสาธารณะ",
+    "query.title": "กระดานคำถาม",
     "query.back": "กลับสู่รายงาน",
     "query.selectItem": "เลือกสิ่งของ",
     "query.generalInquiry": "สอบถามทั่วไป",
     "query.generalNote": "ใช้การสอบถามทั่วไปเมื่อยังไม่ได้เลือกสิ่งของ",
-    "query.messagingNote": "ข้อความจะถูกเก็บไว้ในบทสนทนานี้เท่านั้น และจะไม่เรียกใช้การตอบกลับอัตโนมัติ",
+    "query.messagingNote": "คำถามจะถูกบันทึกพร้อมบริบทรูปภาพ และแสดงผลลัพธ์แบบโครงสร้าง",
     "query.refreshItems": "รีเฟรชรายการสิ่งของ",
     "query.selectAnItem": "เลือกสิ่งของ",
-    "query.selectOrGeneral": "เลือกหนึ่งรายงาน หรือใช้โหมดสอบถามทั่วไป",
-    "query.noMessages": "ยังไม่มีข้อความ เริ่มพิมพ์ได้ด้านล่าง",
-    "query.emptyGeneral": "ยังไม่มีการสอบถามทั่วไป ลองถามเกี่ยวกับรายงานล่าสุดหรือสิ่งของที่หายไป",
-    "query.emptyItem": "ยังไม่มีข้อความสำหรับสิ่งของนี้ ลองถามเรื่องสถานที่ หลักฐาน หรือวิธีการยื่นคำขอ",
-    "query.askAboutItem": "สอบถามเกี่ยวกับสิ่งของนี้",
-    "query.send": "ส่งข้อความ",
+    "query.selectOrGeneral": "เลือกหนึ่งรายงาน หรือใช้โหมดค้นหาทั่วไป",
+    "query.noMessages": "ยังไม่มีผลการค้นหา",
+    "query.emptyGeneral": "ถามเกี่ยวกับสิ่งของที่หายเพื่อดูรายการที่ตรงกัน",
+    "query.emptyItem": "ถามเกี่ยวกับสิ่งของนี้เพื่อดูรายการที่ตรงกัน",
+    "query.askAboutItem": "มีใครเห็นขวดน้ำสีน้ำเงินของฉันไหม",
+    "query.send": "ส่งคำถาม",
     "tutorial.stepOf": "ขั้นตอน {current} จาก {total}",
     "tutorial.welcomeTitle": "ยินดีต้อนรับสู่ระบบของหายและของพบ",
     "tutorial.welcomeBody": "คู่มือนี้จะชี้ไปยังหน้าจอจริง เพื่อให้เห็นว่ารายงาน คำขอ ข้อความ และเครื่องมือผู้ดูแลอยู่ตรงไหน",
@@ -561,8 +795,8 @@ const translationEnhancements = {
     "tutorial.searchBody": "แถบค้นหารองรับการค้นหาแบบยืดหยุ่น โดยให้ความสำคัญกับชื่อ แท็ก หมวดหมู่ และคำสำคัญของสถานที่",
     "tutorial.claimFlowTitle": "การยื่นคำขอ",
     "tutorial.claimFlowBody": "ปุ่มยื่นคำขออยู่บนการ์ดรายงาน โปรดให้รายละเอียดเฉพาะเพื่อให้ผู้ดูแลตรวจสอบได้อย่างปลอดภัย",
-    "tutorial.chatTitle": "การใช้งานแชต",
-    "tutorial.chatBody": "หน้าสนทนานี้เก็บเฉพาะข้อความที่ผู้ใช้ส่งจริง ไม่มีการตอบกลับด้วย AI เลือกรายงานเพื่อคงบริบทของสิ่งของได้",
+    "tutorial.chatTitle": "การค้นหา",
+    "tutorial.chatBody": "กล่องคำถามจะบันทึกบริบทการค้นหาและแสดงรายงานที่ตรงกันแบบโครงสร้าง",
     "tutorial.adminTitle": "ภาพรวมผู้ดูแล",
     "tutorial.adminBody": "ผู้ดูแลสามารถตรวจสอบผู้ใช้ สิ่งของ คำขอ บันทึก และสถานะระบบได้จากที่เดียว โดยไม่เปิดเผยเครื่องมือให้ผู้ใช้ทั่วไป",
     "tutorial.back": "ย้อนกลับ",
@@ -574,14 +808,14 @@ const translationEnhancements = {
     "notifications.title": "การแจ้งเตือน",
     "notifications.empty": "ยังไม่มีการแจ้งเตือน",
     "notifications.markRead": "ทำเครื่องหมายว่าอ่านแล้ว",
-    "claim.eyebrow": "ตรวจสอบความเป็นเจ้าของ",
-    "claim.title": "ยื่นคำขอรับคืน",
+    "claim.eyebrow": "แบบร่างส่วนตัว",
+    "claim.title": "ตัวสร้างแบบร่างคำขอ",
     "claim.close": "ปิดแบบฟอร์มคำขอ",
     "claim.reason": "เหตุใดคุณจึงขอรับสิ่งของนี้คืน",
     "claim.description": "คำอธิบายสิ่งของ",
     "claim.location": "คุณทำหายที่ไหน",
     "claim.identifying": "ข้อมูลระบุตัวตนเพิ่มเติม",
-    "claim.submit": "ยื่นคำขอ",
+    "claim.submit": "บันทึกแบบร่าง",
     "confirm.eyebrow": "ยืนยันการดำเนินการ",
     "confirm.title": "กรุณายืนยัน",
     "confirm.close": "ปิดหน้าต่างยืนยัน",
@@ -629,6 +863,9 @@ const localizedValues = {
     Archived: "已归档",
     "New Sports Hall": "新体育馆",
     "Sports Hall": "体育馆",
+    "Sports Building": "体育楼",
+    "Sports Complex": "体育中心",
+    "Sports Fields & Running Track": "运动场和跑道",
     "Long Court": "长球场",
     Library: "图书馆",
     "Morris Forum": "Morris 论坛",
@@ -654,6 +891,9 @@ const localizedValues = {
     Archived: "เก็บถาวร",
     "New Sports Hall": "โรงยิมใหม่",
     "Sports Hall": "โรงยิม",
+    "Sports Building": "อาคารกีฬา",
+    "Sports Complex": "ศูนย์กีฬา",
+    "Sports Fields & Running Track": "สนามกีฬาและลู่วิ่ง",
     "Long Court": "สนามลองคอร์ต",
     Library: "ห้องสมุด",
     "Morris Forum": "มอร์ริสฟอรัม",
@@ -664,17 +904,40 @@ const localizedValues = {
   },
 };
 
-const predefinedLocations = [
-  "New Sports Hall",
-  "Sports Hall",
-  "Long Court",
-  "Library",
-  "Morris Forum",
-];
+const campusLocationTree = SCHOOL_LOCATIONS.map((location) => {
+  const directSubLocations = directSubLocationsForLocation(location);
+  return {
+    value: location.name,
+    children: directSubLocations.length
+      ? directSubLocations.map((subLocation) => `${location.name} > ${subLocation.label}`)
+      : [
+          ...(location.floors || []).flatMap((floor) => [
+            `${location.name} > ${floor.label}`,
+            ...(floor.subLocations || []).map((subLocation) => `${location.name} > ${floor.label} > ${subLocation.label}`),
+          ]),
+        ],
+  };
+});
+
+function flattenLocationTree(nodes = []) {
+  return nodes.reduce((locations, node) => {
+    if (!node?.value) return locations;
+    locations.push(node.value);
+    (node.children || []).forEach((child) => locations.push(child));
+    return locations;
+  }, []);
+}
+
+const predefinedLocations = flattenLocationTree(campusLocationTree);
+const locationBrowserLocations = predefinedLocations;
+
+function uniqueValues(values = []) {
+  return Array.from(new Set(values.filter(Boolean)));
+}
 
 const buildings = {
-  S: "Senior Building",
-  P: "Primary Building",
+  S: "Senior School",
+  P: "Prep School",
   A: "Innovation Building",
 };
 
@@ -692,13 +955,10 @@ const fallbackFilters = {
     "Other",
   ],
   statuses: ["Open", "Matched", "Claimed", "Archived"],
-  locations: [
+  locations: uniqueValues([
+    ...locationBrowserLocations,
     ...predefinedLocations,
-    "Senior Building",
-    "Primary Building",
-    "Innovation Building",
-    "Lost & Found Room",
-  ],
+  ]),
 };
 
 const state = {
@@ -721,13 +981,34 @@ const state = {
   adminAudits: [],
   aiInspectionLogs: [],
   adminTab: "users",
+  mapImageUrl: MAP_IMAGE_URL,
+  mapImageVersion: Date.now(),
+  loadingVideoUrl: LOGIN_LOADING_VIDEO_URL,
+  locations: normalizeSchoolLocations(SCHOOL_LOCATIONS),
+  mapZones: [...SCHOOL_ZONES],
+  mapRegions: [],
+  mapStats: { regions: {}, zones: {} },
+  selectedZone: null,
+  selectedBox: null,
+  expandedBox: null,
+  selectedFloor: null,
+  selectedSubLocation: null,
+  heatmapEnabled: true,
+  cameraZoomState: { scale: 1, x: 0.5, y: 0.5 },
+  activeReportFormContext: false,
+  selectedLocation: null,
+  hoverLocation: null,
+  hoverState: null,
+  expandedMapTarget: null,
   filters: fallbackFilters,
   selectedFile: null,
   selectedQueryFile: null,
+  selectedQuestionReplyFile: null,
   profilePreviewUrl: "",
   previewUrls: new Map(),
   searchCache: new Map(),
   queryCache: new Map(),
+  queryResultCache: new Map(),
   avatarVersion: Date.now(),
   searchTimer: null,
   activeClaimItem: null,
@@ -736,9 +1017,25 @@ const state = {
   currentQueryItem: null,
   queryItems: [],
   queryMessages: [],
+  queryStructuredResults: [],
   querySuggestions: [],
   queryRequestToken: null,
+  queryCameraStream: null,
+  reportCameraStream: null,
+  questionBoard: [],
+  activeQuestionThread: null,
+  pendingQuestionThreadId: null,
+  assistantMessages: [],
+  assistantMode: "chat",
+  assistantLastQuery: "",
+  assistantLastMessage: "",
+  assistantRequestInFlight: false,
+  assistantQueryLastQuery: "",
+  assistantQueryResults: [],
   language: localStorage.getItem(LANGUAGE_STORAGE_KEY) || "en",
+  activeLocationFilter: "",
+  locationFilterSource: "",
+  locationDrawerOpen: false,
   sidebarMode: SIDEBAR_MODES.includes(savedSidebarMode)
     ? savedSidebarMode
     : "left",
@@ -816,8 +1113,11 @@ const authSubmitButton = document.querySelector("#authSubmitButton");
 const authSubmitLabel = document.querySelector("#authSubmitLabel");
 const loginTab = document.querySelector("#loginTab");
 const registerTab = document.querySelector("#registerTab");
+const loginLoadingScreen = document.querySelector("#loginLoadingScreen");
+const loginLoadingVideo = document.querySelector("#loginLoadingVideo");
 
 const showDashboardButton = document.querySelector("#showDashboardButton");
+const showMapButton = document.querySelector("#showMapButton");
 const showReportsButton = document.querySelector("#showReportsButton");
 const showReportItemButton = document.querySelector("#showReportItemButton");
 const showRoomButton = document.querySelector("#showRoomButton");
@@ -844,6 +1144,7 @@ let windowWorkspace = document.querySelector("#windowWorkspace");
 let sidebarLauncherButton = document.querySelector("#sidebarLauncherButton");
 let sidebarPanel = document.querySelector("#sidebarPanel");
 let sidebarSplitter = document.querySelector("#sidebarSplitter");
+const sidebarDrawerBackdrop = document.querySelector("#sidebarDrawerBackdrop");
 let contentSplitter = document.querySelector("#contentSplitter");
 let secondaryStack = document.querySelector("#secondaryStack");
 const sidebarCollapseButton = document.querySelector("#sidebarCollapseButton");
@@ -875,6 +1176,7 @@ const weeklyReturnedCount = document.querySelector("#weeklyReturnedCount");
 let dashboardSection = document.querySelector("#dashboardSection");
 let reportsSection = document.querySelector("#reportsSection");
 let reportsPanel = document.querySelector("#reportsPanel");
+let mapSection = document.querySelector("#mapSection");
 let roomSection = document.querySelector("#roomSection");
 let returnedSection = document.querySelector("#returnedSection");
 let claimsSection = document.querySelector("#claimsSection");
@@ -884,11 +1186,36 @@ let adminSection = document.querySelector("#adminSection");
 let querySection = document.querySelector("#querySection");
 
 const openReportModalButton = document.querySelector("#openReportModalButton");
+const openAssistantButton = document.querySelector("#openAssistantButton");
+const assistantLauncherButtons = [openAssistantButton].filter(Boolean);
+const assistantPanel = document.querySelector("#assistantPanel");
+const assistantCloseButton = document.querySelector("#assistantCloseButton");
+const assistantChatModeButton = document.querySelector("#assistantChatModeButton");
+const assistantQueryModeButton = document.querySelector("#assistantQueryModeButton");
+const assistantChatModePanel = document.querySelector("#assistantChatModePanel");
+const assistantQueryModePanel = document.querySelector("#assistantQueryModePanel");
+const assistantMessages = document.querySelector("#assistantMessages");
+const assistantForm = document.querySelector("#assistantForm");
+const assistantInput = document.querySelector("#assistantInput");
+const assistantClaimDraftButton = document.querySelector("#assistantClaimDraftButton");
+const assistantSubmitButton = document.querySelector("#assistantSubmitButton");
+const assistantStatus = document.querySelector("#assistantStatus");
+const assistantQueryForm = document.querySelector("#assistantQueryForm");
+const assistantQueryInput = document.querySelector("#assistantQueryInput");
+const assistantQuerySubmitButton = document.querySelector("#assistantQuerySubmitButton");
+const assistantQueryStatus = document.querySelector("#assistantQueryStatus");
+const assistantQueryResults = document.querySelector("#assistantQueryResults");
 const reportDialog = document.querySelector("#reportDialog");
 const closeReportDialog = document.querySelector("#closeReportDialog");
 const form = document.querySelector("#itemForm");
 const dropZone = document.querySelector("#dropZone");
 const imageInput = document.querySelector("#imageInput");
+const reportCameraInput = document.querySelector("#reportCameraInput");
+const reportCameraButton = document.querySelector("#reportCameraButton");
+const reportCameraPanel = document.querySelector("#reportCameraPanel");
+const reportCameraPreview = document.querySelector("#reportCameraPreview");
+const reportCameraCaptureButton = document.querySelector("#reportCameraCaptureButton");
+const reportCameraCancelButton = document.querySelector("#reportCameraCancelButton");
 const dropTitle = document.querySelector("#dropTitle");
 const dropHint = document.querySelector("#dropHint");
 const reporterInput = document.querySelector("#reporterInput");
@@ -897,7 +1224,12 @@ const categoryInput = document.querySelector("#categoryInput");
 const categoryFilter = document.querySelector("#categoryFilter");
 const statusFilter = document.querySelector("#statusFilter");
 const locationFilter = document.querySelector("#locationFilter");
+const locationFilterBanner = document.querySelector("#locationFilterBanner");
+const locationFilterBannerText = document.querySelector("#locationFilterBannerText");
+const locationBackButton = document.querySelector("#locationBackButton");
+const clearLocationFilterButton = document.querySelector("#clearLocationFilterButton");
 const optionalLocationInput = document.querySelector("#optionalLocationInput");
+const locationHelperText = document.querySelector("#locationHelperText");
 const dateInput = document.querySelector("#dateInput");
 const descriptionInput = document.querySelector("#descriptionInput");
 const evidenceDetailsInput = document.querySelector("#evidenceDetailsInput");
@@ -930,6 +1262,20 @@ const dashboardActivityList = document.querySelector("#dashboardActivityList");
 const dashboardReportButton = document.querySelector("#dashboardReportButton");
 const dashboardRefreshButton = document.querySelector("#dashboardRefreshButton");
 const dashboardLinkButtons = Array.from(document.querySelectorAll("[data-dashboard-target]"));
+const dashboardAdvancedButtons = Array.from(document.querySelectorAll("[data-dashboard-advanced]"));
+const locationBrowserTree = document.querySelector("#locationBrowserTree");
+let locationBrowserButtons = Array.from(document.querySelectorAll("[data-location-filter]"));
+let locationTreeGroups = Array.from(document.querySelectorAll("[data-location-group]"));
+const mapResetButton = document.querySelector("#mapResetButton");
+const mapSelectionBreadcrumb = document.querySelector("#mapSelectionBreadcrumb");
+const schoolMapShell = document.querySelector("#schoolMapShell");
+const schoolMapCamera = document.querySelector("#schoolMapCamera");
+const schoolMapImage = document.querySelector("#schoolMapImage");
+const schoolMapTextLayer = document.querySelector("#schoolMapTextLayer");
+const schoolMapTooltip = document.querySelector("#schoolMapTooltip");
+const mapSelectionPanel = document.querySelector("#mapSelectionPanel");
+const locationViewPanel = document.querySelector("#locationViewPanel");
+const mapBackButton = document.querySelector("#mapBackButton");
 
 const roomAdminPanel = document.querySelector("#roomAdminPanel");
 const roomLabelInput = document.querySelector("#roomLabelInput");
@@ -999,7 +1345,6 @@ const adminOllamaStatus = document.querySelector("#adminOllamaStatus");
 const adminOllamaModels = document.querySelector("#adminOllamaModels");
 const adminMonitorUpdated = document.querySelector("#adminMonitorUpdated");
 const adminMonitorWarning = document.querySelector("#adminMonitorWarning");
-
 const queryBackButton = document.querySelector("#queryBackButton");
 const queryItemSelect = document.querySelector("#queryItemSelect");
 const refreshQueryItemsButton = document.querySelector("#refreshQueryItemsButton");
@@ -1015,7 +1360,15 @@ const queryItemImageFallback = document.querySelector("#queryItemImageFallback")
 const queryItemContextLabel = document.querySelector("#queryItemContextLabel");
 const queryMessages = document.querySelector("#queryMessages");
 const queryForm = document.querySelector("#queryForm");
+const queryTypeSelect = document.querySelector("#queryTypeSelect");
+const queryLocationInput = document.querySelector("#queryLocationInput");
 const queryFileInput = document.querySelector("#queryFileInput");
+const queryCameraInput = document.querySelector("#queryCameraInput");
+const queryCameraButton = document.querySelector("#queryCameraButton");
+const queryCameraPanel = document.querySelector("#queryCameraPanel");
+const queryCameraPreview = document.querySelector("#queryCameraPreview");
+const queryCameraCaptureButton = document.querySelector("#queryCameraCaptureButton");
+const queryCameraCancelButton = document.querySelector("#queryCameraCancelButton");
 const queryFileInfo = document.querySelector("#queryFileInfo");
 const queryFileName = document.querySelector("#queryFileName");
 const queryFileSize = document.querySelector("#queryFileSize");
@@ -1033,6 +1386,22 @@ const queryEmptyState = document.querySelector("#queryEmptyState");
 const querySuggestions = document.querySelector("#querySuggestions");
 const queryAdminActions = document.querySelector("#queryAdminActions");
 const queryClearThreadButton = document.querySelector("#queryClearThreadButton");
+const refreshQuestionBoardButton = document.querySelector("#refreshQuestionBoardButton");
+const questionBoardList = document.querySelector("#questionBoardList");
+const questionThreadPanel = document.querySelector("#questionThreadPanel");
+const questionThreadMeta = document.querySelector("#questionThreadMeta");
+const questionThreadTitle = document.querySelector("#questionThreadTitle");
+const questionThreadBody = document.querySelector("#questionThreadBody");
+const closeQuestionThreadButton = document.querySelector("#closeQuestionThreadButton");
+const questionReplyForm = document.querySelector("#questionReplyForm");
+const questionReplyTypeSelect = document.querySelector("#questionReplyTypeSelect");
+const questionReplyFileInput = document.querySelector("#questionReplyFileInput");
+const questionReplyFileInfo = document.querySelector("#questionReplyFileInfo");
+const questionReplyFileName = document.querySelector("#questionReplyFileName");
+const questionReplyFileRemoveButton = document.querySelector("#questionReplyFileRemoveButton");
+const questionReplyInput = document.querySelector("#questionReplyInput");
+const questionReplySubmitButton = document.querySelector("#questionReplySubmitButton");
+const questionReplyMessage = document.querySelector("#questionReplyMessage");
 
 const claimDialog = document.querySelector("#claimDialog");
 const roomClaimPreviewDialog = document.querySelector("#roomClaimPreviewDialog");
@@ -1057,6 +1426,8 @@ const roomUndoSelectionButton = document.querySelector("#roomUndoSelectionButton
 const roomClearSelectionButton = document.querySelector("#roomClearSelectionButton");
 const claimForm = document.querySelector("#claimForm");
 const claimItemLabel = document.querySelector("#claimItemLabel");
+const claimItemSelect = document.querySelector("#claimItemSelect");
+const claimDraftTitleInput = document.querySelector("#claimDraftTitleInput");
 const claimReasonInput = document.querySelector("#claimReasonInput");
 const claimDescriptionInput = document.querySelector("#claimDescriptionInput");
 const claimLocationInput = document.querySelector("#claimLocationInput");
@@ -1143,6 +1514,7 @@ function refreshPanelElements() {
     sidebar: sidebarPanel,
     dashboard: dashboardSection,
     reports: reportsPanel,
+    map: mapSection,
     room: roomSection,
     returned: returnedSection,
     claims: claimsSection,
@@ -1164,6 +1536,7 @@ function cacheLayoutDomReferences() {
   dashboardSection = document.querySelector("#dashboardSection");
   reportsSection = document.querySelector("#reportsSection");
   reportsPanel = document.querySelector("#reportsPanel");
+  mapSection = document.querySelector("#mapSection");
   roomSection = document.querySelector("#roomSection");
   returnedSection = document.querySelector("#returnedSection");
   claimsSection = document.querySelector("#claimsSection");
@@ -1315,9 +1688,9 @@ function ensureLayoutStructure() {
   cacheLayoutDomReferences();
 }
 
-const secondaryPanelNames = ["room", "returned", "claims", "notifications", "account", "admin", "query"];
+const secondaryPanelNames = ["map", "room", "returned", "claims", "notifications", "account", "admin", "query"];
 const primaryPanelNames = ["dashboard", "reports"];
-const simpleModeSections = new Set(["dashboard", "reports", "room", "returned", "query", "claims", "notifications", "account"]);
+const simpleModeSections = new Set(["dashboard", "reports", "map", "room", "returned", "query", "claims", "notifications", "account"]);
 const advancedModeSections = new Set(["admin"]);
 const LAYOUT_BREAKPOINT = 900;
 const PHONE_LAYOUT_BREAKPOINT = 600;
@@ -1424,6 +1797,912 @@ function syncResponsiveNavigationSlots(mode = currentResponsiveMode()) {
   }
 }
 
+function normalizedLocationFilter(value = "") {
+  return String(value || "").trim();
+}
+
+const LOCATION_PART_ALIASES = {
+  "Senior School": ["Senior Building", "Senior"],
+  "Prep School": ["Junior School", "Junior Area", "Junior"],
+  "Pre-Prep School": ["Pre Prep School", "Pre-Prep", "Pre Prep"],
+  "DT & Art Building": ["DT and Art Building", "DT Art Building", "Design Technology Building"],
+  "Sports Building": ["PE Building"],
+  "Sports Complex": [],
+  "Sports Fields & Running Track": ["Sports Fields", "Running Track", "Sports Field", "Track", "Long Court"],
+  "Administration Block": ["Administration", "Admin Office", "Admin Block"],
+  "Junior Area": ["Prep School", "Junior School", "Junior"],
+  "Strength & Conditioning": ["Strength and Conditioning", "Strength & Conditioning Room", "Strength and Conditioning Room", "S&C Room", "Weights Room"],
+  "Strength & Conditioning Room": ["Strength and Conditioning", "Strength and Conditioning Room", "S&C Room", "Weights Room"],
+  "New Sports Hall": ["New Hall"],
+  "Sports Hall": ["Old Sports Hall"],
+  "Changing Rooms": ["PE Changing Rooms", "PE Changing Room"],
+  "Junior Playground": ["Playground"],
+  "Junior DT Room": ["Junior Design Technology Room"],
+};
+
+const LOCATION_VALUE_ALIASES = {
+  "Innovation Building > Floor 1": ["Innovation Building Level 1", "Innovation Building Floor 1", "A1"],
+  "Innovation Building > Floor 2": ["Innovation Building Level 2", "Innovation Building Floor 2", "A2"],
+  "Innovation Building > Floor 3": ["Innovation Building Level 3", "Innovation Building Floor 3", "A3"],
+  "Innovation Building > Floor 4": ["Innovation Building Level 4", "Innovation Building Floor 4", "A4"],
+  "Innovation Building > Floor 5": ["Innovation Building Level 5", "Innovation Building Floor 5", "A5"],
+  "Senior School > Floor 1": ["Senior School Level 1", "Senior School Floor 1", "S1"],
+  "Senior School > Floor 2": ["Senior School Level 2", "Senior School Floor 2", "S2"],
+  "Senior School > Floor 3": ["Senior School Level 3", "Senior School Floor 3", "S3"],
+  "Senior School > Floor 4": ["Senior School Level 4", "Senior School Floor 4", "S4"],
+  "Prep School > Floor 1": ["Prep School Level 1", "Prep School Floor 1", "P1"],
+  "Prep School > Floor 2": ["Prep School Level 2", "Prep School Floor 2", "P2"],
+  "Prep School > Floor 3": ["Prep School Level 3", "Prep School Floor 3", "P3"],
+  "Prep School > Floor 4": ["Prep School Level 4", "Prep School Floor 4", "P4"],
+  "Pre-Prep School > Floor 1": ["Pre Prep School Level 1", "Pre-Prep School Floor 1", "Pre-Prep P1"],
+  "Pre-Prep School > Floor 2": ["Pre Prep School Level 2", "Pre-Prep School Floor 2", "Pre-Prep P2"],
+  "Pre-Prep School > Floor 3": ["Pre Prep School Level 3", "Pre-Prep School Floor 3", "Pre-Prep P3"],
+  "Pre-Prep School > Floor 4": ["Pre Prep School Level 4", "Pre-Prep School Floor 4", "Pre-Prep P4"],
+  "DT & Art Building > DT Room": ["DT Room", "Design Technology Room"],
+  "DT & Art Building > Art Room": ["Art Room"],
+  "Sports Building > New Sports Hall": ["New Sports Hall", "New Hall"],
+  "Sports Building > Sports Hall": ["Sports Hall", "Old Sports Hall"],
+  "Sports Complex > Changing Rooms": ["PE Changing Rooms", "PE Changing Room", "Changing Rooms"],
+  "Sports Complex > Strength & Conditioning Room": ["Strength and Conditioning Room", "Strength and Conditioning", "S&C Room", "Weights Room"],
+  "Junior Area > Junior Playground": ["Junior Playground", "Playground"],
+  "Junior Area > Junior DT Room": ["Junior DT Room", "Junior Design Technology Room"],
+};
+
+const LOCATION_LEAVES_REQUIRING_PARENT = new Set([
+  "new sports hall",
+  "sports hall",
+  "changing rooms",
+  "strength and conditioning room",
+]);
+
+function locationPathParts(value = "") {
+  return normalizedLocationFilter(value)
+    .split(">")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function locationPathLabel(value = "") {
+  const parts = locationPathParts(value);
+  return parts.length ? parts.map((part) => localizeValue(part)).join(" > ") : "";
+}
+
+function normalizeLocationText(value = "") {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function locationAliasesForPart(part = "") {
+  return uniqueValues([part, ...(LOCATION_PART_ALIASES[part] || [])])
+    .map(normalizeLocationText)
+    .filter(Boolean);
+}
+
+function locationAliasesForValue(value = "") {
+  return uniqueValues([value, ...(LOCATION_VALUE_ALIASES[value] || [])])
+    .map(normalizeLocationText)
+    .filter(Boolean);
+}
+
+function locationPartMatchesText(part = "", source = "") {
+  return locationAliasesForPart(part).some((alias) => source.includes(alias));
+}
+
+function locationLeafNeedsParent(leaf = "") {
+  return /^floor\s+\d+$/i.test(leaf)
+    || /^[asp][1-5]$/i.test(leaf)
+    || LOCATION_LEAVES_REQUIRING_PARENT.has(normalizeLocationText(leaf));
+}
+
+function floorNumberFromValue(value = "") {
+  const label = String(value || "").trim();
+  if (!label) return 0;
+  const floorMatch = label.match(/\bfloor\s*([1-9])\b/i) || label.match(/\blevel\s*([1-9])\b/i);
+  if (floorMatch) return Number(floorMatch[1]);
+  const idMatch = label.match(/^floor-([1-9])$/i);
+  if (idMatch) return Number(idMatch[1]);
+  const legacyCodeMatch = label.match(/^[ASP]([1-9])$/i);
+  if (legacyCodeMatch) return Number(legacyCodeMatch[1]);
+  const roomCode = parseManualLocationCode(label);
+  return roomCode?.floorNumber || 0;
+}
+
+function floorNumberForFloor(floor = {}) {
+  return floorNumberFromValue(floor.label) || floorNumberFromValue(floor.id);
+}
+
+function academicFloorCountForLocation(location = {}, fallback = {}) {
+  const id = stableElementId(location.id || fallback.id || location.name || fallback.name || location.label || fallback.label || "");
+  return ACADEMIC_FLOOR_COUNTS_BY_LOCATION_ID[id] || 0;
+}
+
+function floorLabelForNumber(floorNumber) {
+  return `Floor ${floorNumber}`;
+}
+
+function activeLocationLabel() {
+  const location = normalizedLocationFilter(state.activeLocationFilter);
+  return location ? locationPathLabel(location) : "";
+}
+
+function locationBrowserDefaultLabel() {
+  return langText({
+    en: "All locations",
+    "zh-CN": "所有地点",
+    th: "ทุกพื้นที่",
+  });
+}
+
+function stableElementId(value = "") {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "zone";
+}
+
+function coordinatePercent(value, fallback = 50) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) return fallback;
+  return Math.min(100, Math.max(0, numberValue));
+}
+
+function coordinateUnit(value, fallback = 0) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) {
+    const fallbackNumber = Number(fallback);
+    const normalizedFallback = fallbackNumber > 1 ? fallbackNumber / 100 : fallbackNumber;
+    return Number.isFinite(normalizedFallback) ? Math.min(1, Math.max(0, normalizedFallback)) : 0;
+  }
+  const normalized = numberValue > 1 ? numberValue / 100 : numberValue;
+  return Math.min(1, Math.max(0, normalized));
+}
+
+function normalizeSubLocationsForLocation(location = {}, fallback = {}) {
+  let source = DEFAULT_SUB_LOCATIONS;
+  [
+    location.subLocations,
+    location.sub_locations,
+    location.directSubLocations,
+    location.direct_sub_locations,
+    fallback.subLocations,
+    fallback.sub_locations,
+    fallback.directSubLocations,
+    fallback.direct_sub_locations,
+  ].some((candidate) => {
+    if (!Array.isArray(candidate)) return false;
+    source = candidate;
+    return true;
+  });
+  return source
+    .map((subLocation, index) => {
+      const label = String(subLocation?.label || subLocation?.name || subLocation?.id || DEFAULT_SUB_LOCATION_LABELS[index] || "").trim();
+      if (!label) return null;
+      return {
+        id: stableElementId(subLocation?.id || label),
+        label,
+      };
+    })
+    .filter(Boolean);
+}
+
+function cleanFloorLabel(value = "", { academic = false } = {}) {
+  const label = String(value || "").trim();
+  if (!label || /^(?:undefined|null|\?)$/i.test(label)) return "";
+  if (!academic) return label;
+  const floorNumber = floorNumberFromValue(label);
+  return floorNumber ? floorLabelForNumber(floorNumber) : label;
+}
+
+function defaultSubLocationsForFloor(location = {}, label = "") {
+  return DEFAULT_SUB_LOCATIONS;
+}
+
+function normalizeFloorDefinitions(location = {}, fallback = {}) {
+  const source = Array.isArray(location.floors)
+    ? location.floors
+    : Array.isArray(location.floor_definitions)
+      ? location.floor_definitions
+      : Array.isArray(fallback.floors)
+        ? fallback.floors
+        : Array.isArray(fallback.floor_definitions)
+          ? fallback.floor_definitions
+          : [];
+  const requiredFloorCount = academicFloorCountForLocation(location, fallback);
+  const normalizedFloors = source
+    .map((floor, index) => {
+      const label = cleanFloorLabel(floor?.label || floor?.name || floor?.id || "", { academic: Boolean(requiredFloorCount) });
+      if (!label) return null;
+      const floorNumber = floorNumberFromValue(label) || index + 1;
+      return {
+        id: requiredFloorCount ? `floor-${floorNumber}` : stableElementId(floor?.id || label || `floor-${index + 1}`),
+        label,
+        subLocations: normalizeSubLocationsForLocation(floor, {
+          subLocations: defaultSubLocationsForFloor({ ...fallback, ...location }, label),
+        }),
+      };
+    })
+    .filter(Boolean);
+
+  if (!requiredFloorCount) return normalizedFloors;
+
+  const floorByNumber = new Map(
+    normalizedFloors
+      .filter((floor) => {
+        const floorNumber = floorNumberForFloor(floor);
+        return floorNumber >= 1 && floorNumber <= requiredFloorCount;
+      })
+      .map((floor) => [floorNumberForFloor(floor), floor]),
+  );
+  return Array.from({ length: requiredFloorCount }, (_, index) => {
+    const floorNumber = index + 1;
+    const label = floorLabelForNumber(floorNumber);
+    return floorByNumber.get(floorNumber) || {
+      id: `floor-${floorNumber}`,
+      label,
+      subLocations: defaultSubLocationsForFloor({ ...fallback, ...location }, label),
+    };
+  });
+}
+
+function normalizeRegionPoints(points = []) {
+  if (!Array.isArray(points)) return [];
+  return points
+    .map((point) => {
+      const x = Array.isArray(point) ? point[0] : point?.x;
+      const y = Array.isArray(point) ? point[1] : point?.y;
+      const normalizedX = Number(x);
+      const normalizedY = Number(y);
+      if (!Number.isFinite(normalizedX) || !Number.isFinite(normalizedY)) return null;
+      return [
+        Math.min(1, Math.max(0, normalizedX)),
+        Math.min(1, Math.max(0, normalizedY)),
+      ];
+    })
+    .filter(Boolean);
+}
+
+function normalizeLocationInteractionRegion(region = {}, location = {}, index = 0) {
+  const type = "zone";
+  const fallbackRegion = location.region || {};
+  const fallbackWidth = coordinateUnit(fallbackRegion.width, 0.14);
+  const fallbackHeight = coordinateUnit(fallbackRegion.height, 0.08);
+  const x = coordinateUnit(region.x, coordinateUnit(fallbackRegion.x, coordinateUnit(location.x, 50)));
+  const y = coordinateUnit(region.y, coordinateUnit(fallbackRegion.y, coordinateUnit(location.y, 50)));
+  const width = Math.min(1 - x, Math.max(0.001, coordinateUnit(region.width, fallbackWidth)));
+  const height = Math.min(1 - y, Math.max(0.001, coordinateUnit(region.height, fallbackHeight)));
+  return {
+    id: stableElementId(region.id || `${location.id || "location"}-${type}-${index + 1}`),
+    locationId: location.id || "",
+    label: String(region.label || location.label || location.name || "").trim(),
+    x,
+    y,
+    width,
+    height,
+    points: [],
+    shape: "box",
+    type,
+  };
+}
+
+function normalizeLocationInteractionRegions(location = {}, fallback = {}) {
+  const source = Array.isArray(location.interactionRegions)
+    ? location.interactionRegions
+    : Array.isArray(location.interaction_regions)
+      ? location.interaction_regions
+      : Array.isArray(fallback.interactionRegions)
+        ? fallback.interactionRegions
+        : Array.isArray(fallback.interaction_regions)
+          ? fallback.interaction_regions
+          : [];
+  const regions = source
+    .map((region, index) => normalizeLocationInteractionRegion(region, location, index))
+    .filter((region) => region.id && region.label);
+  if (regions.length) return regions;
+  const fallbackRegion = fallback.region || location.region || {};
+  return [normalizeLocationInteractionRegion({
+    id: `${location.id || "location"}-region`,
+    label: location.name || location.label || "",
+    x: coordinateUnit(fallbackRegion.x, coordinateUnit(location.x, 50)),
+    y: coordinateUnit(fallbackRegion.y, coordinateUnit(location.y, 50)),
+    width: coordinateUnit(fallbackRegion.width, 0.14),
+    height: coordinateUnit(fallbackRegion.height, 0.08),
+    type: "zone",
+  }, location, 0)];
+}
+
+function normalizeSchoolLocation(location = {}, index = 0) {
+  const fallback = SCHOOL_LOCATIONS[index] || {};
+  const name = String(location.name || location.zone || fallback.name || location.label || "").trim();
+  const id = stableElementId(location.id || name || fallback.id || `location-${index + 1}`);
+  const locationWithId = { ...fallback, ...location, id, name };
+  const region = {
+    ...(fallback.region || {}),
+    ...(location.region && typeof location.region === "object" ? location.region : {}),
+  };
+  return {
+    id,
+    name,
+    label: String(location.label || fallback.label || name).trim(),
+    x: coordinatePercent(location.x, fallback.x ?? 50),
+    y: coordinatePercent(location.y, fallback.y ?? 50),
+    region,
+    metadata: {
+      ...(fallback.metadata || {}),
+      ...(location.metadata && typeof location.metadata === "object" ? location.metadata : {}),
+    },
+    floors: normalizeFloorDefinitions(location, fallback),
+    subLocations: normalizeSubLocationsForLocation(location, fallback),
+    interactionRegions: normalizeLocationInteractionRegions(locationWithId, fallback),
+  };
+}
+
+function normalizeSchoolLocations(locations = []) {
+  const normalizedInput = Array.isArray(locations)
+    ? locations.map(normalizeSchoolLocation).filter((location) => location.id && location.name)
+    : [];
+  const byId = new Map(normalizedInput.map((location) => [location.id, location]));
+  const byName = new Map(normalizedInput.map((location) => [normalizeLocationText(location.name), location]));
+  return SCHOOL_LOCATIONS.map((fallback, index) => {
+    const fallbackLocation = normalizeSchoolLocation(fallback, index);
+    const match = byId.get(fallbackLocation.id) || byName.get(normalizeLocationText(fallbackLocation.name));
+    return match ? normalizeSchoolLocation({ ...fallbackLocation, ...match }, index) : fallbackLocation;
+  });
+}
+
+function schoolLocationById(locationId) {
+  return state.locations.find((location) => location.id === locationId) || null;
+}
+
+function locationHasFloors(location) {
+  return Array.isArray(location?.floors) && location.floors.length > 0;
+}
+
+function locationUsesDirectExpandedSubLocations(location) {
+  return Boolean(locationHasFloors(location) && location?.metadata?.navigation === "direct-expanded-sub-locations");
+}
+
+function directSubLocationsForLocation(location) {
+  if (locationUsesDirectExpandedSubLocations(location)) {
+    return Array.isArray(location.floors?.[0]?.subLocations) ? location.floors[0].subLocations : [];
+  }
+  if (locationHasFloors(location)) return [];
+  return Array.isArray(location?.subLocations) ? location.subLocations : [];
+}
+
+function floorById(location, floorId) {
+  if (!locationHasFloors(location)) return null;
+  return location.floors.find((floor) => floor.id === floorId) || null;
+}
+
+function validFloorLabelForLocation(location, floor) {
+  const floorCount = academicFloorCountForLocation(location);
+  const label = cleanFloorLabel(floor?.label || floor?.id || "", { academic: Boolean(floorCount) });
+  if (!label) return "";
+  if (floorCount) {
+    const floorNumber = floorNumberFromValue(label);
+    if (!floorNumber || floorNumber > floorCount) return "";
+    return floorLabelForNumber(floorNumber);
+  }
+  return label;
+}
+
+function floorForLabel(location, label = "") {
+  const normalized = normalizedLocationFilter(label);
+  const requestedFloorNumber = floorNumberFromValue(label);
+  const normalizedText = normalizeLocationText(normalized);
+  if (!locationHasFloors(location) || !normalized) return null;
+  return location.floors.find((floor) => (
+    normalizedLocationFilter(floor.label) === normalized
+      || normalizedLocationFilter(floor.id) === normalized
+      || normalizeLocationText(floor.label) === normalizedText
+      || normalizeLocationText(floor.id) === normalizedText
+      || (requestedFloorNumber && floorNumberForFloor(floor) === requestedFloorNumber)
+  )) || null;
+}
+
+function subLocationById(source = [], subLocationId = "") {
+  return source.find((subLocation) => subLocation.id === subLocationId) || null;
+}
+
+function subLocationForLabel(source = [], label = "") {
+  const normalized = normalizedLocationFilter(label);
+  if (!normalized) return null;
+  return source.find((subLocation) => (
+    normalizedLocationFilter(subLocation.label) === normalized
+      || normalizedLocationFilter(subLocation.id) === normalized
+  )) || null;
+}
+
+function selectedSchoolLocation() {
+  return schoolLocationById(state.selectedZone || state.selectedLocation);
+}
+
+function selectedSchoolFloor() {
+  const location = selectedSchoolLocation();
+  return floorById(location, state.selectedFloor?.id || "");
+}
+
+function selectedSchoolSubLocation() {
+  const location = selectedSchoolLocation();
+  if (!location || !state.selectedSubLocation?.id) return null;
+  const floor = selectedSchoolFloor();
+  const source = floor?.subLocations || directSubLocationsForLocation(location);
+  return subLocationById(source, state.selectedSubLocation.id);
+}
+
+function schoolLocationForFilter(value = "") {
+  const normalizedValue = normalizedLocationFilter(value);
+  const source = normalizeLocationText(normalizedValue);
+  if (!normalizedValue) return null;
+  return state.locations.find((location) => (
+    location.id === normalizedValue
+      || normalizedLocationFilter(location.name) === normalizedValue
+      || normalizedLocationFilter(location.label) === normalizedValue
+      || normalizeLocationText(location.name) === source
+      || normalizeLocationText(location.label) === source
+  )) || null;
+}
+
+function schoolLocationFilterValue(location) {
+  return location?.name || "";
+}
+
+function syncSelectedLocationFromFilter() {
+  const active = currentLocationFilterValue();
+  const parts = locationPathParts(active);
+  const parentLocation = parts.length > 1 ? schoolLocationForFilter(parts[0]) : null;
+  const location = parentLocation || schoolLocationForFilter(active);
+  state.selectedZone = location?.id || null;
+  state.selectedLocation = location?.id || null;
+  state.selectedFloor = null;
+  state.selectedSubLocation = null;
+
+  if (location && parts.length > 1) {
+    const floor = floorForLabel(location, parts[1]);
+    if (floor) {
+      state.selectedFloor = { locationId: location.id, id: floor.id, label: floor.label };
+      const subLocation = parts.length > 2 ? subLocationForLabel(floor.subLocations, parts[2]) : null;
+      state.selectedSubLocation = subLocation
+        ? { locationId: location.id, floorId: floor.id, id: subLocation.id, label: subLocation.label }
+        : null;
+    } else {
+      const subLocation = subLocationForLabel(directSubLocationsForLocation(location), parts[1]);
+      state.selectedSubLocation = subLocation
+        ? { locationId: location.id, id: subLocation.id, label: subLocation.label }
+        : null;
+    }
+  }
+  return location;
+}
+
+function currentSchoolLocation() {
+  return selectedSchoolLocation() || schoolLocationForFilter(currentLocationFilterValue());
+}
+
+function regionPath(region) {
+  return region?.zone && region?.label ? `${region.zone} > ${region.label}` : "";
+}
+
+function regionById(regionId) {
+  return state.mapRegions.find((region) => region.id === regionId) || null;
+}
+
+function regionsForZone(zone) {
+  return state.mapRegions
+    .filter((region) => region.zone === zone)
+    .sort((a, b) => String(a.label || "").localeCompare(String(b.label || "")));
+}
+
+function campusLocationsFromMap() {
+  return uniqueValues(state.locations.flatMap((location) => {
+    const directSubLocations = directSubLocationsForLocation(location);
+    if (directSubLocations.length) {
+      return [
+        schoolLocationFilterValue(location),
+        ...directSubLocations.map((subLocation) => `${location.name} > ${subLocation.label}`),
+      ];
+    }
+    return [
+      schoolLocationFilterValue(location),
+      ...location.floors.flatMap((floor) => [
+        `${location.name} > ${floor.label}`,
+        ...floor.subLocations.map((subLocation) => `${location.name} > ${floor.label} > ${subLocation.label}`),
+      ]),
+    ];
+  }));
+}
+
+function selectedMapZone() {
+  const location = selectedSchoolLocation();
+  if (location?.name) return location.name;
+  const parts = locationPathParts(currentLocationFilterValue());
+  return state.mapZones.includes(parts[0]) ? parts[0] : "";
+}
+
+function selectedMapRegion() {
+  return null;
+}
+
+function mapRegionStats(region) {
+  const localItems = itemsForMapRegion(region);
+  const recentCount = localItems.filter(itemRecentForMap).length;
+  return {
+    item_count: localItems.length,
+    lost_count: localItems.filter((item) => String(item.report_type || "").toLowerCase() === "lost").length,
+    recent_count: recentCount,
+    recent_activity: Boolean(recentCount),
+  };
+}
+
+function mapZoneStats(zone) {
+  const localItems = state.items.filter((item) => itemMatchesMapZone(item, zone));
+  const recentCount = localItems.filter(itemRecentForMap).length;
+  return {
+    item_count: localItems.length,
+    lost_count: localItems.filter((item) => String(item.report_type || "").toLowerCase() === "lost").length,
+    recent_count: recentCount,
+    recent_activity: Boolean(recentCount),
+  };
+}
+
+function itemsForSchoolLocation(location) {
+  if (!location?.name) return [];
+  return state.items.filter((item) => !item.claimed && !item.returned_at && itemMatchesMapZone(item, location.name));
+}
+
+function recentItemsForSchoolLocation(location, limit = 3) {
+  return itemsForSchoolLocation(location)
+    .slice()
+    .sort((a, b) => {
+      const left = dateFromItem(a)?.getTime() || 0;
+      const right = dateFromItem(b)?.getTime() || 0;
+      return right - left;
+    })
+    .slice(0, limit);
+}
+
+function latestImageItemForItems(items = []) {
+  return items
+    .slice()
+    .sort((a, b) => {
+      const left = dateFromItem(a)?.getTime() || 0;
+      const right = dateFromItem(b)?.getTime() || 0;
+      return right - left;
+    })
+    .find((item) => canPreviewImage(state.previewUrls.get(item.id) || resolveImageUrl(item))) || null;
+}
+
+function schoolLocationStats(location) {
+  const localItems = itemsForSchoolLocation(location);
+  const recentItems = recentItemsForSchoolLocation(location);
+  const localLostCount = localItems.filter((item) => String(item.report_type || "").toLowerCase() === "lost").length;
+  return {
+    item_count: localItems.length,
+    lost_count: localLostCount,
+    recent_count: recentItems.length,
+    recent_activity: Boolean(recentItems.length),
+    recent_items: recentItems,
+    latest_image_item: latestImageItemForItems(localItems),
+  };
+}
+
+function schoolLocationDisplayName(location) {
+  return localizeValue(location?.label || location?.name || "");
+}
+
+function locationFloorPath(location, floor) {
+  const floorLabel = validFloorLabelForLocation(location, floor);
+  if (!location?.name || !floorLabel) return "";
+  return `${location.name} > ${floorLabel}`;
+}
+
+function locationSubLocationPath(location, subLocation, floor = null) {
+  if (!location?.name || !subLocation?.label) return "";
+  const floorLabel = floor ? validFloorLabelForLocation(location, floor) : "";
+  return floorLabel
+    ? `${location.name} > ${floorLabel} > ${subLocation.label}`
+    : `${location.name} > ${subLocation.label}`;
+}
+
+function itemMatchesFloor(item, location, floor) {
+  if (!location?.name || !floor?.label) return false;
+  const floorNumber = floorNumberForFloor(floor);
+  if (floorNumber && itemRoomLocationInfos(item).some((info) => (
+    info.locationId === location.id && info.floorNumber === floorNumber
+  ))) {
+    return true;
+  }
+  const sources = itemMapTextSources(item);
+  const parentAliases = uniqueValues([location.name, location.label])
+    .map(normalizeLocationText)
+    .filter(Boolean);
+  const floorAliases = locationAliasesForPart(floor.label);
+  return sources.some((source) => {
+    const floorMatches = floorAliases.some((alias) => source.includes(alias));
+    if (!floorMatches) return false;
+    const parentMatches = parentAliases.some((alias) => source.includes(alias));
+    return parentMatches || !locationLeafNeedsParent(floor.label);
+  });
+}
+
+function itemMatchesSubLocation(item, location, subLocation, floor = null) {
+  if (!location?.name || !subLocation?.label) return false;
+  const floorNumber = floor ? floorNumberForFloor(floor) : 0;
+  if (itemRoomLocationInfos(item).some((info) => (
+    info.locationId === location.id
+      && info.subLocationId === subLocation.id
+      && (!floorNumber || info.floorNumber === floorNumber)
+  ))) {
+    return true;
+  }
+  const sources = itemMapTextSources(item);
+  const parentAliases = uniqueValues([location.name, location.label])
+    .map(normalizeLocationText)
+    .filter(Boolean);
+  const leafAliases = locationAliasesForPart(subLocation.label);
+  const floorAliases = floor?.label ? locationAliasesForPart(floor.label) : [];
+  return sources.some((source) => {
+    const leafMatches = leafAliases.some((alias) => source.includes(alias));
+    if (!leafMatches) return false;
+    const parentMatches = parentAliases.some((alias) => source.includes(alias));
+    const floorMatches = floorAliases.length ? floorAliases.some((alias) => source.includes(alias)) : true;
+    return (parentMatches || !locationLeafNeedsParent(subLocation.label)) && floorMatches;
+  });
+}
+
+function itemsForFloor(location, floor) {
+  if (!location || !floor) return [];
+  return state.items.filter((item) => !item.claimed && !item.returned_at && itemMatchesFloor(item, location, floor));
+}
+
+function recentItemsForFloor(location, floor, limit = 3) {
+  return itemsForFloor(location, floor)
+    .slice()
+    .sort((a, b) => {
+      const left = dateFromItem(a)?.getTime() || 0;
+      const right = dateFromItem(b)?.getTime() || 0;
+      return right - left;
+    })
+    .slice(0, limit);
+}
+
+function schoolFloorStats(location, floor) {
+  const localItems = itemsForFloor(location, floor);
+  const recentItems = recentItemsForFloor(location, floor);
+  const localLostCount = localItems.filter((item) => String(item.report_type || "").toLowerCase() === "lost").length;
+  return {
+    item_count: localItems.length,
+    lost_count: localLostCount,
+    recent_count: recentItems.length,
+    recent_activity: Boolean(recentItems.length),
+    recent_items: recentItems,
+    latest_image_item: latestImageItemForItems(localItems),
+  };
+}
+
+function itemsForSubLocation(location, subLocation, floor = null) {
+  if (!location || !subLocation) return [];
+  return state.items.filter((item) => !item.claimed && !item.returned_at && itemMatchesSubLocation(item, location, subLocation, floor));
+}
+
+function recentItemsForSubLocation(location, subLocation, limit = 3, floor = null) {
+  return itemsForSubLocation(location, subLocation, floor)
+    .slice()
+    .sort((a, b) => {
+      const left = dateFromItem(a)?.getTime() || 0;
+      const right = dateFromItem(b)?.getTime() || 0;
+      return right - left;
+    })
+    .slice(0, limit);
+}
+
+function schoolSubLocationStats(location, subLocation, floor = null) {
+  const localItems = itemsForSubLocation(location, subLocation, floor);
+  const recentItems = recentItemsForSubLocation(location, subLocation, 3, floor);
+  const localLostCount = localItems.filter((item) => String(item.report_type || "").toLowerCase() === "lost").length;
+  return {
+    item_count: localItems.length,
+    lost_count: localLostCount,
+    recent_count: recentItems.length,
+    recent_activity: Boolean(recentItems.length),
+    recent_items: recentItems,
+    latest_image_item: latestImageItemForItems(localItems),
+  };
+}
+
+function currentLocationFilterValue() {
+  return normalizedLocationFilter(state.activeLocationFilter);
+}
+
+function ensureLocationFilterOption(value) {
+  if (!locationFilter || !value) return;
+  const exists = Array.from(locationFilter.options).some((option) => option.value === value);
+  if (!exists) {
+    locationFilter.append(new Option(locationPathLabel(value), value));
+  }
+}
+
+function syncLocationFilterSelect() {
+  if (!locationFilter) return;
+  const value = currentLocationFilterValue();
+  ensureLocationFilterOption(value);
+  locationFilter.value = value;
+}
+
+function syncLocationFilterBanner() {
+  if (!locationFilterBanner || !locationFilterBannerText) return;
+  const location = activeLocationLabel();
+  const hasLocation = Boolean(location);
+  locationFilterBanner.classList.toggle("is-hidden", !hasLocation);
+  locationFilterBannerText.textContent = hasLocation
+    ? `Showing reports for ${location}`
+    : "Showing all campus locations";
+}
+
+function refreshLocationBrowserRefs() {
+  locationBrowserButtons = Array.from(document.querySelectorAll("[data-location-filter]"));
+  locationTreeGroups = Array.from(document.querySelectorAll("[data-location-group]"));
+}
+
+function renderLocationBrowserTree() {
+  if (!locationBrowserTree) return;
+  locationBrowserTree.replaceChildren();
+
+  state.locations.forEach((location) => {
+    const stats = schoolLocationStats(location);
+    const button = document.createElement("button");
+    button.className = "ghost-button location-browser-button location-mirror-button";
+    button.type = "button";
+    button.dataset.locationId = location.id;
+    button.dataset.locationFilter = schoolLocationFilterValue(location);
+
+    const label = document.createElement("span");
+    label.className = "location-browser-name";
+    label.textContent = localizeValue(location.name);
+
+    const meta = document.createElement("span");
+    meta.className = "location-browser-meta";
+    meta.textContent = `${stats.lost_count}`;
+    meta.setAttribute("aria-label", `${stats.lost_count} lost items`);
+
+    button.append(label, meta);
+    locationBrowserTree.append(button);
+  });
+
+  refreshLocationBrowserRefs();
+  syncLocationBrowserState();
+}
+
+function syncLocationBrowserState() {
+  refreshLocationBrowserRefs();
+  const activeLocation = currentLocationFilterValue();
+  locationTreeGroups.forEach((group) => group.classList.remove("has-active-descendant"));
+  locationBrowserButtons.forEach((button) => {
+    const buttonLocation = normalizedLocationFilter(button.dataset.locationFilter || "");
+    const active = buttonLocation === activeLocation;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+    if (active) {
+      button.setAttribute("aria-current", "location");
+      const group = button.closest("[data-location-group]");
+      if (group && !button.hasAttribute("data-location-toggle")) setLocationGroupExpanded(group, true);
+    } else {
+      button.removeAttribute("aria-current");
+    }
+  });
+  locationTreeGroups.forEach((group) => {
+    const activeButton = group.querySelector(".location-browser-button.is-active");
+    const parentButton = group.querySelector("[data-location-toggle]");
+    group.classList.toggle("has-active-descendant", Boolean(activeButton && activeButton !== parentButton));
+  });
+  syncLocationFilterSelect();
+}
+
+function setLocationGroupExpanded(group, expanded) {
+  if (!group) return;
+  group.classList.toggle("is-expanded", Boolean(expanded));
+  const toggleButton = group.querySelector("[data-location-toggle]");
+  toggleButton?.setAttribute("aria-expanded", String(Boolean(expanded)));
+}
+
+function toggleLocationGroup(button) {
+  const group = button?.closest("[data-location-group]");
+  if (!group) return;
+  setLocationGroupExpanded(group, !group.classList.contains("is-expanded"));
+}
+
+function handleLocationBrowserClick(button) {
+  if (!button) return;
+  const locationId = button.dataset.locationId || schoolLocationForFilter(button.dataset.locationFilter || "")?.id || "";
+  if (locationId) {
+    selectSchoolLocation(locationId, { openMap: true, closeDrawer: true });
+    return;
+  }
+  setActiveLocationFilter(button.dataset.locationFilter || "", {
+    focusDashboard: false,
+    closeDrawer: true,
+  });
+}
+
+function closeLocationDrawer() {
+  state.locationDrawerOpen = false;
+  syncWorkspaceLayout();
+}
+
+function openLocationDrawer() {
+  state.locationDrawerOpen = true;
+  openPanel("sidebar");
+}
+
+function setActiveLocationFilter(value = "", {
+  updateSelect = true,
+  load = true,
+  focusDashboard = false,
+  closeDrawer = true,
+  source = "",
+} = {}) {
+  state.activeLocationFilter = normalizedLocationFilter(value);
+  state.locationFilterSource = state.activeLocationFilter ? source : "";
+  syncSelectedLocationFromFilter();
+  syncMapSelectionFromFilter();
+  if (updateSelect) {
+    syncLocationFilterSelect();
+  }
+  invalidateSearchCache();
+  syncLocationBrowserState();
+  updateLocationBar();
+  syncLocationFilterBanner();
+
+  if (closeDrawer && currentResponsiveMode() !== "desktop") {
+    state.locationDrawerOpen = false;
+    syncWorkspaceLayout();
+  }
+
+  if (focusDashboard && state.user && state.currentView !== "dashboard") {
+    navigateTo("dashboard");
+  }
+
+  renderLocationScopedSurfaces();
+
+  if (load && state.user) {
+    void loadItems();
+  } else {
+    syncWorkspaceLayout();
+  }
+}
+
+function selectSchoolLocation(locationId, {
+  openMap = true,
+  closeDrawer = true,
+  load = true,
+} = {}) {
+  const location = schoolLocationById(locationId);
+  if (!location) return;
+  state.selectedZone = location.id;
+  state.selectedLocation = location.id;
+  state.selectedFloor = null;
+  state.selectedSubLocation = null;
+  focusCameraOnRegion(primaryRegionForLocation(location));
+  setActiveLocationFilter(schoolLocationFilterValue(location), {
+    load,
+    focusDashboard: false,
+    closeDrawer,
+    source: "map",
+  });
+  renderLocationViewPanel(location);
+  renderSchoolMap();
+  if (openMap && state.user && state.currentView !== "map") {
+    navigateTo("map");
+  } else {
+    syncWorkspaceLayout();
+  }
+}
+
 function sectionAvailableInCurrentMode(section) {
   if (section === "admin") {
     return state.advancedMode && currentUserCanAdmin();
@@ -1439,16 +2718,19 @@ function syncModeLabels() {
   };
   if (state.advancedMode) {
     showDashboardButton.textContent = t("nav.dashboard");
+    if (showMapButton) showMapButton.textContent = "School Map";
     showReportsButton.textContent = t("nav.reports");
     showReportItemButton.textContent = langText({ en: "Report item", "zh-CN": "提交报告", th: "ส่งรายงาน" });
     showRoomButton.textContent = t("nav.room");
     showDashboardButton.dataset.navIcon = "D";
+    if (showMapButton) showMapButton.dataset.navIcon = "M";
     showReportsButton.dataset.navIcon = "R";
     showRoomButton.dataset.navIcon = "L";
     showClaimsButton.textContent = t("nav.claims");
     showNotificationsButton.textContent = t("notifications.title");
     showAccountButton.textContent = t("nav.account");
     setShortLabel(showDashboardButton, t("nav.dashboard"));
+    setShortLabel(showMapButton, "Map");
     setShortLabel(showReportsButton, t("nav.reports"));
     setShortLabel(showReportItemButton, langText({ en: "Report", "zh-CN": "报告", th: "รายงาน" }));
     setShortLabel(showRoomButton, langText({ en: "Room", "zh-CN": "招领室", th: "ห้อง" }));
@@ -1461,10 +2743,12 @@ function syncModeLabels() {
   }
 
   showDashboardButton.textContent = t("nav.dashboard");
+  if (showMapButton) showMapButton.textContent = "School Map";
   showReportsButton.textContent = langText({ en: "Claim item", "zh-CN": "认领物品", th: "รับของคืน" });
   showReportItemButton.textContent = langText({ en: "Report", "zh-CN": "报告", th: "รายงาน" });
   showRoomButton.textContent = langText({ en: "Lost & Found Room", "zh-CN": "失物招领室", th: "ห้องของหาย" });
   showDashboardButton.dataset.navIcon = "D";
+  if (showMapButton) showMapButton.dataset.navIcon = "M";
   showReportsButton.dataset.navIcon = "C";
   showReportItemButton.dataset.navIcon = "+";
   showRoomButton.dataset.navIcon = "L";
@@ -1472,6 +2756,7 @@ function syncModeLabels() {
   showNotificationsButton.textContent = t("notifications.title");
   showAccountButton.textContent = langText({ en: "Profile", "zh-CN": "个人资料", th: "โปรไฟล์" });
   setShortLabel(showDashboardButton, t("nav.dashboard"));
+  setShortLabel(showMapButton, "Map");
   setShortLabel(showReportsButton, langText({ en: "Claim", "zh-CN": "认领", th: "รับคืน" }));
   setShortLabel(showReportItemButton, langText({ en: "Report", "zh-CN": "报告", th: "รายงาน" }));
   setShortLabel(showRoomButton, langText({ en: "Room", "zh-CN": "招领室", th: "ห้อง" }));
@@ -1493,6 +2778,7 @@ function syncModeUi({ navigateIfNeeded = false } = {}) {
   }
 
   const showAdvancedNav = state.advancedMode;
+  showMapButton?.classList.remove("is-hidden");
   showReportItemButton?.classList.toggle("is-hidden", showAdvancedNav);
   showRoomButton?.classList.remove("is-hidden");
   showReturnedButton?.classList.remove("is-hidden");
@@ -1500,8 +2786,12 @@ function syncModeUi({ navigateIfNeeded = false } = {}) {
   showAdminButton?.classList.toggle("is-hidden", !(showAdvancedNav && currentUserCanAdmin()));
   logoutButton?.classList.toggle("is-hidden", !showAdvancedNav);
   roomAdminPanel?.classList.toggle("is-hidden", !(showAdvancedNav && currentUserCanAdmin()));
+  dashboardAdvancedButtons.forEach((button) => {
+    button.classList.toggle("is-hidden", !(showAdvancedNav && currentUserCanAdmin()));
+  });
 
   syncModeLabels();
+  syncLocationBrowserState();
   syncNewWindowMenu();
 
   if (!state.advancedMode) {
@@ -1611,12 +2901,15 @@ function syncWorkspaceLayout() {
   const responsiveMode = currentResponsiveMode();
   const phoneLayout = responsiveMode === "mobile";
   const tabletLayout = responsiveMode === "tablet";
+  const drawerLayout = responsiveMode !== "desktop";
+  if (!drawerLayout) {
+    state.locationDrawerOpen = false;
+  }
 
-  sidebarState.closed = false;
+  sidebarState.closed = drawerLayout ? !state.locationDrawerOpen : false;
   state.layoutSizes.sidebarWidth = sidebarState.collapsed ? SIDEBAR_COLLAPSED_WIDTH : STABLE_SIDEBAR_WIDTH;
 
-  if (phoneLayout) {
-    sidebarState.closed = false;
+  if (drawerLayout) {
     sidebarState.collapsed = false;
     reportsState.minimized = false;
     if (secondaryState) {
@@ -1624,7 +2917,7 @@ function syncWorkspaceLayout() {
     }
   }
 
-  const sidebarVisible = phoneLayout ? true : !sidebarState.closed;
+  const sidebarVisible = !sidebarState.closed;
   const primaryVisible = phoneLayout ? isPrimaryPanel(state.currentView) : !reportsState.closed;
   const dashboardVisible = primaryVisible && state.currentView === "dashboard";
   const reportsVisible = primaryVisible && !dashboardVisible;
@@ -1639,6 +2932,7 @@ function syncWorkspaceLayout() {
   const splitContentSideBySide = canResizeContent && isDesktopWindowLayout();
 
   appShell?.classList.toggle("has-open-sidebar", sidebarVisible);
+  appShell?.classList.toggle("is-location-drawer-open", drawerLayout && sidebarVisible);
   appShell?.classList.toggle("is-phone-layout", phoneLayout);
   appShell?.classList.toggle("is-tablet-layout", tabletLayout);
   appShell?.classList.toggle("is-desktop-layout", responsiveMode === "desktop");
@@ -1648,6 +2942,7 @@ function syncWorkspaceLayout() {
   workspaceLayout.classList.toggle("is-phone-layout", phoneLayout);
   workspaceLayout.classList.toggle("is-tablet-layout", tabletLayout);
   workspaceLayout.classList.toggle("is-desktop-layout", responsiveMode === "desktop");
+  workspaceLayout.classList.toggle("is-drawer-layout", drawerLayout);
   workspaceLayout.dataset.layoutMode = responsiveMode;
   document.body.dataset.layoutMode = responsiveMode;
   syncResponsiveNavigationSlots(responsiveMode);
@@ -1655,10 +2950,11 @@ function syncWorkspaceLayout() {
   sidebarPanel?.classList.toggle("is-top-mode", sidebarMode === "top");
   sidebarPanel?.classList.toggle("is-bottom-mode", sidebarMode === "bottom");
   sidebarPanel?.classList.toggle("is-minimal-mode", sidebarMode === "minimal");
-  sidebarState.collapsed = !phoneLayout && sidebarMode === "left" ? Boolean(sidebarState.collapsed) : false;
+  sidebarState.collapsed = !drawerLayout && sidebarMode === "left" ? Boolean(sidebarState.collapsed) : false;
   applyPanelLayout("sidebar");
-  sidebarPanel?.classList.toggle("is-hidden", false);
-  sidebarLauncherButton?.classList.toggle("is-hidden", true);
+  sidebarPanel?.classList.toggle("is-hidden", drawerLayout && !sidebarVisible);
+  sidebarLauncherButton?.classList.toggle("is-hidden", !drawerLayout);
+  sidebarDrawerBackdrop?.classList.toggle("is-hidden", !(drawerLayout && sidebarVisible));
   const canResizeSidebar = false;
   sidebarSplitter?.classList.toggle("is-hidden", !canResizeSidebar);
   contentSplitter?.classList.toggle("is-hidden", !(canResizeContent && state.advancedMode && state.multitaskActive));
@@ -1799,6 +3095,10 @@ function closePanel(name) {
   const panel = panelElements[name];
   if (!panel) return;
   if (name === "sidebar") {
+    if (currentResponsiveMode() !== "desktop") {
+      closeLocationDrawer();
+      return;
+    }
     setSidebarMode("left");
     return;
   }
@@ -1953,10 +3253,103 @@ function logClientError(context, error, details = {}) {
 }
 
 function logClientDebug(context, details = {}) {
-  const host = window.location.hostname;
-  const isDevelopment = !host || host === "localhost" || host === "127.0.0.1" || host.endsWith(".local");
-  if (!isDevelopment) return;
+  if (!API_DEBUG_ENABLED) return;
   console.info(`[LostFound] ${context}`, details);
+}
+
+function logProfileImage(status, source, details = {}) {
+  const normalizedStatus = status === "loaded" ? "loaded" : "failed";
+  const payload = { path: source, ...details };
+  if (normalizedStatus === "loaded") {
+    console.info(`[PROFILE IMAGE] loaded ${source}`, payload);
+    return;
+  }
+  console.warn(`[PROFILE IMAGE] failed ${source}`, payload);
+}
+
+function truncateForApiLog(value, limit = 1200) {
+  const text = String(value || "");
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit)}...<truncated ${text.length - limit} chars>`;
+}
+
+function sanitizeForApiLog(value, key = "") {
+  const loweredKey = String(key || "").toLowerCase();
+  if (["authorization", "content", "data", "image", "password", "raw", "secret", "token"].includes(loweredKey)) {
+    if (typeof value === "string") return `<redacted ${value.length} chars>`;
+    if (value instanceof Blob) return `<redacted ${value.size} bytes>`;
+    return "<redacted>";
+  }
+
+  if (value instanceof Blob) {
+    return {
+      name: typeof File !== "undefined" && value instanceof File ? value.name : "",
+      size: value.size,
+      type: value.type || "application/octet-stream",
+    };
+  }
+
+  if (Array.isArray(value)) {
+    return value.slice(0, 20).map((entry) => sanitizeForApiLog(entry, key));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([childKey, childValue]) => [childKey, sanitizeForApiLog(childValue, childKey)]),
+    );
+  }
+
+  if (typeof value === "string") {
+    return truncateForApiLog(value);
+  }
+
+  return value;
+}
+
+function summarizeRequestBodyForLog(body) {
+  if (!body) return null;
+
+  if (body instanceof FormData) {
+    const entries = {};
+    for (const [key, value] of body.entries()) {
+      entries[key] = sanitizeForApiLog(value, key);
+    }
+    return entries;
+  }
+
+  if (body instanceof URLSearchParams) {
+    return Object.fromEntries(body.entries());
+  }
+
+  if (body instanceof Blob) {
+    return sanitizeForApiLog(body);
+  }
+
+  if (typeof body === "string") {
+    try {
+      return sanitizeForApiLog(JSON.parse(body));
+    } catch {
+      return truncateForApiLog(body);
+    }
+  }
+
+  return sanitizeForApiLog(body);
+}
+
+function parseApiResponsePayload(responseText, contentType) {
+  if (String(contentType || "").includes("application/json")) {
+    try {
+      return JSON.parse(responseText || "{}");
+    } catch {
+      return {};
+    }
+  }
+  return responseText;
+}
+
+function logApiDebug(context, details = {}) {
+  if (!API_DEBUG_ENABLED) return;
+  console.info(`[LostFound API] ${context}`, details);
 }
 
 function currentLanguage() {
@@ -1978,6 +3371,76 @@ function t(key, vars = {}) {
 
 function localizeValue(value) {
   return localizedValues[currentLanguage()]?.[value] || value;
+}
+
+function createLucideIcon(iconName) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "18");
+  svg.setAttribute("height", "18");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  svg.innerHTML = LUCIDE_ICON_PATHS[iconName] || LUCIDE_ICON_PATHS["circle-plus"];
+  return svg;
+}
+
+function renderSidebarIcons() {
+  document.querySelectorAll(".sidebar-nav-group button[data-nav-icon]").forEach((button) => {
+    const iconName = button.dataset.navIcon || "";
+    const labelText = (button.textContent || button.dataset.navLabel || button.getAttribute("aria-label") || "").trim();
+    button.replaceChildren();
+
+    const iconWrap = document.createElement("span");
+    iconWrap.className = "sidebar-nav-icon";
+    iconWrap.append(createLucideIcon(iconName));
+
+    const label = document.createElement("span");
+    label.className = "sidebar-nav-label";
+    label.textContent = labelText || titleCase(button.id.replace(/^show|Button$/g, ""));
+
+    button.dataset.navLabel = label.textContent;
+    button.dataset.shortLabel = label.textContent;
+    button.append(iconWrap, label);
+  });
+}
+
+function renderAssistantButtonIcon() {
+  if (openAssistantButton) {
+    openAssistantButton.replaceChildren(createLucideIcon("message-circle"));
+    openAssistantButton.setAttribute("aria-label", langText({
+      en: "Open AI helper",
+      "zh-CN": "打开 AI 助手",
+      th: "เปิดผู้ช่วย AI",
+    }));
+    openAssistantButton.setAttribute("title", langText({
+      en: "AI helper",
+      "zh-CN": "AI 助手",
+      th: "ผู้ช่วย AI",
+    }));
+  }
+}
+
+function yesNo(value) {
+  return value ? "yes" : "no";
+}
+
+function chatbotButtonIsRendered() {
+  if (!openAssistantButton?.isConnected) return false;
+  if (typeof openAssistantButton.getClientRects !== "function") return true;
+  return openAssistantButton.getClientRects().length > 0;
+}
+
+function logChatbotDebug(context = "status") {
+  console.info(CHATBOT_DEBUG_PREFIX, context, {
+    "component mounted": yesNo(Boolean(assistantPanel?.isConnected)),
+    "button rendered": yesNo(chatbotButtonIsRendered()),
+    "click handler attached": yesNo(chatbotDebugState.clickHandlerAttached),
+    "modal state changes": yesNo(chatbotDebugState.modalStateChanged),
+  });
 }
 
 function applyTranslations() {
@@ -2026,6 +3489,8 @@ function applyTranslations() {
   updateLocationBar();
   renderDashboard();
   renderNotifications(state.notifications);
+  renderSidebarIcons();
+  renderAssistantButtonIcon();
 }
 
 function setMessage(element, message, isError = false) {
@@ -2299,7 +3764,7 @@ function clearProgressActivity(kind) {
 
 function activityTargetLabel(activity) {
   if (activity.target === "query" && activity.itemId) {
-    return langText({ en: "Open chat", "zh-CN": "打开聊天", th: "เปิดแชต" });
+    return langText({ en: "Open lookup", "zh-CN": "打开查询", th: "เปิดการค้นหา" });
   }
   if (activity.target === "claims") {
     return langText({ en: "Open claims", "zh-CN": "查看认领", th: "เปิดคำขอ" });
@@ -2484,6 +3949,19 @@ function dismissCompletedActivities() {
 function claimStatusActivityCopy(claim) {
   const status = String(claim?.status || "pending").toLowerCase();
   const itemTitle = claim?.item?.title || langText({ en: "Item", "zh-CN": "物品", th: "สิ่งของ" });
+  if (status === "draft") {
+    return {
+      title: langText({ en: `Draft: ${claim?.title || itemTitle}`, "zh-CN": `草稿：${claim?.title || itemTitle}`, th: `แบบร่าง: ${claim?.title || itemTitle}` }),
+      stage: langText({ en: "Private draft", "zh-CN": "私人草稿", th: "แบบร่างส่วนตัว" }),
+      detail: langText({
+        en: "Saved privately. Submit it from My Claims when ready.",
+        "zh-CN": "已私人保存。准备好后可在我的认领中提交。",
+        th: "บันทึกแบบส่วนตัว ส่งจากหน้าคำขอของฉันเมื่อพร้อม",
+      }),
+      status: "waiting",
+      progress: 35,
+    };
+  }
   if (status === "approved") {
     const collectionLocation = localizeValue("Lost & Found Room");
     return {
@@ -2551,6 +4029,7 @@ function syncClaimActivities(claims = state.claims) {
 
 function notificationActivityTarget(notification) {
   const eventType = String(notification?.event_type || "").toLowerCase();
+  if (notification?.related_question_id || eventType.includes("question")) return "query";
   if (notification?.related_claim_id || eventType.includes("claim")) return "claims";
   if (eventType.includes("query")) return "query";
   if (eventType.includes("room")) return "room";
@@ -2590,15 +4069,15 @@ function syncNotificationActivities(notifications = state.notifications) {
     });
 }
 
-function ensureGlobalBackground() {
+function ensureLoginBackground() {
   const probe = new Image();
   probe.onload = () => {
-    document.body.classList.remove("background-missing");
+    document.body.classList.remove("login-background-missing");
   };
   probe.onerror = () => {
-    document.body.classList.add("background-missing");
+    document.body.classList.add("login-background-missing");
   };
-  probe.src = GLOBAL_BACKGROUND_URL;
+  probe.src = LOGIN_BACKGROUND_URL;
 }
 
 function fillSelect(select, values, includeAll = false) {
@@ -2606,7 +4085,10 @@ function fillSelect(select, values, includeAll = false) {
   if (includeAll) {
     select.append(new Option(t("common.all"), ""));
   }
-  values.forEach((value) => select.append(new Option(localizeValue(value), value)));
+  values.forEach((value) => {
+    const label = String(value || "").includes(">") ? locationPathLabel(value) : localizeValue(value);
+    select.append(new Option(label, value));
+  });
 }
 
 function todayIso() {
@@ -2738,8 +4220,11 @@ function setLanguage(language) {
   state.language = SUPPORTED_LANGUAGES.includes(language) ? language : "en";
   localStorage.setItem(LANGUAGE_STORAGE_KEY, state.language);
   state.queryCache.clear();
+  state.queryResultCache.clear();
   languageSelect.value = state.language;
   applyTranslations();
+  syncLocationBrowserState();
+  updateLocationBar();
 }
 
 function tutorialState() {
@@ -2766,17 +4251,22 @@ function invalidateSearchCache() {
 function invalidateQueryCache(itemId = null) {
   if (itemId == null) {
     state.queryCache.clear();
+    state.queryResultCache.clear();
     return;
   }
   state.queryCache.delete(itemId == null ? "general" : `item:${itemId}`);
+  [...state.queryResultCache.keys()]
+    .filter((key) => String(key).startsWith(`item:${itemId}:`))
+    .forEach((key) => state.queryResultCache.delete(key));
 }
 
 function ensureApiBase(path = "") {
+  const normalizedPath = String(path || "").startsWith("/") ? String(path || "") : `/${path || ""}`;
   if (API_BASE) {
-    return `${API_BASE}${path}`;
+    return `${API_BASE}${normalizedPath}`;
   }
 
-  const error = new Error("Frontend needs to be opened from http://localhost:8000 or your Mac hostname on port 8000.");
+  const error = new Error("Frontend needs an API base URL. Set PUBLIC_API_BASE_URL or serve the frontend from the backend origin.");
   logClientError("missing api base", error, { path, location: window.location.href });
   throw error;
 }
@@ -2838,16 +4328,16 @@ function validateChatFile(file) {
   const extension = fileExtension(file.name);
   if (!CHAT_ALLOWED_FILE_EXTENSIONS.includes(extension)) {
     return langText({
-      en: "Chat attachments must be PNG, JPG, JPEG, PDF, or TXT.",
-      "zh-CN": "聊天附件仅支持 PNG、JPG、JPEG、PDF 或 TXT。",
-      th: "ไฟล์แนบในแชตรองรับเฉพาะ PNG, JPG, JPEG, PDF หรือ TXT",
+      en: "Question images must be PNG, JPG, or JPEG.",
+      "zh-CN": "问题图片仅支持 PNG、JPG 或 JPEG。",
+      th: "รูปภาพคำถามต้องเป็น PNG, JPG หรือ JPEG",
     });
   }
   if (file.size > CHAT_UPLOAD_LIMIT_BYTES) {
     return langText({
-      en: "Chat attachments must be 5 MB or smaller.",
-      "zh-CN": "聊天附件必须小于或等于 5 MB。",
-      th: "ไฟล์แนบในแชตต้องมีขนาดไม่เกิน 5 MB",
+      en: "Question images must be 5 MB or smaller.",
+      "zh-CN": "问题图片必须小于或等于 5 MB。",
+      th: "รูปภาพคำถามต้องมีขนาดไม่เกิน 5 MB",
     });
   }
   if (file.type && !CHAT_ALLOWED_FILE_MIME_TYPES.includes(file.type)) {
@@ -3169,7 +4659,13 @@ function apiRequestWithProgress(path, { method = "GET", headers = {}, body = nul
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const requestMethod = String(method || "GET").toUpperCase();
-    xhr.open(requestMethod, ensureApiBase(path));
+    const requestUrl = ensureApiBase(path);
+    logApiDebug("request", {
+      method: requestMethod,
+      url: requestUrl,
+      payload: summarizeRequestBodyForLog(body),
+    });
+    xhr.open(requestMethod, requestUrl);
     xhr.responseType = "text";
     xhr.timeout = 60000;
 
@@ -3188,14 +4684,13 @@ function apiRequestWithProgress(path, { method = "GET", headers = {}, body = nul
 
     xhr.onload = () => {
       const contentType = xhr.getResponseHeader("content-type") || "";
-      let payload = xhr.responseText;
-      if (contentType.includes("application/json")) {
-        try {
-          payload = JSON.parse(xhr.responseText || "{}");
-        } catch {
-          payload = {};
-        }
-      }
+      const payload = parseApiResponsePayload(xhr.responseText || "", contentType);
+      logApiDebug("response", {
+        method: requestMethod,
+        url: xhr.responseURL || requestUrl,
+        status: xhr.status,
+        body: sanitizeForApiLog(payload),
+      });
 
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve(payload);
@@ -3205,8 +4700,14 @@ function apiRequestWithProgress(path, { method = "GET", headers = {}, body = nul
       reject(new Error(extractApiMessage(payload, "Request failed.")));
     };
 
-    xhr.onerror = () => reject(new Error(`Could not reach backend at ${API_BASE}. Make sure start.sh is running.`));
-    xhr.ontimeout = () => reject(new Error("Request timed out."));
+    xhr.onerror = () => {
+      logApiDebug("network error", { method: requestMethod, url: requestUrl });
+      reject(new Error(`Could not reach backend at ${API_BASE || "the configured API origin"}.`));
+    };
+    xhr.ontimeout = () => {
+      logApiDebug("timeout", { method: requestMethod, url: requestUrl });
+      reject(new Error("Request timed out."));
+    };
     xhr.send(body);
   });
 }
@@ -3237,17 +4738,74 @@ function persistCurrentItemId(itemId) {
 
 function showAuthScreen() {
   closeTutorial({ markSeen: false, rememberSession: false });
+  document.body.classList.add("auth-route");
   authScreen?.classList.remove("is-hidden");
   appShell?.classList.add("is-hidden");
+  loginLoadingScreen?.classList.add("is-hidden");
+  document.body.classList.remove("login-loading-route");
 }
 
 function showAppShell() {
+  document.body.classList.remove("auth-route");
+  document.body.classList.remove("login-loading-route");
   authScreen?.classList.add("is-hidden");
+  loginLoadingScreen?.classList.add("is-hidden");
   appShell?.classList.remove("is-hidden");
   syncModeUi();
   window.requestAnimationFrame(() => {
     syncAllPanels(Object.keys(state.panelState).length === 0);
     openPanel("sidebar");
+    logChatbotDebug("after-login-mount");
+  });
+}
+
+function hideLoginLoadingVideo() {
+  if (loginLoadingVideo) {
+    loginLoadingVideo.pause();
+    loginLoadingVideo.removeAttribute("src");
+    loginLoadingVideo.load();
+  }
+  loginLoadingScreen?.classList.add("is-fading");
+  window.setTimeout(() => {
+    loginLoadingScreen?.classList.add("is-hidden");
+    loginLoadingScreen?.classList.remove("is-active", "is-fading");
+    document.body.classList.remove("login-loading-route");
+  }, 260);
+}
+
+function playLoginLoadingVideo() {
+  if (!loginLoadingScreen || !loginLoadingVideo) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (played) => {
+      if (settled) return;
+      settled = true;
+      loginLoadingVideo.removeEventListener("ended", onEnded);
+      loginLoadingVideo.removeEventListener("error", onError);
+      window.clearTimeout(timeoutId);
+      resolve(Boolean(played));
+    };
+    const onEnded = () => finish(true);
+    const onError = () => finish(false);
+    const timeoutId = window.setTimeout(() => finish(false), LOGIN_LOADING_FALLBACK_MS);
+
+    document.body.classList.add("login-loading-route");
+    authScreen?.classList.add("is-hidden");
+    appShell?.classList.add("is-hidden");
+    loginLoadingScreen.classList.remove("is-hidden", "is-fading");
+    loginLoadingScreen.classList.add("is-active");
+
+    loginLoadingVideo.src = state.loadingVideoUrl || LOGIN_LOADING_VIDEO_URL;
+    loginLoadingVideo.currentTime = 0;
+    loginLoadingVideo.muted = true;
+    loginLoadingVideo.playsInline = true;
+    loginLoadingVideo.addEventListener("ended", onEnded, { once: true });
+    loginLoadingVideo.addEventListener("error", onError, { once: true });
+
+    const playPromise = loginLoadingVideo.play();
+    if (playPromise && typeof playPromise.catch === "function") {
+      playPromise.catch(() => finish(false));
+    }
   });
 }
 
@@ -3274,6 +4832,10 @@ function closeDialogWithAnimation(dialog, afterClose) {
 }
 
 function resetReportModalState() {
+  state.activeReportFormContext = false;
+  stopReportCamera();
+  reportDialog?.classList.remove("is-map-report-context");
+  clearReportMapLocationMarker();
   form?.reset();
   state.selectedFile = null;
   dropZone?.classList.remove("is-dragging");
@@ -3296,15 +4858,25 @@ function resetReportModalState() {
   }
   setMessage(uploadMessage, "");
   setWarningCard(reportWarningCard, "");
+  renderSchoolMap();
 }
 
 function openReportModal() {
   if (!reportDialog) return;
+  state.activeReportFormContext = true;
+  if (state.user && state.currentView !== "map") {
+    navigateTo("map");
+  }
   reportDialog.classList.remove("is-closing");
+  reportDialog.classList.add("is-map-report-context");
   delete reportDialog.dataset.closeToken;
-  reportDialog.showModal();
+  if (!reportDialog.open) {
+    reportDialog.show();
+  }
   triggerHaptic("open");
   setWarningCard(reportWarningCard, "");
+  assignReportLocationFromSelection();
+  renderSchoolMap();
   window.setTimeout(() => {
     titleInput?.focus();
   }, 0);
@@ -4026,6 +5598,95 @@ function createThumbnailButton(source, { title = "Preview image", caption = "" }
   return button;
 }
 
+function analysisText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function analysisList(value) {
+  const source = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(/[,;\n]+/)
+      : [];
+  return uniqueValues(source.map(analysisText).filter(Boolean)).slice(0, 8);
+}
+
+function analysisConfidenceValue(item) {
+  const analysis = item?.llava_analysis || {};
+  const raw = analysis.confidence_score ?? analysis.confidence ?? item?.image?.confidence_score;
+  if (raw === null || raw === undefined || raw === "") return 0;
+  const numeric = Number(String(raw).replace("%", "").trim());
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.min(100, Math.round(numeric <= 1 && numeric > 0 ? numeric * 100 : numeric)));
+}
+
+function aiAnalysisStatus(item) {
+  return analysisText(item?.ai_analysis_status || item?.llava_analysis?.ai_analysis_status || "success").toLowerCase() || "success";
+}
+
+function aiAnalysisSummary(item) {
+  const analysis = item?.llava_analysis || {};
+  const status = aiAnalysisStatus(item);
+  const source = state.previewUrls.get(item?.id) || resolveImageUrl(item);
+  const hasImageAnalysis = Boolean(analysis.llava_attempted || analysis.llava_called || canPreviewImage(source));
+  const direct = analysisText(
+    analysis.item_description
+    || analysis.object_description
+    || (!hasImageAnalysis ? item?.ai_summary : ""),
+  );
+  if (direct) return direct;
+
+  const objectType = analysisText(analysis.object_type || analysis.item_classification);
+  const colours = analysisList(analysis.colours || analysis.colors);
+  const markings = analysisList(analysis.notable_markings || analysis.markings);
+  if (objectType) {
+    const prefix = colours.length ? `${colours.join(", ")} ${objectType}` : objectType;
+    return markings.length ? `${prefix} with ${markings.join(", ")}` : prefix;
+  }
+
+  if (status === "fallback") return "LLaVA unavailable; keyword tags were used.";
+  if (status === "failed") return "Image analysis failed.";
+  if (!hasImageAnalysis) {
+    const tags = analysisList(analysis.tags || item?.tags);
+    if (tags.length) return tags.slice(0, 4).join(", ");
+  }
+  return "";
+}
+
+function createAiAnalysisBlock(item, { heading = "AI Analysis", includeStatus = true } = {}) {
+  const source = state.previewUrls.get(item?.id) || resolveImageUrl(item);
+  if (!canPreviewImage(source)) return null;
+
+  const summary = aiAnalysisSummary(item);
+  const confidence = analysisConfidenceValue(item);
+  const status = aiAnalysisStatus(item);
+  const block = document.createElement("div");
+  block.className = "ai-analysis-block";
+  if (status !== "success") block.classList.add(`is-${status}`);
+
+  const title = document.createElement("span");
+  title.className = "ai-analysis-heading";
+  title.textContent = heading;
+
+  const summaryLine = document.createElement("p");
+  summaryLine.className = "ai-analysis-summary";
+  summaryLine.textContent = summary || "Analysis pending.";
+
+  const meta = document.createElement("div");
+  meta.className = "ai-analysis-meta";
+  const confidenceLine = document.createElement("span");
+  confidenceLine.textContent = `Confidence: ${confidence ? `${confidence}%` : "Not provided"}`;
+  meta.append(confidenceLine);
+  if (includeStatus) {
+    const statusLine = document.createElement("span");
+    statusLine.textContent = `Status: ${status}`;
+    meta.append(statusLine);
+  }
+
+  block.append(title, summaryLine, meta);
+  return block;
+}
+
 function createAttachmentPreview(attachment) {
   const source = normalizeImageUrl(attachment?.url || "");
   return isPreviewableAttachment(attachment) ? createThumbnailButton(source, {
@@ -4172,32 +5833,323 @@ function createDetailsToggle(detailRegion) {
   return button;
 }
 
+function manualLocationCodeCandidate(value = "") {
+  const parts = locationPathParts(value);
+  const leaf = String(parts[parts.length - 1] || value || "").trim();
+  const compactLeaf = leaf.toUpperCase().replace(/[\s-]+/g, "");
+  if (/^[ASP][1-5]\d{2}$/.test(compactLeaf)) return compactLeaf;
+  const embeddedCode = String(value || "").toUpperCase().match(/\b([ASP])\s*([1-5]\d{2})\b/);
+  return embeddedCode ? `${embeddedCode[1]}${embeddedCode[2]}` : compactLeaf;
+}
+
+function activeSchoolLocations() {
+  return Array.isArray(state?.locations) && state.locations.length ? state.locations : SCHOOL_LOCATIONS;
+}
+
+function locationAliasEntries() {
+  return activeSchoolLocations()
+    .flatMap((location) => uniqueValues([
+      location.name,
+      location.label,
+      ...(LOCATION_PART_ALIASES[location.name] || []),
+      ...(LOCATION_PART_ALIASES[location.label] || []),
+    ]).map((alias) => ({
+      location,
+      alias: normalizeLocationText(alias),
+    })))
+    .filter((entry) => entry.location?.id && entry.alias);
+}
+
+function locationByExactLabel(value = "") {
+  const normalized = normalizeLocationText(value);
+  if (!normalized) return null;
+  return locationAliasEntries().find((entry) => entry.alias === normalized)?.location || null;
+}
+
+function locationContextIdFromInput(value = "") {
+  const source = normalizeLocationText(value);
+  if (!source) return "";
+  const entries = locationAliasEntries()
+    .slice()
+    .sort((left, right) => right.alias.length - left.alias.length);
+  return entries.find((entry) => source === entry.alias || source.includes(entry.alias))?.location?.id || "";
+}
+
+function manualLocationRulesForPrefix(prefix, floorNumber) {
+  return MANUAL_LOCATION_CODE_RULES.filter((rule) => (
+    rule.prefix === prefix
+      && floorNumber >= rule.minFloor
+      && floorNumber <= rule.maxFloor
+  ));
+}
+
+function manualLocationRuleForInput(prefix, value = "", floorNumber = 0) {
+  const rules = manualLocationRulesForPrefix(prefix, floorNumber);
+  if (!rules.length) return null;
+  const contextLocationId = locationContextIdFromInput(value);
+  if (contextLocationId) {
+    return rules.find((rule) => rule.locationId === contextLocationId) || null;
+  }
+  return rules[0] || null;
+}
+
+function parseManualLocationCode(value = "") {
+  const code = manualLocationCodeCandidate(value);
+  const match = code.match(/^([ASP])([1-5]\d{2})$/);
+  if (!match) return null;
+  const [, prefix, roomNumber] = match;
+  const floorNumber = Number(roomNumber[0]);
+  const rule = manualLocationRuleForInput(prefix, value, floorNumber);
+  if (!rule || !Number.isInteger(floorNumber) || floorNumber < rule.minFloor || floorNumber > rule.maxFloor) return null;
+  return { code, prefix, roomNumber, floorNumber, rule };
+}
+
+function manualLocationCodeValidationMessage(value = "") {
+  const candidate = manualLocationCodeCandidate(value);
+  if (!candidate) return "";
+  if (parseManualLocationCode(value)) return "";
+  const looksLikeLocationCode = /^[ASP]\d*$/i.test(candidate) || /\b[ASP]\s*\d+\b/i.test(String(value || ""));
+  return looksLikeLocationCode ? INVALID_LOCATION_CODE_MESSAGE : "";
+}
+
+function manualLocationFromInput(value = "") {
+  const parsed = parseManualLocationCode(value);
+  if (!parsed) return null;
+  const location = schoolLocationById(parsed.rule.locationId);
+  const floor = floorForLabel(location, floorLabelForNumber(parsed.floorNumber));
+  if (!location || !floor) return null;
+  const floorPath = locationFloorPath(location, floor);
+  return {
+    code: parsed.code,
+    location,
+    floor,
+    floorNumber: parsed.floorNumber,
+    roomNumber: parsed.roomNumber,
+    value: parsed.code,
+    meta: floorPath,
+    label: `${floorPath} > Room ${parsed.code}`,
+    mapLabel: floorPath,
+  };
+}
+
 function normalizeRoomCode(value) {
-  return value.trim().toUpperCase();
+  return manualLocationCodeCandidate(value);
 }
 
 function roomCodeToLabel(roomCode) {
+  const manualLocation = manualLocationFromInput(roomCode);
+  if (manualLocation) return manualLocation.label;
   const code = normalizeRoomCode(roomCode);
   const building = buildings[code[0]];
   return building ? `${building} - Room ${code}` : code;
 }
 
 function validateRoomCode(value) {
-  const code = normalizeRoomCode(value);
-  return /^[SPA][0-9]{3}$/.test(code);
+  return Boolean(manualLocationFromInput(value));
+}
+
+function subLocationMatchesLabel(subLocation, label = "") {
+  const normalized = normalizeLocationText(label);
+  if (!normalized) return false;
+  return locationAliasesForPart(subLocation?.label || "").includes(normalized)
+    || normalizeLocationText(subLocation?.id || "") === normalized;
+}
+
+function knownSubLocationMatches(label = "") {
+  const normalized = normalizeLocationText(label);
+  if (!normalized) return [];
+  return activeSchoolLocations().flatMap((location) => (
+    directSubLocationsForLocation(location)
+      .filter((subLocation) => subLocationMatchesLabel(subLocation, normalized))
+      .map((subLocation) => ({ location, subLocation }))
+  ));
+}
+
+function knownLocationFromInput(value = "") {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) return null;
+
+  const parts = locationPathParts(rawValue);
+  const location = parts.length ? locationByExactLabel(parts[0]) : locationByExactLabel(rawValue);
+  if (location) {
+    if (parts.length <= 1) {
+      return {
+        valid: true,
+        value: location.name,
+        meta: location.name,
+        label: location.name,
+        location,
+      };
+    }
+
+    const floor = floorForLabel(location, parts[1]);
+    if (floor) {
+      if (parts.length === 2) {
+        return {
+          valid: true,
+          value: floor.label,
+          meta: location.name,
+          label: locationFloorPath(location, floor),
+          location,
+          floor,
+          floorNumber: floorNumberForFloor(floor),
+        };
+      }
+      const manualLocation = manualLocationFromInput(rawValue);
+      if (
+        manualLocation
+          && manualLocation.location.id === location.id
+          && manualLocation.floor.id === floor.id
+      ) {
+        return manualLocation;
+      }
+      const subLocation = subLocationForLabel(floor.subLocations || [], parts[2]);
+      if (subLocation && parts.length === 3) {
+        return {
+          valid: true,
+          value: subLocation.label,
+          meta: locationFloorPath(location, floor),
+          label: locationSubLocationPath(location, subLocation, floor),
+          location,
+          floor,
+          floorNumber: floorNumberForFloor(floor),
+          subLocation,
+        };
+      }
+      return null;
+    }
+
+    const subLocation = directSubLocationsForLocation(location)
+      .find((candidate) => subLocationMatchesLabel(candidate, parts[1]));
+    if (subLocation && parts.length === 2) {
+      return {
+        valid: true,
+        value: subLocation.label,
+        meta: location.name,
+        label: locationSubLocationPath(location, subLocation),
+        location,
+        subLocation,
+      };
+    }
+    return null;
+  }
+
+  const subLocationMatches = knownSubLocationMatches(rawValue);
+  if (subLocationMatches.length === 1) {
+    const { location: parentLocation, subLocation } = subLocationMatches[0];
+    return {
+      valid: true,
+      value: subLocation.label,
+      meta: parentLocation.name,
+      label: locationSubLocationPath(parentLocation, subLocation),
+      location: parentLocation,
+      subLocation,
+    };
+  }
+  return null;
 }
 
 function currentLocation() {
   const value = String(optionalLocationInput?.value || "").trim();
+  const manualLocation = manualLocationFromInput(value);
+  if (manualLocation) {
+    return {
+      valid: true,
+      value: manualLocation.value,
+      meta: manualLocation.meta,
+      label: manualLocation.label,
+      code: manualLocation.code,
+    };
+  }
+  const manualLocationError = manualLocationCodeValidationMessage(value);
+  if (manualLocationError) {
+    return {
+      valid: false,
+      value: value || "Unknown",
+      meta: "invalid-location-code",
+      message: manualLocationError,
+    };
+  }
+  const structured = structuredLocationFromSelection();
+  if (structured && (!value || optionalLocationInput?.dataset?.mapLocation === structured.label)) {
+    return {
+      valid: true,
+      value: structured.value,
+      meta: structured.meta,
+    };
+  }
+  const knownLocation = knownLocationFromInput(value);
+  if (knownLocation) {
+    return {
+      valid: true,
+      value: knownLocation.value,
+      meta: knownLocation.meta,
+      label: knownLocation.label,
+      code: knownLocation.code || "",
+    };
+  }
+  const activeRegion = selectedMapRegion();
+  const activeZone = selectedMapZone();
+  if (!value && activeRegion) {
+    return {
+      valid: true,
+      value: activeRegion.label,
+      meta: activeRegion.zone,
+    };
+  }
+  if (!value && activeZone) {
+    return {
+      valid: true,
+      value: activeZone,
+      meta: activeZone,
+    };
+  }
   return {
-    valid: true,
-    value: value || "Unknown",
-    meta: value ? "optional-text" : "unknown",
+    valid: false,
+    value: value || "",
+    meta: "invalid-location-code",
+    message: INVALID_LOCATION_CODE_MESSAGE,
   };
 }
 
 function updateLocationUi() {
-  return currentLocation();
+  const location = currentLocation();
+  if (optionalLocationInput) {
+    const message = location.valid ? "" : (location.message || "Invalid location.");
+    optionalLocationInput.setCustomValidity(message);
+    optionalLocationInput.setAttribute("aria-invalid", String(!location.valid));
+  }
+  if (locationHelperText) {
+    locationHelperText.textContent = location.valid && location.code
+      ? `Report code ${location.code} maps to ${location.meta}.`
+      : (location.message || "Use room codes like A504, S312, P308, or P201.");
+  }
+  return location;
+}
+
+function handleManualLocationInput() {
+  clearReportMapLocationMarker();
+  const manualLocation = manualLocationFromInput(optionalLocationInput?.value || "");
+  if (manualLocation) {
+    state.selectedZone = manualLocation.location.id;
+    state.selectedLocation = manualLocation.location.id;
+    state.selectedBox = manualLocation.location.id;
+    state.expandedBox = manualLocation.location.id;
+    state.selectedFloor = {
+      locationId: manualLocation.location.id,
+      id: manualLocation.floor.id,
+      label: manualLocation.floor.label,
+    };
+    state.selectedSubLocation = null;
+    state.expandedMapTarget = null;
+    setActiveLocationFilter(manualLocation.mapLabel, {
+      load: false,
+      focusDashboard: false,
+      closeDrawer: false,
+      source: "manual",
+    });
+  }
+  updateLocationUi();
 }
 
 function prefillReporter() {
@@ -4245,6 +6197,10 @@ function validateReportForm() {
   }
   if (imageValidationMessage) {
     return imageValidationMessage;
+  }
+  const locationValidation = currentLocation();
+  if (!locationValidation.valid) {
+    return locationValidation.message || "Invalid location.";
   }
   return "";
 }
@@ -4322,6 +6278,7 @@ function confidenceTooltip(item) {
 function statusBadgeClass(status) {
   if (status === "approved" || status === "claimed") return "is-claimed";
   if (status === "rejected" || status === "blocked") return "is-flagged";
+  if (status === "draft") return "is-safe";
   if (status === "allowed" || status === "admin") return "is-safe";
   return "is-lost";
 }
@@ -4352,33 +6309,43 @@ function initialsFromText(value, fallback = "LF") {
 
 function applyAvatar(element, imageUrl, fallbackText) {
   if (!element) return;
-  element.textContent = fallbackText;
+  const fallback = fallbackText || "LF";
+  element.textContent = fallback;
   element.style.backgroundImage = "";
+  element.style.removeProperty("--avatar-image");
   element.style.color = "";
-  element.classList.remove("has-avatar-image", "is-avatar-broken");
+  element.classList.remove("has-avatar-image", "is-avatar-broken", "is-avatar-loading");
   const source = normalizeAvatarUrl(imageUrl);
   element.dataset.avatarSource = source;
   if (!source) return;
 
+  element.textContent = "";
+  element.classList.add("is-avatar-loading");
   const probe = new Image();
   probe.onload = () => {
     if (element.dataset.avatarSource !== source) return;
-    element.style.backgroundImage = `url("${source}")`;
+    const cssSource = `url(${JSON.stringify(source)})`;
+    element.style.setProperty("--avatar-image", cssSource);
+    element.style.backgroundImage = cssSource;
     element.style.color = "transparent";
+    element.textContent = "";
     element.classList.add("has-avatar-image");
-    element.classList.remove("is-avatar-broken");
+    element.classList.remove("is-avatar-broken", "is-avatar-loading");
+    logProfileImage("loaded", source, {
+      elementId: element.id || "",
+    });
   };
   probe.onerror = () => {
     if (element.dataset.avatarSource !== source) return;
     element.style.backgroundImage = "";
+    element.style.removeProperty("--avatar-image");
     element.style.color = "";
-    element.classList.remove("has-avatar-image");
+    element.classList.remove("has-avatar-image", "is-avatar-loading");
     element.classList.add("is-avatar-broken");
-    element.textContent = fallbackText;
-    logClientDebug("avatar image failed to load", {
+    element.textContent = fallback;
+    logProfileImage("failed", source, {
       elementId: element.id || "",
-      source,
-      fallbackText,
+      fallbackText: fallback,
     });
   };
   probe.src = source;
@@ -4401,6 +6368,9 @@ function buildHash(section, itemId = null) {
   if (section === "dashboard") {
     return "#dashboard";
   }
+  if (section === "map") {
+    return "#map";
+  }
   if (section === "query") {
     return itemId ? `#query-${itemId}` : "#query";
   }
@@ -4422,13 +6392,16 @@ function readRoute() {
     const itemId = Number(raw.slice("query-".length)) || null;
     return { section: "query", itemId };
   }
-  if (["dashboard", "reports", "room", "returned", "claims", "notifications", "account", "admin"].includes(raw)) {
+  if (["dashboard", "map", "reports", "room", "returned", "claims", "notifications", "account", "admin"].includes(raw)) {
     return { section: raw, itemId: state.currentItemId };
   }
   return { section: "dashboard", itemId: state.currentItemId };
 }
 
 function navigateTo(section, itemId = null, options = {}) {
+  if (currentResponsiveMode() !== "desktop") {
+    state.locationDrawerOpen = false;
+  }
   state.multitaskRequested = Boolean(options.multitask && state.advancedMode);
   if (!state.multitaskRequested) {
     state.multitaskActive = false;
@@ -4439,6 +6412,23 @@ function navigateTo(section, itemId = null, options = {}) {
     return;
   }
   window.location.hash = nextHash;
+}
+
+function goBackToPreviousRoute(fallbackSection = "dashboard") {
+  if (window.history.length > 1) {
+    window.history.back();
+    return;
+  }
+  navigateTo(fallbackSection);
+}
+
+function returnFromLocationFilter() {
+  const fallback = state.locationFilterSource === "map" ? "map" : "dashboard";
+  setActiveLocationFilter("", {
+    load: true,
+    closeDrawer: false,
+  });
+  goBackToPreviousRoute(fallback);
 }
 
 function closeNewWindowMenu() {
@@ -4478,6 +6468,7 @@ function openNewWindowTarget(section) {
 function sectionLabel(section = state.currentView) {
   const labels = {
     dashboard: t("nav.dashboard"),
+    map: "School Map",
     reports: t("nav.reports"),
     room: t("nav.room"),
     returned: t("nav.returned"),
@@ -4492,6 +6483,10 @@ function sectionLabel(section = state.currentView) {
 
 function breadcrumbLabel(section = state.currentView) {
   const parts = [t("nav.dashboard")];
+  const location = activeLocationLabel();
+  if (location) {
+    parts.push(location);
+  }
   if (section && section !== "dashboard") {
     parts.push(sectionLabel(section));
   }
@@ -4502,20 +6497,22 @@ function breadcrumbLabel(section = state.currentView) {
 }
 
 function updateLocationBar() {
-  const section = sectionLabel(state.currentView);
   const breadcrumbs = breadcrumbLabel(state.currentView);
+  const currentSection = sectionLabel(state.currentView);
   if (topbarCurrentSection) {
-    topbarCurrentSection.textContent = section;
+    topbarCurrentSection.textContent = currentSection;
   }
   if (topbarBreadcrumbs) {
     topbarBreadcrumbs.textContent = breadcrumbs;
   }
   if (sidebarCurrentSection) {
-    sidebarCurrentSection.textContent = section;
+    sidebarCurrentSection.textContent = currentSection;
   }
   if (sidebarBreadcrumbs) {
     sidebarBreadcrumbs.textContent = breadcrumbs;
   }
+  syncLocationBrowserState();
+  syncLocationFilterBanner();
 }
 
 function updateTopbarState() {
@@ -4529,6 +6526,7 @@ function updateTopbarState() {
     }
   };
   toggle(showDashboardButton, state.currentView === "dashboard");
+  toggle(showMapButton, state.currentView === "map");
   toggle(showReportsButton, state.currentView === "reports");
   toggle(showReportItemButton, false);
   toggle(showRoomButton, state.currentView === "room");
@@ -4595,6 +6593,12 @@ async function activateRoute(route = readRoute()) {
     return;
   }
 
+  if (section === "map") {
+    switchSection("map");
+    await loadMapSystem();
+    return;
+  }
+
   if (section === "returned") {
     switchSection("returned");
     await loadReturnedItems();
@@ -4636,9 +6640,15 @@ async function activateRoute(route = readRoute()) {
 
 async function apiFetch(path, options = {}) {
   let response;
+  const method = String(options.method || "GET").toUpperCase();
+  const requestUrl = ensureApiBase(path);
+  logApiDebug("request", {
+    method,
+    url: requestUrl,
+    payload: summarizeRequestBodyForLog(options.body),
+  });
   try {
-    const method = String(options.method || "GET").toUpperCase();
-    response = await fetch(ensureApiBase(path), {
+    response = await fetch(requestUrl, {
       ...options,
       method,
       headers: {
@@ -4647,27 +6657,32 @@ async function apiFetch(path, options = {}) {
       },
     });
   } catch (error) {
-    logClientError("network request failed", error, { path, apiBase: API_BASE });
-    throw new Error(`Could not reach backend at ${API_BASE}. Make sure start.sh is running.`);
+    logClientError("network request failed", error, { path, apiBase: API_BASE, url: requestUrl });
+    logApiDebug("network error", { method, url: requestUrl });
+    throw new Error(`Could not reach backend at ${API_BASE || "the configured API origin"}.`);
   }
 
+  const contentType = response.headers.get("content-type") || "";
+  const responseText = await response.text();
+  const responsePayload = parseApiResponsePayload(responseText, contentType);
+  logApiDebug("response", {
+    method,
+    url: response.url || requestUrl,
+    status: response.status,
+    body: sanitizeForApiLog(responsePayload),
+  });
+
   if (response.ok) {
-    const contentType = response.headers.get("content-type") || "";
-    return contentType.includes("application/json") ? response.json() : response.text();
+    return responsePayload;
   }
 
   let message = "Request failed";
   let retryAfter = null;
-  try {
-    const data = await response.json();
-    message = extractApiMessage(data, message);
-    retryAfter = Number(data?.retry_after || 0) || null;
-  } catch {
-    try {
-      message = await response.text();
-    } catch {
-      message = "Request failed";
-    }
+  if (responsePayload && typeof responsePayload === "object") {
+    message = extractApiMessage(responsePayload, message);
+    retryAfter = Number(responsePayload?.retry_after || 0) || null;
+  } else if (typeof responsePayload === "string" && responsePayload.trim()) {
+    message = responsePayload.trim();
   }
 
   if (response.status === 429 && retryAfter) {
@@ -4687,10 +6702,16 @@ async function loadFilters() {
     state.filters = {
       categories: filters.categories || fallbackFilters.categories,
       statuses: filters.statuses || fallbackFilters.statuses,
-      locations: filters.locations || fallbackFilters.locations,
+      locations: uniqueValues([
+        ...campusLocationsFromMap(),
+        ...(filters.locations || fallbackFilters.locations),
+      ]),
     };
   } catch (error) {
-    state.filters = fallbackFilters;
+    state.filters = {
+      ...fallbackFilters,
+      locations: campusLocationsFromMap(),
+    };
     logClientError("loading filters failed", error);
   }
 
@@ -4698,6 +6719,7 @@ async function loadFilters() {
   fillSelect(categoryFilter, state.filters.categories, true);
   fillSelect(statusFilter, state.filters.statuses, true);
   fillSelect(locationFilter, state.filters.locations, true);
+  syncLocationFilterSelect();
   categoryInput.value = "Other";
 }
 
@@ -4719,8 +6741,8 @@ function notificationCategory(notification) {
   }
   if (eventType.includes("query")) {
     return {
-      key: "chat-reply",
-      label: langText({ en: "New chat reply", "zh-CN": "新聊天回复", th: "ข้อความใหม่" }),
+      key: "query-update",
+      label: langText({ en: "Question update", "zh-CN": "问题更新", th: "อัปเดตคำถาม" }),
       className: "is-lost",
     };
   }
@@ -4758,6 +6780,17 @@ async function markNotificationRead(notificationId, { reload = true } = {}) {
     }
   } catch (error) {
     logClientError("mark notification read failed", error, { notificationId });
+  }
+}
+
+async function openQuestionNotification(notification) {
+  const questionId = Number(notification?.related_question_id || 0);
+  if (!questionId) return;
+  state.pendingQuestionThreadId = questionId;
+  await markNotificationRead(notification.id, { reload: false });
+  navigateTo("query");
+  if (state.currentView === "query") {
+    await loadQuestionBoard({ openQuestionId: questionId });
   }
 }
 
@@ -4817,6 +6850,20 @@ function createNotificationCard(notification, { page = false } = {}) {
       navigateTo("claims");
     });
     actions.append(viewClaim);
+    item.append(actions);
+  }
+
+  if (notification.related_question_id) {
+    const actions = document.createElement("div");
+    actions.className = "card-actions notification-card-actions";
+    const viewThread = document.createElement("button");
+    viewThread.className = "primary-button small-button";
+    viewThread.type = "button";
+    viewThread.textContent = langText({ en: "Open thread", "zh-CN": "打开主题", th: "เปิดเธรด" });
+    viewThread.addEventListener("click", () => {
+      void openQuestionNotification(notification);
+    });
+    actions.append(viewThread);
     item.append(actions);
   }
 
@@ -4957,28 +7004,1231 @@ function isWithinDays(date, days, reference = new Date()) {
   return diffMs >= 0 && diffMs <= days * 24 * 60 * 60 * 1000;
 }
 
+function textMatchesActiveLocation(value) {
+  const activeLocation = currentLocationFilterValue();
+  if (!activeLocation) return true;
+  const source = normalizeLocationText(value);
+  if (!source) return false;
+
+  if (locationAliasesForValue(activeLocation).some((alias) => source.includes(alias))) {
+    return true;
+  }
+
+  const parts = locationPathParts(activeLocation);
+  if (!parts.length) return true;
+  if (parts.length === 1) {
+    return locationPartMatchesText(parts[0], source);
+  }
+
+  const leaf = parts[parts.length - 1];
+  const parentMatches = parts.slice(0, -1).every((part) => locationPartMatchesText(part, source));
+  const leafMatches = locationPartMatchesText(leaf, source);
+  if (parentMatches && leafMatches) return true;
+  return !locationLeafNeedsParent(leaf) && leafMatches;
+}
+
+function itemMapTextSources(item = {}) {
+  const nested = item?.item || {};
+  return [
+    item?.location,
+    item?.secondary_location,
+    item?.lost_location,
+    nested?.location,
+    nested?.secondary_location,
+    `${item?.secondary_location || ""} > ${item?.location || ""}`,
+    `${nested?.secondary_location || ""} > ${nested?.location || ""}`,
+  ].map((value) => normalizeLocationText(value)).filter(Boolean);
+}
+
+function roomLocationInfoFromValue(value = "") {
+  const parsed = parseManualLocationCode(value);
+  if (!parsed) return null;
+  const location = schoolLocationById(parsed.rule.locationId);
+  if (!location) return null;
+  const floor = floorForLabel(location, floorLabelForNumber(parsed.floorNumber));
+  return {
+    code: parsed.code,
+    location,
+    floor,
+    locationId: location.id,
+    floorNumber: parsed.floorNumber,
+  };
+}
+
+function canonicalLocationInfoFromValue(value = "") {
+  const roomInfo = roomLocationInfoFromValue(value);
+  if (roomInfo) return roomInfo;
+  const knownLocation = knownLocationFromInput(value);
+  if (!knownLocation?.location) return null;
+  const floor = knownLocation.floor || null;
+  const subLocation = knownLocation.subLocation || null;
+  return {
+    code: knownLocation.code || "",
+    location: knownLocation.location,
+    floor,
+    subLocation,
+    locationId: knownLocation.location.id,
+    floorNumber: knownLocation.floorNumber || (floor ? floorNumberForFloor(floor) : 0),
+    subLocationId: subLocation?.id || "",
+  };
+}
+
+function itemRoomLocationInfos(item = {}) {
+  const nested = item?.item || {};
+  return uniqueValues([
+    item?.location,
+    item?.secondary_location,
+    item?.lost_location,
+    nested?.location,
+    nested?.secondary_location,
+    `${item?.secondary_location || ""} > ${item?.location || ""}`,
+    `${nested?.secondary_location || ""} > ${nested?.location || ""}`,
+  ])
+    .map(canonicalLocationInfoFromValue)
+    .filter(Boolean);
+}
+
+function itemRecentForMap(item = {}) {
+  const rawDate = item?.updated_at || item?.created_at || item?.timestamp || item?.event_date;
+  const dateValue = Date.parse(rawDate || "");
+  return Number.isFinite(dateValue) && Date.now() - dateValue <= 7 * 24 * 60 * 60 * 1000;
+}
+
+function itemMatchesMapRegion(item, region) {
+  if (!region) return false;
+  const label = normalizeLocationText(region.label);
+  const zone = normalizeLocationText(region.zone);
+  const path = normalizeLocationText(regionPath(region));
+  const sources = itemMapTextSources(item);
+  if (!label || !sources.length) return false;
+  if (sources.some((source) => path && source.includes(path))) return true;
+  if (!sources.some((source) => source.includes(label))) return false;
+  const secondaryMatchesZone = sources.some((source) => zone && source.includes(zone));
+  const hasSecondary = Boolean(normalizeLocationText(item?.secondary_location || item?.item?.secondary_location || ""));
+  return secondaryMatchesZone || !hasSecondary;
+}
+
+function itemMatchesMapZone(item, zone) {
+  const matchingLocation = state.locations.find((location) => location.name === zone || location.label === zone);
+  if (matchingLocation && itemRoomLocationInfos(item).some((info) => info.locationId === matchingLocation.id)) {
+    return true;
+  }
+  const candidateZones = uniqueValues([
+    zone,
+    matchingLocation?.name,
+    matchingLocation?.label,
+  ]).flatMap((value) => locationAliasesForPart(value)).filter(Boolean);
+  const sources = itemMapTextSources(item);
+  if (candidateZones.some((normalizedZone) => sources.some((source) => source.includes(normalizedZone)))) {
+    return true;
+  }
+  return state.mapRegions.some((region) => region.zone === zone && itemMatchesMapRegion(item, region));
+}
+
+function itemsForMapRegion(region) {
+  if (!region) return [];
+  return state.items.filter((item) => !item.claimed && !item.returned_at && itemMatchesMapRegion(item, region));
+}
+
+function itemMatchesActiveLocation(item) {
+  const activeLocation = currentLocationFilterValue();
+  if (!activeLocation) return true;
+  const activeRegion = state.mapRegions.find((region) => normalizedLocationFilter(regionPath(region)) === activeLocation);
+  if (activeRegion) return itemMatchesMapRegion(item, activeRegion);
+  const activeZone = state.mapZones.find((zone) => normalizedLocationFilter(zone) === activeLocation);
+  if (activeZone) return itemMatchesMapZone(item, activeZone);
+  const activeParts = locationPathParts(activeLocation);
+  const activeLocationNode = activeParts.length ? schoolLocationForFilter(activeParts[0]) : null;
+  const activeFloor = activeLocationNode && activeParts.length > 1 ? floorForLabel(activeLocationNode, activeParts[1]) : null;
+  if (activeLocationNode && activeFloor && itemMatchesFloor(item, activeLocationNode, activeFloor)) {
+    return true;
+  }
+  return textMatchesActiveLocation(item?.location)
+    || textMatchesActiveLocation(item?.secondary_location)
+    || textMatchesActiveLocation(item?.lost_location)
+    || textMatchesActiveLocation(item?.item?.location)
+    || textMatchesActiveLocation(item?.item?.secondary_location);
+}
+
+function filterByActiveLocation(items = []) {
+  return currentLocationFilterValue() ? items.filter(itemMatchesActiveLocation) : items;
+}
+
+function renderLocationScopedSurfaces() {
+  renderItems(filterByActiveLocation(state.items));
+  renderClaims(filterByActiveLocation(state.claims));
+  renderReturnedItems(filterByActiveLocation(state.returnedItems));
+  renderDashboard();
+  renderSchoolMap();
+  if (state.currentView === "query") {
+    renderQueryItemSelector(state.currentQueryItem?.id || state.currentItemId || null);
+  }
+}
+
+function normalizeMapRegion(region = {}) {
+  const zone = SCHOOL_ZONES.includes(region.zone) ? region.zone : SCHOOL_ZONES[0];
+  const numberFor = (key, fallback = 0) => {
+    const value = Number(region[key]);
+    return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : fallback;
+  };
+  const x = numberFor("x");
+  const y = numberFor("y");
+  const width = Math.min(1 - x, Math.max(0.001, numberFor("width", 0.08)));
+  const height = Math.min(1 - y, Math.max(0.001, numberFor("height", 0.08)));
+  return {
+    id: String(region.id || ""),
+    label: String(region.label || "").trim() || "Unnamed region",
+    zone,
+    x,
+    y,
+    width,
+    height,
+  };
+}
+
+function positionMapTooltip(tooltip, shell, event) {
+  if (!tooltip || !shell || !event) return;
+  const rect = shell.getBoundingClientRect();
+  const clientX = Number.isFinite(event.clientX) ? event.clientX : rect.left + rect.width / 2;
+  const clientY = Number.isFinite(event.clientY) ? event.clientY : rect.top + rect.height / 2;
+  const x = Math.min(rect.width - 12, Math.max(12, clientX - rect.left + 14));
+  const y = Math.min(rect.height - 12, Math.max(12, clientY - rect.top + 14));
+  tooltip.style.left = `${x}px`;
+  tooltip.style.top = `${y}px`;
+}
+
+function showMapTooltip(region, event, tooltip = schoolMapTooltip, shell = schoolMapShell) {
+  if (!tooltip || !shell || !region) return;
+  const stats = mapRegionStats(region);
+  tooltip.replaceChildren();
+  const title = document.createElement("strong");
+  title.textContent = region.label;
+  const zone = document.createElement("span");
+  zone.textContent = region.zone;
+  const count = document.createElement("span");
+  count.textContent = `${stats.item_count} item${stats.item_count === 1 ? "" : "s"} • ${stats.lost_count} lost`;
+  const recent = document.createElement("span");
+  recent.className = stats.recent_activity ? "map-tooltip-recent is-active" : "map-tooltip-recent";
+  recent.textContent = stats.recent_activity ? "Recent activity" : "No recent activity";
+  tooltip.append(title, zone, count, recent);
+  positionMapTooltip(tooltip, shell, event);
+  tooltip.classList.remove("is-hidden");
+}
+
+function hideMapTooltip(tooltip = schoolMapTooltip) {
+  tooltip?.classList.add("is-hidden");
+}
+
+function heatToneForCount(count, maxCount) {
+  if (count <= 0 || maxCount <= 0) return "";
+  const ratio = count / maxCount;
+  if (ratio < 0.34) return "is-heat-low";
+  if (ratio < 0.67) return "is-heat-medium";
+  return "is-heat-high";
+}
+
+function heatIntensityLabel(count, maxCount) {
+  if (!count || !maxCount) return "No density";
+  const ratio = count / maxCount;
+  if (ratio < 0.34) return "Low density";
+  if (ratio < 0.67) return "Medium density";
+  return "High density";
+}
+
+function appendTooltipRecentItems(tooltip, recentItems = []) {
+  const latestItem = latestImageItemForItems(recentItems) || recentItems[0] || null;
+  if (!latestItem) {
+    const empty = document.createElement("span");
+    empty.className = "map-tooltip-recent";
+    empty.textContent = "No reports yet";
+    tooltip.append(empty);
+    return;
+  }
+  const latestLabel = document.createElement("span");
+  latestLabel.className = "map-tooltip-latest-label";
+  latestLabel.textContent = "Latest:";
+  const preview = document.createElement("span");
+  preview.className = "map-tooltip-preview";
+  preview.textContent = latestItem.title || latestItem.category || "Recent item";
+  tooltip.append(latestLabel, preview);
+
+  const thumbnailSource = state.previewUrls.get(latestItem.id) || resolveImageUrl(latestItem);
+  if (!canPreviewImage(thumbnailSource)) return;
+  const image = document.createElement("img");
+  image.className = "map-tooltip-thumbnail";
+  image.src = thumbnailSource;
+  image.alt = latestItem.title || "Latest report image";
+  image.loading = "lazy";
+  image.decoding = "async";
+  image.addEventListener("error", () => image.remove(), { once: true });
+  tooltip.append(image);
+}
+
+function mapLocationTargetStats(target = {}) {
+  if (!target.location) return { item_count: 0, lost_count: 0, recent_items: [] };
+  if (target.subLocation) {
+    return schoolSubLocationStats(target.location, target.subLocation, target.floor || null);
+  }
+  if (target.floor) {
+    return schoolFloorStats(target.location, target.floor);
+  }
+  return schoolLocationStats(target.location);
+}
+
+function showMapLocationTooltip(target, event, tooltip = schoolMapTooltip, shell = schoolMapShell) {
+  if (!tooltip || !shell || !target?.location) return;
+  const stats = mapLocationTargetStats(target);
+  const heatMax = target.floor || target.subLocation
+    ? maxTerminalReportCount(target.location)
+    : maxLocationReportCount();
+  tooltip.replaceChildren();
+  const title = document.createElement("strong");
+  title.textContent = target.label || schoolLocationDisplayName(target.location);
+  const count = document.createElement("span");
+  count.textContent = reportCountLabel(stats.item_count || 0);
+  const hint = document.createElement("span");
+  hint.className = stats.recent_activity ? "map-tooltip-recent is-active" : "map-tooltip-recent";
+  hint.textContent = heatIntensityLabel(stats.item_count, heatMax);
+  tooltip.append(title, count, hint);
+  appendTooltipRecentItems(tooltip, stats.recent_items || []);
+  positionMapTooltip(tooltip, shell, event);
+  tooltip.classList.remove("is-hidden");
+}
+
+function mapReportContextActive() {
+  return Boolean(state.activeReportFormContext && reportDialog?.open);
+}
+
+function primaryRegionForLocation(location) {
+  return location?.interactionRegions?.[0] || {
+    id: `${location?.id || "location"}-region`,
+    label: location?.label || location?.name || "",
+    x: 0.4,
+    y: 0.4,
+    width: 0.2,
+    height: 0.16,
+  };
+}
+
+function cloneMapLayoutRegion(region = {}) {
+  return {
+    ...region,
+    x: coordinateUnit(region.x, 0),
+    y: coordinateUnit(region.y, 0),
+    width: Math.max(0.001, Math.min(1, coordinateUnit(region.width, 0.1))),
+    height: Math.max(0.001, Math.min(1, coordinateUnit(region.height, 0.1))),
+    points: normalizeRegionPoints(region.points || []),
+  };
+}
+
+function mapRegionEdge(region, axis, edge) {
+  if (axis === "x") {
+    return edge === "end" ? region.x + region.width : region.x;
+  }
+  return edge === "end" ? region.y + region.height : region.y;
+}
+
+function mapRegionCenter(region, axis) {
+  return axis === "x"
+    ? region.x + region.width / 2
+    : region.y + region.height / 2;
+}
+
+function mapRegionSeparation(regionA, regionB) {
+  const xAmount = Math.min(mapRegionEdge(regionA, "x", "end"), mapRegionEdge(regionB, "x", "end"))
+    - Math.max(mapRegionEdge(regionA, "x", "start"), mapRegionEdge(regionB, "x", "start"))
+    + MAP_WRAPPER_MIN_GAP;
+  const yAmount = Math.min(mapRegionEdge(regionA, "y", "end"), mapRegionEdge(regionB, "y", "end"))
+    - Math.max(mapRegionEdge(regionA, "y", "start"), mapRegionEdge(regionB, "y", "start"))
+    + MAP_WRAPPER_MIN_GAP;
+  if (xAmount <= 0 || yAmount <= 0) return null;
+  return { xAmount, yAmount };
+}
+
+function shrinkMapRegionTrailingEdge(region, axis, amount) {
+  const sizeKey = axis === "x" ? "width" : "height";
+  const applied = Math.min(Math.max(0, amount), Math.max(0, region[sizeKey] - MAP_WRAPPER_MIN_SIZE));
+  region[sizeKey] -= applied;
+  return applied;
+}
+
+function shrinkMapRegionLeadingEdge(region, axis, amount) {
+  const positionKey = axis === "x" ? "x" : "y";
+  const sizeKey = axis === "x" ? "width" : "height";
+  const applied = Math.min(Math.max(0, amount), Math.max(0, region[sizeKey] - MAP_WRAPPER_MIN_SIZE));
+  region[positionKey] += applied;
+  region[sizeKey] -= applied;
+  return applied;
+}
+
+function splitMapRegionBoundary(regionA, regionB, axis, amount) {
+  const before = mapRegionCenter(regionA, axis) <= mapRegionCenter(regionB, axis) ? regionA : regionB;
+  const after = before === regionA ? regionB : regionA;
+  const beforeTarget = amount / 2;
+  const afterTarget = amount - beforeTarget;
+  let applied = 0;
+  applied += shrinkMapRegionTrailingEdge(before, axis, beforeTarget);
+  applied += shrinkMapRegionLeadingEdge(after, axis, afterTarget);
+  if (applied < amount) {
+    applied += shrinkMapRegionTrailingEdge(before, axis, amount - applied);
+  }
+  if (applied < amount) {
+    applied += shrinkMapRegionLeadingEdge(after, axis, amount - applied);
+  }
+  return applied > 0;
+}
+
+function collisionSafeMapTargets(targets = []) {
+  const safeTargets = targets.map((target) => ({
+    ...target,
+    region: cloneMapLayoutRegion(target.region),
+  }));
+  for (let pass = 0; pass < 6; pass += 1) {
+    let changed = false;
+    for (let leftIndex = 0; leftIndex < safeTargets.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < safeTargets.length; rightIndex += 1) {
+        const leftRegion = safeTargets[leftIndex].region;
+        const rightRegion = safeTargets[rightIndex].region;
+        if (!leftRegion || !rightRegion) continue;
+        const separation = mapRegionSeparation(leftRegion, rightRegion);
+        if (!separation) continue;
+        const axis = separation.xAmount <= separation.yAmount ? "x" : "y";
+        changed = splitMapRegionBoundary(leftRegion, rightRegion, axis, separation[`${axis}Amount`]) || changed;
+      }
+    }
+    if (!changed) break;
+  }
+  return safeTargets;
+}
+
+function styleMapBox(element, region) {
+  element.style.left = `${region.x * 100}%`;
+  element.style.top = `${region.y * 100}%`;
+  element.style.width = `${region.width * 100}%`;
+  element.style.height = `${region.height * 100}%`;
+  element.style.maxWidth = "none";
+}
+
+function subdivideRegion(region, index, total, { columns = 0 } = {}) {
+  const safeTotal = Math.max(1, total);
+  const columnCount = columns || (safeTotal > 4 ? 2 : safeTotal);
+  const rowCount = Math.ceil(safeTotal / columnCount);
+  const gap = 0.006;
+  const column = index % columnCount;
+  const row = Math.floor(index / columnCount);
+  const width = Math.max(0.001, (region.width - gap * (columnCount + 1)) / columnCount);
+  const height = Math.max(0.001, (region.height - gap * (rowCount + 1)) / rowCount);
+  return {
+    x: region.x + gap + column * (width + gap),
+    y: region.y + gap + row * (height + gap),
+    width,
+    height,
+  };
+}
+
+function regionForFloor(location, floor) {
+  if (!location || !floor) return primaryRegionForLocation(location);
+  const index = location.floors.findIndex((candidate) => candidate.id === floor.id);
+  return subdivideRegion(primaryRegionForLocation(location), Math.max(0, index), location.floors.length, { columns: 1 });
+}
+
+function regionForFloorRoom(location, floor, room) {
+  if (!location || !floor || !room) return regionForFloor(location, floor);
+  const source = floor.subLocations || [];
+  const index = source.findIndex((candidate) => candidate.id === room.id);
+  return subdivideRegion(regionForFloor(location, floor), Math.max(0, index), source.length);
+}
+
+function regionForDirectSubLocation(location, subLocation) {
+  if (!location || !subLocation) return primaryRegionForLocation(location);
+  const source = directSubLocationsForLocation(location);
+  const index = source.findIndex((candidate) => candidate.id === subLocation.id);
+  return subdivideRegion(primaryRegionForLocation(location), Math.max(0, index), source.length);
+}
+
+function focusedMapRegion() {
+  const location = selectedSchoolLocation();
+  if (!location) return null;
+  const floor = selectedSchoolFloor();
+  const subLocation = selectedSchoolSubLocation();
+  if (subLocation && floor) return regionForFloor(location, floor);
+  if (subLocation && !floor) return primaryRegionForLocation(location);
+  if (floor) return regionForFloor(location, floor);
+  return primaryRegionForLocation(location);
+}
+
+function cameraStateForRegion(region) {
+  if (!region) return { scale: 1, x: 0.5, y: 0.5 };
+  const longestSide = Math.max(region.width, region.height, 0.001);
+  const scale = Math.min(4, Math.max(2, 0.82 / longestSide));
+  return {
+    scale,
+    x: Math.min(0.95, Math.max(0.05, region.x + region.width / 2)),
+    y: Math.min(0.95, Math.max(0.05, region.y + region.height / 2)),
+  };
+}
+
+function focusCameraOnRegion(region) {
+  state.cameraZoomState = { scale: 1, x: 0.5, y: 0.5 };
+}
+
+function resetMapCamera() {
+  state.cameraZoomState = { scale: 1, x: 0.5, y: 0.5 };
+}
+
+function applyMapCamera() {
+  if (schoolMapCamera) {
+    schoolMapCamera.style.transform = "none";
+  }
+  schoolMapShell?.classList.remove("is-focused");
+}
+
+function renderMapFocus() {
+  return null;
+}
+
+function structuredLocationFromSelection() {
+  const location = selectedSchoolLocation();
+  if (!location) return null;
+  const floor = selectedSchoolFloor();
+  const subLocation = selectedSchoolSubLocation();
+  if (subLocation && floor) {
+    return {
+      valid: true,
+      value: subLocation.label,
+      meta: locationFloorPath(location, floor),
+      label: locationSubLocationPath(location, subLocation, floor),
+    };
+  }
+  if (subLocation) {
+    return {
+      valid: true,
+      value: subLocation.label,
+      meta: location.name,
+      label: locationSubLocationPath(location, subLocation),
+    };
+  }
+  if (floor) {
+    return {
+      valid: true,
+      value: floor.label,
+      meta: location.name,
+      label: locationFloorPath(location, floor),
+    };
+  }
+  return {
+    valid: true,
+    value: location.name,
+    meta: location.name,
+    label: location.name,
+  };
+}
+
+function assignReportLocationFromSelection() {
+  if (!mapReportContextActive()) return;
+  const structured = structuredLocationFromSelection();
+  if (!structured || !optionalLocationInput) return;
+  optionalLocationInput.value = structured.label;
+  optionalLocationInput.dataset.mapLocation = structured.label;
+  updateLocationUi();
+  setMessage(uploadMessage, `Location selected: ${structured.label}`);
+}
+
+function clearReportMapLocationMarker() {
+  if (optionalLocationInput) {
+    delete optionalLocationInput.dataset.mapLocation;
+  }
+}
+
+function terminalTargetsForLocation(location) {
+  if (!location) return [];
+  if (locationUsesDirectExpandedSubLocations(location)) {
+    return directSubLocationsForLocation(location).map((subLocation) => ({
+      id: `${location.id}-${subLocation.id}`,
+      key: `sub:${location.id}:${subLocation.id}`,
+      type: "subLocation",
+      label: subLocation.label,
+      location,
+      floor: null,
+      subLocation,
+      path: locationSubLocationPath(location, subLocation),
+      stats: schoolSubLocationStats(location, subLocation),
+    }));
+  }
+  if (locationHasFloors(location)) {
+    return location.floors
+      .map((floor) => {
+        const label = validFloorLabelForLocation(location, floor);
+        if (!label) return null;
+        return {
+          id: `${location.id}-${floor.id}`,
+          key: `floor:${location.id}:${floor.id}`,
+          type: "floor",
+          label,
+          location,
+          floor: { ...floor, label },
+          subLocation: null,
+          path: locationFloorPath(location, floor),
+          stats: schoolFloorStats(location, floor),
+        };
+      })
+      .filter(Boolean);
+  }
+  if (!directSubLocationsForLocation(location).length) {
+    return [{
+      id: location.id,
+      key: `location:${location.id}`,
+      type: "location",
+      label: schoolLocationDisplayName(location),
+      location,
+      floor: null,
+      subLocation: null,
+      path: location.name,
+      stats: schoolLocationStats(location),
+    }];
+  }
+  return directSubLocationsForLocation(location).map((subLocation) => ({
+    id: `${location.id}-${subLocation.id}`,
+    key: `sub:${location.id}:${subLocation.id}`,
+    type: "subLocation",
+    label: subLocation.label,
+    location,
+    floor: null,
+    subLocation,
+    path: locationSubLocationPath(location, subLocation),
+    stats: schoolSubLocationStats(location, subLocation),
+  }));
+}
+
+function selectedTerminalKeyForLocation(location) {
+  if (!location || state.selectedLocation !== location.id) return "";
+  if (state.selectedSubLocation?.id) return `sub:${location.id}:${state.selectedSubLocation.id}`;
+  if (state.selectedFloor?.id) return `floor:${location.id}:${state.selectedFloor.id}`;
+  if (!locationHasFloors(location) && !directSubLocationsForLocation(location).length) return `location:${location.id}`;
+  return "";
+}
+
+function maxLocationReportCount() {
+  return state.locations.reduce((maxCount, location) => (
+    Math.max(maxCount, schoolLocationStats(location).item_count || 0)
+  ), 0);
+}
+
+function maxTerminalReportCount(location) {
+  return terminalTargetsForLocation(location).reduce((maxCount, target) => (
+    Math.max(maxCount, target.stats?.item_count || 0)
+  ), 0);
+}
+
+function expandMapBox(location) {
+  if (!location) return;
+  state.selectedBox = location.id;
+  state.expandedBox = location.id;
+  state.selectedZone = location.id;
+  state.selectedLocation = location.id;
+  state.selectedSubLocation = null;
+  state.selectedFloor = null;
+  state.expandedMapTarget = null;
+  resetMapCamera();
+  triggerHaptic("selection");
+  renderSchoolMap();
+}
+
+function selectMapZone(location) {
+  expandMapBox(location);
+}
+
+function selectMapStandaloneLocation(location, { assignInput = true, openReports = true } = {}) {
+  if (!location) return;
+  state.selectedBox = location.id;
+  state.expandedBox = location.id;
+  state.selectedZone = location.id;
+  state.selectedLocation = location.id;
+  state.selectedFloor = null;
+  state.selectedSubLocation = null;
+  state.expandedMapTarget = null;
+  resetMapCamera();
+  setActiveLocationFilter(schoolLocationFilterValue(location), {
+    load: !mapReportContextActive(),
+    focusDashboard: false,
+    closeDrawer: false,
+    source: "map",
+  });
+  if (assignInput) {
+    assignReportLocationFromSelection();
+  }
+  triggerHaptic("selection");
+  renderSchoolMap();
+  if (openReports) {
+    openReportsForSelectedMapLocation();
+  }
+}
+
+function openReportsForSelectedMapLocation() {
+  if (mapReportContextActive()) return;
+  if (state.user && state.currentView !== "reports") {
+    navigateTo("reports");
+  } else {
+    syncWorkspaceLayout();
+  }
+}
+
+function selectMapFloor(location, floor, { assignInput = true, openReports = true } = {}) {
+  if (!location || !floor) return;
+  state.selectedBox = location.id;
+  state.expandedBox = location.id;
+  state.selectedZone = location.id;
+  state.selectedLocation = location.id;
+  state.selectedFloor = { locationId: location.id, id: floor.id, label: floor.label };
+  state.selectedSubLocation = null;
+  state.expandedMapTarget = null;
+  resetMapCamera();
+  setActiveLocationFilter(locationFloorPath(location, floor), {
+    load: !mapReportContextActive(),
+    focusDashboard: false,
+    closeDrawer: false,
+    source: "map",
+  });
+  if (assignInput) {
+    assignReportLocationFromSelection();
+  }
+  triggerHaptic("selection");
+  renderSchoolMap();
+  if (openReports) {
+    openReportsForSelectedMapLocation();
+  }
+}
+
+function selectMapSubLocation(location, subLocation, floor = null, { openReports = true } = {}) {
+  if (!location || !subLocation) return;
+  state.selectedBox = location.id;
+  state.expandedBox = location.id;
+  state.selectedZone = location.id;
+  state.selectedLocation = location.id;
+  state.selectedFloor = floor
+    ? { locationId: location.id, id: floor.id, label: floor.label }
+    : null;
+  state.selectedSubLocation = {
+    locationId: location.id,
+    floorId: floor?.id || "",
+    id: subLocation.id,
+    label: subLocation.label,
+  };
+  state.expandedMapTarget = null;
+  resetMapCamera();
+  setActiveLocationFilter(locationSubLocationPath(location, subLocation, floor), {
+    load: !mapReportContextActive(),
+    focusDashboard: false,
+    closeDrawer: false,
+    source: "map",
+  });
+  assignReportLocationFromSelection();
+  triggerHaptic("selection");
+  renderSchoolMap();
+  if (openReports) {
+    openReportsForSelectedMapLocation();
+  }
+}
+
+function selectMapTerminalTarget(target) {
+  if (!target?.location) return;
+  if (target.type === "location") {
+    selectMapStandaloneLocation(target.location);
+    return;
+  }
+  if (target.type === "floor") {
+    selectMapFloor(target.location, target.floor);
+    return;
+  }
+  selectMapSubLocation(target.location, target.subLocation, target.floor || null);
+}
+
+function clearMapNavigation({ clearFilter = true } = {}) {
+  state.selectedZone = null;
+  state.selectedLocation = null;
+  state.selectedBox = null;
+  state.expandedBox = null;
+  state.selectedFloor = null;
+  state.selectedSubLocation = null;
+  state.expandedMapTarget = null;
+  resetMapCamera();
+  if (clearFilter && !mapReportContextActive()) {
+    setActiveLocationFilter("", { load: true, focusDashboard: false, closeDrawer: false, source: "map" });
+  }
+  renderSchoolMap();
+}
+
+function createRecentMapItemPreview(item) {
+  const node = document.createElement("button");
+  node.className = "map-preview-item";
+  node.type = "button";
+  node.textContent = item.title || item.category || "Recent item";
+  node.addEventListener("click", () => navigateTo("query", item.id || null));
+  return node;
+}
+
+function currentHeatmapEntities() {
+  const location = selectedSchoolLocation();
+  const floor = selectedSchoolFloor();
+  if (location && floor) {
+    const rooms = floor.subLocations || [];
+    if (!rooms.length) {
+      return [{
+        id: `${location.id}-${floor.id}`,
+        label: locationFloorPath(location, floor),
+        region: regionForFloor(location, floor),
+        stats: schoolFloorStats(location, floor),
+        location,
+        floor,
+      }];
+    }
+    return rooms.map((room) => ({
+      id: `${location.id}-${floor.id}-${room.id}`,
+      label: locationSubLocationPath(location, room, floor),
+      region: regionForFloorRoom(location, floor, room),
+      stats: schoolSubLocationStats(location, room, floor),
+      location,
+      floor,
+      subLocation: room,
+    }));
+  }
+  if (locationHasFloors(location)) {
+    return location.floors
+      .map((floor) => {
+        const label = validFloorLabelForLocation(location, floor);
+        if (!label) return null;
+        return {
+          id: `${location.id}-${floor.id}`,
+          label: locationFloorPath(location, floor),
+          region: regionForFloor(location, floor),
+          stats: schoolFloorStats(location, floor),
+          location,
+          floor: { ...floor, label },
+        };
+      })
+      .filter(Boolean);
+  }
+  if (location && directSubLocationsForLocation(location).length) {
+    return directSubLocationsForLocation(location).map((subLocation) => ({
+      id: `${location.id}-${subLocation.id}`,
+      label: locationSubLocationPath(location, subLocation),
+      region: regionForDirectSubLocation(location, subLocation),
+      stats: schoolSubLocationStats(location, subLocation),
+      location,
+      subLocation,
+    }));
+  }
+  if (location) {
+    return [{
+      id: location.id,
+      label: schoolLocationDisplayName(location),
+      region: primaryRegionForLocation(location),
+      stats: schoolLocationStats(location),
+      location,
+    }];
+  }
+  return collisionSafeMapTargets(state.locations.map((zoneLocation) => ({
+    id: zoneLocation.id,
+    label: schoolLocationDisplayName(zoneLocation),
+    region: primaryRegionForLocation(zoneLocation),
+    stats: schoolLocationStats(zoneLocation),
+    location: zoneLocation,
+  })));
+}
+
+function currentHeatmapMaxCount() {
+  return currentHeatmapEntities().reduce((maxCount, entity) => Math.max(maxCount, entity.stats?.item_count || 0), 0);
+}
+
+function createMapTextHitElement(target) {
+  const { region, location, label = "", onClick } = target;
+  const stats = schoolLocationStats(location);
+  const expanded = state.expandedBox === location.id;
+  const heatClass = heatToneForCount(stats.item_count, maxLocationReportCount());
+  const box = document.createElement("div");
+  box.className = "map-region-box";
+  if (heatClass) box.classList.add(heatClass);
+  box.dataset.locationId = location.id;
+  box.dataset.locationFilter = schoolLocationFilterValue(location);
+  box.setAttribute("role", "button");
+  box.setAttribute("tabindex", "0");
+  box.setAttribute("aria-expanded", String(expanded));
+  box.setAttribute("aria-label", `${label || schoolLocationDisplayName(location)}: ${stats.item_count} reports`);
+  box.classList.toggle("is-active", state.selectedBox === location.id);
+  box.classList.toggle("is-expanded", expanded);
+  styleMapBox(box, region);
+
+  box.addEventListener("pointerenter", (event) => showMapLocationTooltip({ location, label }, event));
+  box.addEventListener("pointermove", (event) => positionMapTooltip(schoolMapTooltip, schoolMapShell, event));
+  box.addEventListener("pointerleave", () => hideMapTooltip(schoolMapTooltip));
+  box.addEventListener("click", (event) => {
+    if (typeof onClick === "function") onClick();
+  });
+  box.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    if (typeof onClick === "function") onClick();
+  });
+  return box;
+}
+
+function mapTextHitTargets() {
+  return state.locations.map((zoneLocation) => ({
+    location: zoneLocation,
+    label: schoolLocationDisplayName(zoneLocation),
+    region: primaryRegionForLocation(zoneLocation),
+    onClick: () => selectMapZone(zoneLocation),
+  }));
+}
+
+function renderMapTextHitLayer() {
+  if (!schoolMapTextLayer) return;
+  schoolMapTextLayer.replaceChildren();
+  mapTextHitTargets().forEach((target) => {
+    schoolMapTextLayer.append(createMapTextHitElement(target));
+  });
+  syncLocationBrowserState();
+}
+
+function renderMapOverlay() {
+  renderMapTextHitLayer();
+}
+
+function renderMapBreadcrumb() {
+  if (!mapSelectionBreadcrumb) return;
+  const structured = structuredLocationFromSelection();
+  mapSelectionBreadcrumb.textContent = structured?.label || "Campus";
+}
+
+function appendMapPreview(panel, location, { floor = null, subLocation = null } = {}) {
+  const previewTitle = document.createElement("span");
+  previewTitle.className = "map-preview-title";
+  previewTitle.textContent = subLocation ? "Reported items" : "Recent items";
+  const previewList = document.createElement("div");
+  previewList.className = "map-preview-list";
+  const recentItems = subLocation
+    ? itemsForSubLocation(location, subLocation, floor)
+      .slice()
+      .sort((a, b) => {
+        const left = dateFromItem(a)?.getTime() || 0;
+        const right = dateFromItem(b)?.getTime() || 0;
+        return right - left;
+      })
+    : floor
+      ? recentItemsForFloor(location, floor)
+      : recentItemsForSchoolLocation(location);
+  if (recentItems.length) {
+    recentItems.forEach((item) => previewList.append(createRecentMapItemPreview(item)));
+  } else {
+    const empty = document.createElement("span");
+    empty.className = "map-preview-empty";
+    empty.textContent = subLocation ? "No reports in this room" : "No recent items";
+    previewList.append(empty);
+  }
+  panel.append(previewTitle, previewList);
+}
+
+function reportCountLabel(count) {
+  return `${count} report${count === 1 ? "" : "s"}`;
+}
+
+function latestMapItemForStats(stats = {}) {
+  return Array.isArray(stats.recent_items) && stats.recent_items.length ? stats.recent_items[0] : null;
+}
+
+function latestMapImageItemForStats(stats = {}) {
+  return stats.latest_image_item || (
+    Array.isArray(stats.recent_items)
+      ? stats.recent_items.find((item) => canPreviewImage(mapItemImageSource(item)))
+      : null
+  );
+}
+
+function mapItemImageSource(item) {
+  return item ? (state.previewUrls.get(item.id) || resolveImageUrl(item)) : "";
+}
+
+function createMapPreviewMedia(item, { interactive = true } = {}) {
+  const source = mapItemImageSource(item);
+  if (canPreviewImage(source)) {
+    if (interactive) {
+      const thumbnail = createThumbnailButton(source, {
+        title: item?.title || "Latest report image",
+        caption: item?.description || "",
+      });
+      thumbnail?.classList.add("map-preview-thumbnail");
+      return thumbnail;
+    }
+    const image = document.createElement("img");
+    image.className = "map-preview-thumbnail-image";
+    image.src = source;
+    image.alt = item?.title || "Latest report image";
+    image.loading = "lazy";
+    image.decoding = "async";
+    image.addEventListener("error", () => image.remove(), { once: true });
+    return image;
+  }
+  const placeholder = document.createElement("div");
+  placeholder.className = "map-preview-thumbnail-placeholder";
+  placeholder.textContent = item ? "No image" : "No reports yet";
+  return placeholder;
+}
+
+function createMapSelectionPreviewCard(target, heatMax) {
+  const stats = target.stats || mapLocationTargetStats(target);
+  const latestItem = latestMapItemForStats(stats);
+  const displayItem = latestMapImageItemForStats(stats) || latestItem;
+  const heatClass = heatToneForCount(stats.item_count || 0, heatMax);
+  const card = document.createElement("article");
+  card.className = "map-selection-card";
+  if (heatClass) card.classList.add(heatClass);
+
+  const media = createMapPreviewMedia(displayItem, { interactive: Boolean(displayItem) });
+  media.classList.add("map-selection-card-media");
+
+  const selectButton = document.createElement("button");
+  selectButton.className = "map-selection-card-main";
+  selectButton.type = "button";
+  selectButton.setAttribute("aria-label", `${target.path}: ${reportCountLabel(stats.item_count || 0)}`);
+  selectButton.classList.toggle("is-active", selectedTerminalKeyForLocation(target.location) === target.key);
+  selectButton.addEventListener("click", () => selectMapTerminalTarget(target));
+
+  const title = document.createElement("strong");
+  title.textContent = target.label;
+  const latestLabel = document.createElement("span");
+  latestLabel.className = "map-selection-latest-label";
+  latestLabel.textContent = "Latest:";
+  const latest = document.createElement("span");
+  latest.className = "map-selection-latest";
+  latest.textContent = latestItem?.title || latestItem?.category || "No reports yet";
+  const count = document.createElement("span");
+  count.className = "map-selection-count";
+  count.textContent = reportCountLabel(stats.item_count || 0);
+  selectButton.append(title, latestLabel, latest, count);
+
+  card.append(media, selectButton);
+  return card;
+}
+
+function renderMapSelectionPanel() {
+  if (!mapSelectionPanel) return;
+  mapSelectionPanel.replaceChildren();
+  const location = selectedSchoolLocation();
+  if (!location || state.expandedBox !== location.id) {
+    mapSelectionPanel.classList.add("is-hidden");
+    return;
+  }
+
+  const targets = terminalTargetsForLocation(location);
+  const head = document.createElement("div");
+  head.className = "map-selection-panel-head";
+  const titleWrap = document.createElement("div");
+  const eyebrow = document.createElement("span");
+  eyebrow.className = "eyebrow";
+  eyebrow.textContent = "Location";
+  const title = document.createElement("strong");
+  title.textContent = schoolLocationDisplayName(location);
+  titleWrap.append(eyebrow, title);
+
+  const closeButton = document.createElement("button");
+  closeButton.className = "icon-button map-location-close";
+  closeButton.type = "button";
+  closeButton.setAttribute("aria-label", "Close location selection");
+  closeButton.textContent = "×";
+  closeButton.addEventListener("click", () => {
+    state.expandedBox = null;
+    state.selectedBox = null;
+    renderSchoolMap();
+  });
+  head.append(titleWrap, closeButton);
+
+  const list = document.createElement("div");
+  list.className = "map-selection-card-list";
+  if (targets.length) {
+    const heatMax = maxTerminalReportCount(location);
+    targets.forEach((target) => list.append(createMapSelectionPreviewCard(target, heatMax)));
+  } else {
+    const empty = document.createElement("span");
+    empty.className = "map-preview-empty";
+    empty.textContent = "No reports yet";
+    list.append(empty);
+  }
+
+  mapSelectionPanel.append(head, list);
+  mapSelectionPanel.classList.remove("is-hidden");
+}
+
+function renderSchoolMap() {
+  setMapImageSource(schoolMapImage);
+  renderMapBreadcrumb();
+  renderMapOverlay();
+  renderMapFocus();
+  renderMapSelectionPanel();
+  applyMapCamera();
+}
+
+function syncMapSelectionFromFilter() {
+  const location = selectedSchoolLocation();
+  if (location) {
+    const focusRegion = focusedMapRegion() || primaryRegionForLocation(location);
+    focusCameraOnRegion(focusRegion);
+  } else {
+    resetMapCamera();
+  }
+}
+
+function noopMapEditorCall() {}
+
+function mapPointFromClient(shell, event) {
+  const rect = shell?.getBoundingClientRect();
+  if (!rect?.width || !rect?.height) return { x: 0, y: 0 };
+  return {
+    x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
+    y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)),
+  };
+}
+
+function normalizeRegionBox(box) {
+  const x1 = Math.min(box.x, box.x + box.width);
+  const y1 = Math.min(box.y, box.y + box.height);
+  const x2 = Math.max(box.x, box.x + box.width);
+  const y2 = Math.max(box.y, box.y + box.height);
+  const x = Math.min(1, Math.max(0, x1));
+  const y = Math.min(1, Math.max(0, y1));
+  return {
+    x,
+    y,
+    width: Math.min(1 - x, Math.max(0, x2 - x)),
+    height: Math.min(1 - y, Math.max(0, y2 - y)),
+  };
+}
+
+function styleRegionElement(element, region) {
+  styleMapBox(element, region);
+}
+
+function createMapRegionElement(region) {
+  const element = document.createElement("button");
+  element.type = "button";
+  element.className = "map-region-box";
+  element.dataset.regionId = region.id || "";
+  element.dataset.zone = region.zone || "";
+  element.setAttribute("aria-label", region.label || region.zone || "Map region");
+  styleRegionElement(element, region);
+  return element;
+}
+
+function visibleMapRegions() {
+  return [];
+}
+
+function renderMapZoneTabs() {}
+
+function renderMapRegionStrip() {}
+
+function renderMapOverlayForAdmin() {}
+
+function versionedUploadUrl(url, version = Date.now()) {
+  const rawUrl = normalizeImageUrl(url || MAP_IMAGE_URL) || MAP_IMAGE_URL;
+  try {
+    const parsed = new URL(rawUrl, window.location.origin);
+    parsed.searchParams.set(MAP_IMAGE_RELOAD_PARAM, String(version || Date.now()));
+    if (rawUrl.startsWith("/")) {
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+    return parsed.toString();
+  } catch {
+    const joiner = rawUrl.includes("?") ? "&" : "?";
+    return `${rawUrl}${joiner}${MAP_IMAGE_RELOAD_PARAM}=${encodeURIComponent(String(version || Date.now()))}`;
+  }
+}
+
+function syncMapImageAspect(image) {
+  if (!image?.naturalWidth || !image?.naturalHeight) return;
+  const shell = image.closest(".school-map-shell");
+  shell?.style.setProperty("--map-aspect-ratio", `${image.naturalWidth} / ${image.naturalHeight}`);
+}
+
+function setMapImageSource(image) {
+  if (!image) return;
+  const nextSrc = versionedUploadUrl(state.mapImageUrl, state.mapImageVersion);
+  if (image.getAttribute("src") !== nextSrc) {
+    image.src = nextSrc;
+    return;
+  }
+  syncMapImageAspect(image);
+}
+
+function updateMapFilters() {
+  state.filters = {
+    ...state.filters,
+    locations: campusLocationsFromMap(),
+  };
+  if (locationFilter) {
+    fillSelect(locationFilter, state.filters.locations, true);
+    syncLocationFilterSelect();
+  }
+}
+
+async function loadMapSystem() {
+  try {
+    const data = await apiFetch("/map");
+    state.mapImageUrl = data.image_url || MAP_IMAGE_URL;
+    state.mapImageVersion = data.image_version || Date.now();
+    state.loadingVideoUrl = data.loading_video_url || LOGIN_LOADING_VIDEO_URL;
+    state.locations = normalizeSchoolLocations(Array.isArray(data.locations) && data.locations.length ? data.locations : SCHOOL_LOCATIONS);
+    state.mapZones = uniqueValues([
+      ...SCHOOL_ZONES,
+      ...(Array.isArray(data.zones) ? data.zones : []),
+    ]);
+    state.mapRegions = [];
+    state.mapStats = data.stats || { regions: {}, zones: {} };
+    renderLocationBrowserTree();
+    updateMapFilters();
+    syncMapSelectionFromFilter();
+    renderSchoolMap();
+  } catch (error) {
+    state.mapImageUrl = MAP_IMAGE_URL;
+    state.mapImageVersion = Date.now();
+    state.loadingVideoUrl = LOGIN_LOADING_VIDEO_URL;
+    state.locations = normalizeSchoolLocations(SCHOOL_LOCATIONS);
+    state.mapZones = [...SCHOOL_ZONES];
+    state.mapRegions = [];
+    state.mapStats = { regions: {}, zones: {} };
+    renderLocationBrowserTree();
+    syncMapSelectionFromFilter();
+    renderSchoolMap();
+    logClientError("loading map failed", error);
+  }
+}
+
+function fillMapRegionZoneSelect() {}
+
 function dashboardStats() {
   const now = new Date();
-  const reportsToday = state.items.filter((item) => {
+  const visibleItems = state.items.filter(itemMatchesActiveLocation);
+  const visibleClaims = state.claims.filter((claim) => itemMatchesActiveLocation(claim));
+  const visibleReturnedItems = state.returnedItems.filter(itemMatchesActiveLocation);
+  const reportsToday = visibleItems.filter((item) => {
     const created = dateFromItem(item, ["created_at", "event_date"]);
     return isSameLocalDay(created, now);
   }).length;
-  const reportsThisWeek = state.items.filter((item) => isWithinDays(dateFromItem(item, ["created_at", "event_date"]), 7, now)).length;
-  const pendingClaims = state.claims.filter((claim) => String(claim.status || "").toLowerCase() === "pending").length;
-  const returnedThisWeek = Number(state.statsSummary?.items_returned_this_week || 0)
-    || state.returnedItems.filter((item) => isWithinDays(dateFromItem(item, ["returned_at", "updated_at", "created_at"]), 7, now)).length;
+  const reportsThisWeek = visibleItems.filter((item) => isWithinDays(dateFromItem(item, ["created_at", "event_date"]), 7, now)).length;
+  const pendingClaims = visibleClaims.filter((claim) => String(claim.status || "").toLowerCase() === "pending").length;
+  const returnedThisWeek = (currentLocationFilterValue() ? 0 : Number(state.statsSummary?.items_returned_this_week || 0))
+    || visibleReturnedItems.filter((item) => isWithinDays(dateFromItem(item, ["returned_at", "updated_at", "created_at"]), 7, now)).length;
   const recoveredTotal = Math.max(
-    state.returnedItems.length,
-    state.items.filter((item) => item.claimed || String(item.status || "").toLowerCase() === "claimed").length,
+    visibleReturnedItems.length,
+    visibleItems.filter((item) => item.claimed || String(item.status || "").toLowerCase() === "claimed").length,
   );
   const activeQueries = state.notifications.filter((notification) => {
     const eventType = String(notification.event_type || "").toLowerCase();
-    return eventType.includes("query") && !notification.read;
+    return (eventType.includes("query") || eventType.includes("question")) && !notification.read;
   }).length;
-  const approvedClaims = state.claims.filter((claim) => String(claim.status || "").toLowerCase() === "approved").length;
-  const reviewedClaims = state.claims.filter((claim) => ["approved", "rejected"].includes(String(claim.status || "").toLowerCase())).length;
+  const approvedClaims = visibleClaims.filter((claim) => String(claim.status || "").toLowerCase() === "approved").length;
+  const reviewedClaims = visibleClaims.filter((claim) => ["approved", "rejected"].includes(String(claim.status || "").toLowerCase())).length;
   const approvalRate = reviewedClaims ? Math.round((approvedClaims / reviewedClaims) * 100) : 0;
-  const activeReports = state.items.filter((item) => {
+  const activeReports = visibleItems.filter((item) => {
     const status = String(item.status || "").toLowerCase();
     return !item.claimed && !["claimed", "archived", "returned"].includes(status);
   }).length;
@@ -5099,6 +8349,11 @@ async function refreshCurrentView() {
   }
   if (state.currentView === "reports") {
     await loadItems();
+    return;
+  }
+  if (state.currentView === "map") {
+    await Promise.all([loadMapSystem(), loadItems()]);
+    renderSchoolMap();
     return;
   }
   if (state.currentView === "room") {
@@ -5383,7 +8638,7 @@ async function loadReturnedItems() {
       state.statsSummary.items_returned_this_week = Number(data.items_returned_this_week || 0);
       renderStatsSummary();
     }
-    renderReturnedItems(state.returnedItems);
+    renderReturnedItems(filterByActiveLocation(state.returnedItems));
     renderDashboard();
   } catch (error) {
     returnedList.replaceChildren();
@@ -5415,7 +8670,6 @@ async function loadItems() {
   }
   if (categoryFilter.value) params.set("category", categoryFilter.value);
   if (statusFilter.value) params.set("status", statusFilter.value);
-  if (locationFilter.value) params.set("location", locationFilter.value);
 
   try {
     const suffix = params.toString();
@@ -5424,8 +8678,9 @@ async function loadItems() {
     const data = cached || await apiFetch(`/items${suffix ? `?${suffix}` : ""}`);
     state.searchCache.set(cacheKey, data);
     state.items = data.items || [];
-    renderItems(state.items);
+    renderItems(filterByActiveLocation(state.items));
     renderDashboard();
+    renderSchoolMap();
     if (state.currentView === "query") {
       renderQueryItemSelector(state.currentQueryItem?.id || state.currentItemId || null);
     }
@@ -5458,7 +8713,7 @@ async function loadClaims() {
   try {
     const data = await apiFetch("/claims/history");
     state.claims = data.claims || [];
-    renderClaims(state.claims);
+    renderClaims(filterByActiveLocation(state.claims));
     syncClaimActivities(state.claims);
     renderDashboard();
   } catch (error) {
@@ -5474,6 +8729,49 @@ async function loadClaims() {
   }
 }
 
+function populateInlineClaimItemSelect(select, selectedId = null) {
+  if (!select) return;
+  select.replaceChildren(new Option(langText({
+    en: "Select report",
+    "zh-CN": "选择报告",
+    th: "เลือกรายงาน",
+  }), ""));
+  const seen = new Set();
+  [...(state.queryItems || []), ...(state.items || [])].forEach((item) => {
+    if (!item?.id || item.claimed || seen.has(item.id)) return;
+    seen.add(item.id);
+    const label = [item.title, localizeValue(item.location), `#${item.id}`].filter(Boolean).join(" • ");
+    select.append(new Option(label, String(item.id)));
+  });
+  select.value = selectedId ? String(selectedId) : "";
+}
+
+async function submitClaimDraft(draft, button, itemId = null) {
+  const draftId = draft?.draft_id || String(draft?.id || "").replace(/^draft-/, "");
+  const selectedItemId = itemId || draft?.item_id || draft?.item?.id || null;
+  if (!draftId) return;
+  if (!selectedItemId) {
+    setMessage(claimsLoading, langText({ en: "Choose a report before submitting this draft.", "zh-CN": "提交草稿前请先选择报告。", th: "กรุณาเลือกรายงานก่อนส่งแบบร่าง" }), true);
+    return;
+  }
+  setButtonLoading(button, true);
+  try {
+    await apiFetch(`/claim-drafts/${draftId}/submit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ item_id: Number(selectedItemId) }),
+    });
+    triggerHaptic("success");
+    invalidateSearchCache();
+    await Promise.all([loadClaims(), loadNotifications(), loadReturnedItems(), loadStatsSummary()]);
+  } catch (error) {
+    setMessage(claimsLoading, error.message, true);
+    logClientError("submitting claim draft failed", error, { draftId, itemId: selectedItemId });
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
 function renderItems(items) {
   gallery.replaceChildren();
   resultCount.textContent = langText({
@@ -5485,7 +8783,7 @@ function renderItems(items) {
   if (!items.length) {
     const empty = document.createElement("p");
     empty.className = "status-message";
-    const hasFilters = Boolean(searchInput.value.trim() || categoryFilter.value || statusFilter.value || locationFilter.value);
+    const hasFilters = Boolean(searchInput.value.trim() || categoryFilter.value || statusFilter.value || currentLocationFilterValue());
     empty.textContent = hasFilters ? t("reports.emptyFiltered") : t("reports.emptyAll");
     gallery.append(empty);
     return;
@@ -5506,13 +8804,15 @@ function renderItems(items) {
     const claimButton = card.querySelector("[data-claim-button]");
     const openQueryButton = card.querySelector("[data-open-query-button]");
     const markClaimedButton = card.querySelector("[data-mark-claimed-button]");
+    const preview = state.previewUrls.get(item.id) || resolveImageUrl(item);
+    const primaryAiSummary = canPreviewImage(preview) ? aiAnalysisSummary(item) : analysisText(item.ai_summary);
 
     title.textContent = item.title || langText({ en: "Untitled item", "zh-CN": "未命名物品", th: "สิ่งของไม่มีชื่อ" });
     const reporterLine = document.createElement("span");
     reporterLine.className = "person-line";
     reporterLine.append(
       createMiniAvatar(item.reporter_identity || item.reporter_name || "Reporter", item.reporter_avatar_url || ""),
-      document.createTextNode(item.ai_summary || langText({
+      document.createTextNode(primaryAiSummary || langText({
         en: `Evidence: ${item.evidence_summary || "Awaiting review"}`,
         "zh-CN": `证据：${item.evidence_summary || "等待审核"}`,
         th: `หลักฐาน: ${item.evidence_summary || "รอตรวจสอบ"}`,
@@ -5538,7 +8838,6 @@ function renderItems(items) {
     confidenceDot.setAttribute("aria-label", confidenceTooltip(item));
     imageFrame.append(confidenceDot);
 
-    const preview = state.previewUrls.get(item.id) || resolveImageUrl(item);
     if (canPreviewImage(preview)) {
       image.src = preview;
       image.alt = item.title || "Uploaded item";
@@ -5555,6 +8854,11 @@ function renderItems(items) {
         imageFrame.classList.remove("has-image");
         imageFrame.style.cursor = "";
       }, { once: true });
+    }
+
+    const aiAnalysisBlock = createAiAnalysisBlock(item);
+    if (aiAnalysisBlock) {
+      description.after(aiAnalysisBlock);
     }
 
     renderTags(tags, item.tags || []);
@@ -5608,6 +8912,7 @@ function renderClaims(claims) {
 
   claims.forEach((claim) => {
     const card = claimHistoryTemplate.content.cloneNode(true);
+    const article = card.querySelector(".claim-history-card");
     const title = card.querySelector("h3");
     const meta = card.querySelector(".claim-history-meta");
     const status = card.querySelector(".status-badge");
@@ -5620,14 +8925,16 @@ function renderClaims(claims) {
     });
     if (thumbnail) {
       thumbnail.classList.add("claim-history-preview");
-      card.querySelector(".claim-history-card")?.prepend(thumbnail);
+      article?.prepend(thumbnail);
     }
 
-    title.textContent = claim.item?.title || langText({ en: "Unavailable item", "zh-CN": "不可用物品", th: "สิ่งของไม่พร้อมใช้งาน" });
+    title.textContent = claim.is_draft
+      ? (claim.title || claim.item?.title || langText({ en: "Claim draft", "zh-CN": "认领草稿", th: "แบบร่างคำขอ" }))
+      : (claim.item?.title || langText({ en: "Unavailable item", "zh-CN": "不可用物品", th: "สิ่งของไม่พร้อมใช้งาน" }));
     meta.textContent = langText({
-      en: `${claim.user_identity || "User"} • Submitted ${formatDateTime(claim.timestamp)}`,
-      "zh-CN": `${claim.user_identity || "用户"} • 提交于 ${formatDateTime(claim.timestamp)}`,
-      th: `${claim.user_identity || "ผู้ใช้"} • ส่งเมื่อ ${formatDateTime(claim.timestamp)}`,
+      en: `${claim.user_identity || "User"} • ${claim.is_draft ? "Draft saved" : "Submitted"} ${formatDateTime(claim.timestamp)}`,
+      "zh-CN": `${claim.user_identity || "用户"} • ${claim.is_draft ? "草稿保存于" : "提交于"} ${formatDateTime(claim.timestamp)}`,
+      th: `${claim.user_identity || "ผู้ใช้"} • ${claim.is_draft ? "บันทึกแบบร่างเมื่อ" : "ส่งเมื่อ"} ${formatDateTime(claim.timestamp)}`,
     });
     status.textContent = titleCase(claim.status);
     status.classList.add(statusBadgeClass(claim.status));
@@ -5639,6 +8946,32 @@ function renderClaims(claims) {
     addInfo(info, langText({ en: "Description", "zh-CN": "描述", th: "คำอธิบาย" }), claim.item_description);
     addInfo(info, langText({ en: "ID info", "zh-CN": "识别信息", th: "ข้อมูลระบุตัวตน" }), claim.identifying_info);
     addInfo(info, langText({ en: "Updated", "zh-CN": "更新时间", th: "อัปเดตเมื่อ" }), formatDateTime(claim.updated_at));
+
+    if (claim.is_draft) {
+      const actions = document.createElement("div");
+      actions.className = "card-actions";
+      let attachSelect = null;
+      if (!claim.item_id) {
+        attachSelect = document.createElement("select");
+        attachSelect.className = "inline-claim-select";
+        populateInlineClaimItemSelect(attachSelect);
+        actions.append(attachSelect);
+      }
+      const submitButton = document.createElement("button");
+      submitButton.className = "primary-button card-button";
+      submitButton.type = "button";
+      submitButton.textContent = langText({ en: "Submit draft", "zh-CN": "提交草稿", th: "ส่งแบบร่าง" });
+      submitButton.addEventListener("click", () => {
+        void submitClaimDraft(claim, submitButton, attachSelect ? Number(attachSelect.value) || null : null);
+      });
+      const editButton = document.createElement("button");
+      editButton.className = "ghost-button card-button";
+      editButton.type = "button";
+      editButton.textContent = langText({ en: "Open builder", "zh-CN": "打开构建器", th: "เปิดตัวสร้าง" });
+      editButton.addEventListener("click", () => openClaimDialog(claim.item || null, null, claim));
+      actions.append(submitButton, editButton);
+      article?.append(actions);
+    }
 
     claimsList.append(card);
   });
@@ -5943,6 +9276,8 @@ function renderAdminItems(items) {
     addInfo(info, langText({ en: "Risk level", "zh-CN": "风险等级", th: "ระดับความเสี่ยง" }), item.effective_abuse_risk_level || item.abuse_risk_level || "");
     addInfo(info, langText({ en: "Risk reasoning", "zh-CN": "风险说明", th: "เหตุผลของความเสี่ยง" }), item.abuse_reasoning || "");
     addInfo(info, langText({ en: "Admin override", "zh-CN": "管理员覆盖", th: "การแทนค่าผู้ดูแล" }), item.abuse_override_status || "-");
+    addInfo(info, "AI analysis status", aiAnalysisStatus(item));
+    addInfo(info, "LLaVA confidence", analysisConfidenceValue(item) ? `${analysisConfidenceValue(item)}%` : "Not provided");
     addInfo(info, langText({ en: "Tags", "zh-CN": "标签", th: "แท็ก" }), (item.tags || []).join(", "));
 
     const actions = document.createElement("div");
@@ -6013,7 +9348,7 @@ function renderAdminItems(items) {
     const clearChatButton = document.createElement("button");
     clearChatButton.className = "ghost-button card-button danger-button";
     clearChatButton.type = "button";
-    clearChatButton.textContent = langText({ en: "Clear chat", "zh-CN": "清空聊天", th: "ล้างแชต" });
+    clearChatButton.textContent = langText({ en: "Clear questions", "zh-CN": "清空问题", th: "ล้างคำถาม" });
     clearChatButton.addEventListener("click", () => {
       state.currentQueryItem = item;
       clearCurrentQueryThread();
@@ -6031,7 +9366,12 @@ function renderAdminItems(items) {
     body.className = thumbnail ? "panel-media-row" : "panel-meta-stack";
     const metaStack = document.createElement("div");
     metaStack.className = "panel-meta-stack";
-    metaStack.append(head, description, info, actions);
+    const aiAnalysisBlock = createAiAnalysisBlock(item, { heading: "LLaVA Analysis", includeStatus: true });
+    metaStack.append(head, description);
+    if (aiAnalysisBlock) {
+      metaStack.append(aiAnalysisBlock);
+    }
+    metaStack.append(info, actions);
 
     if (thumbnail) {
       body.append(thumbnail, metaStack);
@@ -6370,7 +9710,7 @@ async function loadAdminSurface() {
   if (!currentUserCanAdmin()) {
     return;
   }
-  await Promise.all([loadAdminData(), loadAdminMonitor()]);
+  await Promise.all([loadAdminData(), loadAdminMonitor(), loadMapSystem()]);
   triggerHaptic("success");
 }
 
@@ -6642,6 +9982,9 @@ function setQueryComposerEnabled(enabled, placeholder = "Ask about the selected 
   queryInput.disabled = !enabled;
   querySubmitButton.disabled = !enabled;
   queryFileInput.disabled = !enabled;
+  if (queryCameraInput) queryCameraInput.disabled = !enabled;
+  if (queryCameraButton) queryCameraButton.disabled = !enabled;
+  if (queryCameraCaptureButton) queryCameraCaptureButton.disabled = !enabled;
   queryFileRemoveButton.disabled = !enabled;
   queryInput.placeholder = placeholder;
 }
@@ -6649,7 +9992,7 @@ function setQueryComposerEnabled(enabled, placeholder = "Ask about the selected 
 function renderQueryItemSelector(selectedItemId = null) {
   const previousValue = selectedItemId ? String(selectedItemId) : "";
   queryItemSelect.replaceChildren(new Option(t("query.generalInquiry"), ""));
-  state.queryItems.forEach((item) => {
+  filterByActiveLocation(state.queryItems).forEach((item) => {
     const label = [item.title, localizeValue(item.category), localizeValue(item.location)].filter(Boolean).join(" • ");
     queryItemSelect.append(new Option(label || langText({ en: "Untitled report", "zh-CN": "未命名报告", th: "รายงานไม่มีชื่อ" }), String(item.id)));
   });
@@ -6662,12 +10005,17 @@ function setCurrentQueryItem(item) {
 }
 
 function clearQueryState() {
+  stopQueryCamera();
   state.queryRequestToken = null;
   setCurrentQueryItem(null);
   state.queryMessages = [];
+  state.queryStructuredResults = [];
   state.querySuggestions = [];
   queryInput.value = "";
   queryMessages.replaceChildren();
+  questionThreadBody?.replaceChildren();
+  questionThreadPanel?.classList.add("is-hidden");
+  state.activeQuestionThread = null;
   queryItemTags.replaceChildren();
   querySuggestions.replaceChildren();
   querySuggestions.classList.add("is-hidden");
@@ -6698,6 +10046,9 @@ function renderSelectedQueryFile() {
 function clearSelectedQueryFile() {
   state.selectedQueryFile = null;
   queryFileInput.value = "";
+  if (queryCameraInput) {
+    queryCameraInput.value = "";
+  }
   renderSelectedQueryFile();
 }
 
@@ -6709,10 +10060,195 @@ function selectQueryFile(file) {
     setWarningCard(queryWarningCard, validationError);
     return;
   }
+  if (file) {
+    stopQueryCamera();
+  }
   state.selectedQueryFile = file || null;
   renderSelectedQueryFile();
   setMessage(queryMessage, "");
   setWarningCard(queryWarningCard, "");
+}
+
+function renderSelectedQuestionReplyFile() {
+  const file = state.selectedQuestionReplyFile;
+  questionReplyFileInfo?.classList.toggle("is-hidden", !file);
+  if (questionReplyFileName) {
+    questionReplyFileName.textContent = file ? `${file.name} (${formatFileSize(file.size)})` : "";
+  }
+}
+
+function clearSelectedQuestionReplyFile() {
+  state.selectedQuestionReplyFile = null;
+  if (questionReplyFileInput) {
+    questionReplyFileInput.value = "";
+  }
+  renderSelectedQuestionReplyFile();
+}
+
+function selectQuestionReplyFile(file) {
+  const validationError = validateChatFile(file);
+  if (validationError) {
+    clearSelectedQuestionReplyFile();
+    setMessage(questionReplyMessage, validationError, true);
+    return;
+  }
+  state.selectedQuestionReplyFile = file || null;
+  renderSelectedQuestionReplyFile();
+  setMessage(questionReplyMessage, "");
+}
+
+function stopReportCamera() {
+  if (state.reportCameraStream) {
+    state.reportCameraStream.getTracks().forEach((track) => track.stop());
+  }
+  state.reportCameraStream = null;
+  if (reportCameraPreview) {
+    reportCameraPreview.pause?.();
+    reportCameraPreview.srcObject = null;
+  }
+  reportCameraPanel?.classList.add("is-hidden");
+}
+
+async function openReportCamera() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    reportCameraInput?.click();
+    return;
+  }
+  try {
+    stopReportCamera();
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: "environment" },
+        width: { ideal: 1280 },
+        height: { ideal: 960 },
+      },
+      audio: false,
+    });
+    state.reportCameraStream = stream;
+    if (reportCameraPreview) {
+      reportCameraPreview.srcObject = stream;
+      await reportCameraPreview.play();
+    }
+    reportCameraPanel?.classList.remove("is-hidden");
+    setMessage(uploadMessage, "");
+    setWarningCard(reportWarningCard, "");
+  } catch (error) {
+    stopReportCamera();
+    logClientError("opening report camera failed", error);
+    reportCameraInput?.click();
+  }
+}
+
+function reportCameraPhotoFilename() {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `report-photo-${stamp}.jpg`;
+}
+
+async function captureReportCameraPhoto() {
+  if (!reportCameraPreview || !state.reportCameraStream) {
+    reportCameraInput?.click();
+    return;
+  }
+  const width = reportCameraPreview.videoWidth || 1280;
+  const height = reportCameraPreview.videoHeight || 960;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Could not capture camera photo.");
+  }
+  context.drawImage(reportCameraPreview, 0, 0, width, height);
+  const blob = await new Promise((resolve) => {
+    canvas.toBlob(resolve, "image/jpeg", 0.88);
+  });
+  if (!blob?.size) {
+    throw new Error("Camera photo was empty.");
+  }
+  const file = new File([blob], reportCameraPhotoFilename(), {
+    type: "image/jpeg",
+    lastModified: Date.now(),
+  });
+  selectFile(file);
+  stopReportCamera();
+  triggerHaptic("success");
+}
+
+function stopQueryCamera() {
+  if (state.queryCameraStream) {
+    state.queryCameraStream.getTracks().forEach((track) => track.stop());
+  }
+  state.queryCameraStream = null;
+  if (queryCameraPreview) {
+    queryCameraPreview.pause?.();
+    queryCameraPreview.srcObject = null;
+  }
+  queryCameraPanel?.classList.add("is-hidden");
+}
+
+async function openQueryCamera() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    queryCameraInput?.click();
+    return;
+  }
+  try {
+    stopQueryCamera();
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: "environment" },
+        width: { ideal: 1280 },
+        height: { ideal: 960 },
+      },
+      audio: false,
+    });
+    state.queryCameraStream = stream;
+    if (queryCameraPreview) {
+      queryCameraPreview.srcObject = stream;
+      await queryCameraPreview.play();
+    }
+    queryCameraPanel?.classList.remove("is-hidden");
+    setMessage(queryMessage, "");
+    setWarningCard(queryWarningCard, "");
+  } catch (error) {
+    stopQueryCamera();
+    logClientError("opening query camera failed", error);
+    queryCameraInput?.click();
+  }
+}
+
+function queryCameraPhotoFilename() {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `query-photo-${stamp}.jpg`;
+}
+
+async function captureQueryCameraPhoto() {
+  if (!queryCameraPreview || !state.queryCameraStream) {
+    queryCameraInput?.click();
+    return;
+  }
+  const width = queryCameraPreview.videoWidth || 1280;
+  const height = queryCameraPreview.videoHeight || 960;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Could not capture camera photo.");
+  }
+  context.drawImage(queryCameraPreview, 0, 0, width, height);
+  const blob = await new Promise((resolve) => {
+    canvas.toBlob(resolve, "image/jpeg", 0.88);
+  });
+  if (!blob?.size) {
+    throw new Error("Camera photo was empty.");
+  }
+  const file = new File([blob], queryCameraPhotoFilename(), {
+    type: "image/jpeg",
+    lastModified: Date.now(),
+  });
+  selectQueryFile(file);
+  stopQueryCamera();
+  triggerHaptic("success");
 }
 
 function renderQuerySelectionState() {
@@ -6720,20 +10256,20 @@ function renderQuerySelectionState() {
   queryItemSelect.value = "";
   queryItemTitle.textContent = t("query.generalInquiry");
   queryItemMeta.textContent = langText({
-    en: "Ask about a lost item that hasn't been reported yet.",
+    en: "Ask about a lost item that has not been reported yet.",
     "zh-CN": "你可以咨询尚未上报的失物。",
     th: "คุณสามารถสอบถามเกี่ยวกับสิ่งของที่ยังไม่ได้ถูกรายงาน",
   });
   queryItemDescription.textContent = langText({
-    en: "You can ask general questions without selecting an item, or choose a specific report for item-aware chat.",
-    "zh-CN": "你可以在不选择物品的情况下提一般问题，或选择某条报告进行物品相关聊天。",
-    th: "คุณสามารถถามคำถามทั่วไปโดยไม่ต้องเลือกสิ่งของ หรือเลือกหนึ่งรายงานเพื่อสนทนาแบบมีบริบทของสิ่งของ",
+    en: "Use text, an uploaded image, or a camera photo to look for matching reports.",
+    "zh-CN": "你可以使用文字、上传图片或相机照片查找匹配报告。",
+    th: "ใช้ข้อความ รูปที่อัปโหลด หรือภาพจากกล้องเพื่อค้นหารายงานที่ตรงกัน",
   });
   queryItemStatus.textContent = langText({ en: "General", "zh-CN": "一般", th: "ทั่วไป" });
   queryItemStatus.className = "status-badge is-lost";
   renderQueryContextImage(null);
   syncQueryAdminActions();
-  queryItemContextLabel.textContent = langText({ en: "General conversation", "zh-CN": "一般对话", th: "บทสนทนาทั่วไป" });
+  queryItemContextLabel.textContent = langText({ en: "General lookup results", "zh-CN": "一般查询结果", th: "ผลการค้นหาทั่วไป" });
   queryEmptyState.textContent = t("query.emptyGeneral");
   queryEmptyState.classList.remove("is-hidden");
   setQueryComposerEnabled(
@@ -6753,7 +10289,7 @@ function renderQueryErrorState(message) {
   queryItemDescription.textContent = "";
   queryItemStatus.textContent = langText({ en: "Error", "zh-CN": "错误", th: "ข้อผิดพลาด" });
   queryItemStatus.className = "status-badge is-flagged";
-  queryItemContextLabel.textContent = langText({ en: "Conversation", "zh-CN": "对话", th: "บทสนทนา" });
+  queryItemContextLabel.textContent = langText({ en: "Lookup results", "zh-CN": "查询结果", th: "ผลการค้นหา" });
   queryEmptyState.textContent = langText({ en: "Select another item to continue.", "zh-CN": "请选择其他物品继续。", th: "กรุณาเลือกสิ่งของอื่นเพื่อดำเนินการต่อ" });
   queryEmptyState.classList.remove("is-hidden");
   setWarningCard(queryWarningCard, message);
@@ -6827,50 +10363,28 @@ function buildHeuristicSuggestions(item = null, messages = []) {
 }
 
 function renderQuerySuggestions(suggestions = [], item = null, messages = state.queryMessages) {
-  const nextSuggestions = Array.isArray(suggestions) && suggestions.length
-    ? suggestions.slice(0, QUERY_SUGGESTION_LIMIT)
-    : buildHeuristicSuggestions(item, messages);
-  state.querySuggestions = nextSuggestions;
+  void suggestions;
+  void item;
+  void messages;
+  state.querySuggestions = [];
   querySuggestions.replaceChildren();
-
-  if (!nextSuggestions.length) {
-    querySuggestions.classList.add("is-hidden");
-    return;
-  }
-
-  nextSuggestions.forEach((suggestion) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "ghost-button small-button";
-    button.textContent = suggestion;
-    button.addEventListener("click", () => {
-      if (queryInput.disabled) return;
-      queryInput.value = suggestion;
-      queryInput.focus();
-      queryInput.setSelectionRange(queryInput.value.length, queryInput.value.length);
-      triggerHaptic("selection");
-      ensureQueryComposerVisible();
-    });
-    querySuggestions.append(button);
-  });
-
-  querySuggestions.classList.remove("is-hidden");
+  querySuggestions.classList.add("is-hidden");
 }
 
 function deleteQueryMessage(messageId) {
   openConfirmModal({
-    title: langText({ en: "Delete message", "zh-CN": "删除消息", th: "ลบข้อความ" }),
+    title: langText({ en: "Delete question", "zh-CN": "删除问题", th: "ลบคำถาม" }),
     body: langText({
-      en: `Delete message #${messageId}?`,
-      "zh-CN": `删除消息 #${messageId}？`,
-      th: `ลบข้อความ #${messageId} ใช่หรือไม่`,
+      en: `Delete question #${messageId}?`,
+      "zh-CN": `删除问题 #${messageId}？`,
+      th: `ลบคำถาม #${messageId} ใช่หรือไม่`,
     }),
     confirmLabel: t("common.confirm"),
     onConfirm: async () => {
       try {
         const data = await apiFetch(`/admin/query-messages/${messageId}`, { method: "DELETE" });
         closeConfirmModal();
-        setMessage(queryMessage, data.message || "Message deleted.");
+        setMessage(queryMessage, data.message || "Question deleted.");
         const itemId = state.currentQueryItem?.id || null;
         invalidateQueryThread(itemId);
         await loadQueryPage(itemId);
@@ -6889,18 +10403,18 @@ function clearCurrentQueryThread() {
   const item = state.currentQueryItem;
   if (!currentUserCanAdmin() || !item?.id) return;
   openConfirmModal({
-    title: langText({ en: "Clear item chat", "zh-CN": "清空物品聊天", th: "ล้างแชตรายการ" }),
+    title: langText({ en: "Clear item questions", "zh-CN": "清空物品问题", th: "ล้างคำถามรายการ" }),
     body: langText({
-      en: `Clear all query messages for "${item.title || `item #${item.id}`}"?`,
-      "zh-CN": `清空“${item.title || `物品 #${item.id}`}”的全部咨询消息？`,
-      th: `ล้างข้อความทั้งหมดสำหรับ "${item.title || `รายการ #${item.id}`}" ใช่หรือไม่`,
+      en: `Clear all saved questions for "${item.title || `item #${item.id}`}"?`,
+      "zh-CN": `清空“${item.title || `物品 #${item.id}`}”的全部已保存问题？`,
+      th: `ล้างคำถามที่บันทึกไว้ทั้งหมดสำหรับ "${item.title || `รายการ #${item.id}`}" ใช่หรือไม่`,
     }),
     confirmLabel: t("common.confirm"),
     onConfirm: async () => {
       try {
         const data = await apiFetch(`/admin/items/${item.id}/query-thread`, { method: "DELETE" });
         closeConfirmModal();
-        setMessage(queryMessage, data.message || "Item chat cleared.");
+        setMessage(queryMessage, data.message || "Item questions cleared.");
         invalidateQueryThread(item.id);
         await loadQueryPage(item.id);
         if (currentUserCanAdmin()) {
@@ -6968,62 +10482,351 @@ function renderQueryContext(item) {
   queryItemStatus.className = "status-badge";
   queryItemStatus.classList.add(itemStatusClass(item));
   queryItemContextLabel.textContent = langText({
-    en: `Conversation for ${item.title}`,
-    "zh-CN": `${item.title} 的对话`,
-    th: `บทสนทนาสำหรับ ${item.title}`,
+    en: `Lookup results for ${item.title}`,
+    "zh-CN": `${item.title} 的查询结果`,
+    th: `ผลการค้นหาสำหรับ ${item.title}`,
   });
   updateQueryEmptyState();
   renderTags(queryItemTags, item.tags || []);
   setQueryComposerEnabled(true, t("query.askAboutItem"));
 }
 
+function latestUserQueryMessage(messages = []) {
+  return [...messages].reverse().find((entry) => entry?.role !== "system" && String(entry?.message || "").trim()) || null;
+}
+
+function queryResultCacheKey(itemId, queryRecord) {
+  const scope = itemId ? `item:${itemId}` : "general";
+  const id = queryRecord?.id || String(queryRecord?.message || "").trim().toLowerCase().replace(/\s+/g, "-");
+  return `${scope}:${id}`;
+}
+
+function querySearchText(queryText, item = null) {
+  return [
+    queryText,
+    item?.title,
+    item?.category,
+    item?.location_path,
+    item?.location,
+    item?.secondary_location,
+  ].filter(Boolean).join(" ");
+}
+
+function queryResultItem(match) {
+  return assistantResultItem(match);
+}
+
+function queryResultScore(match) {
+  return assistantResultScore(match);
+}
+
+function queryResultConfidence(match, item) {
+  return assistantResultConfidence(match, item);
+}
+
+function queryResultLocationCode(item) {
+  const source = [
+    item?.location_path,
+    item?.secondary_location,
+    item?.location,
+    item?.description,
+  ].filter(Boolean).join(" ");
+  return (source.match(/\b[ASP]\d{3}\b/i)?.[0] || "").toUpperCase();
+}
+
+function queryResultFloor(item) {
+  const source = [
+    item?.location_path,
+    item?.secondary_location,
+    item?.location,
+  ].filter(Boolean).join(" ");
+  const namedFloor = source.match(/\b(?:floor|level)\s*([1-9])\b/i)?.[1];
+  if (namedFloor) return `Floor ${namedFloor}`;
+  const code = queryResultLocationCode(item);
+  if (code && /^\D[1-9]\d{2}$/.test(code)) {
+    return `Floor ${code.slice(1, 2)}`;
+  }
+  return "";
+}
+
+function queryResultFloorZoneLabel(item) {
+  const floor = queryResultFloor(item);
+  const code = queryResultLocationCode(item);
+  if (floor && code) return `${floor} - ${code}`;
+  return floor || code || langText({ en: "Not specified", "zh-CN": "未指定", th: "ไม่ได้ระบุ" });
+}
+
+function appendQueryResultDetail(list, label, value) {
+  if (!value && value !== 0) return;
+  const row = document.createElement("div");
+  const dt = document.createElement("dt");
+  const dd = document.createElement("dd");
+  dt.textContent = label;
+  dd.textContent = String(value);
+  row.append(dt, dd);
+  list.append(row);
+}
+
+function createQueryResultCard(match, index = 0, topScore = 0) {
+  const item = queryResultItem(match);
+  if (!item) return null;
+
+  const score = queryResultScore(match);
+  const confidence = queryResultConfidence(match, item);
+  const card = document.createElement("article");
+  card.className = "query-result-card";
+  if (index === 0 && score > 0) {
+    card.classList.add("is-strongest");
+  } else if (topScore > 0 && score < topScore) {
+    card.classList.add("is-secondary-match");
+  }
+
+  const media = document.createElement("button");
+  media.type = "button";
+  media.className = "query-result-media";
+  const imageSource = assistantResultImageSource(item);
+  if (canPreviewImage(imageSource)) {
+    const image = document.createElement("img");
+    image.src = imageSource;
+    image.alt = item.title || "Matched item";
+    image.loading = "lazy";
+    image.decoding = "async";
+    image.addEventListener("error", () => {
+      media.classList.remove("has-image");
+      media.replaceChildren(document.createTextNode(langText({ en: "No image", "zh-CN": "无图片", th: "ไม่มีรูป" })));
+    }, { once: true });
+    media.classList.add("has-image");
+    media.append(image);
+    media.addEventListener("click", () => openImagePreview(imageSource, item.title || "Matched item", item.description || ""));
+  } else {
+    media.textContent = langText({ en: "No image", "zh-CN": "无图片", th: "ไม่มีรูป" });
+    media.disabled = true;
+  }
+
+  const body = document.createElement("div");
+  body.className = "query-result-body";
+
+  const head = document.createElement("div");
+  head.className = "query-result-head";
+  const title = document.createElement("h4");
+  title.textContent = `#${item.id || "?"} ${item.title || langText({ en: "Untitled report", "zh-CN": "未命名报告", th: "รายงานไม่มีชื่อ" })}`;
+  head.append(title);
+  if (confidence) {
+    const badge = document.createElement("span");
+    badge.className = "query-confidence-badge";
+    badge.textContent = confidence.value;
+    badge.title = confidence.label;
+    head.append(badge);
+  }
+
+  const details = document.createElement("dl");
+  details.className = "query-result-details";
+  appendQueryResultDetail(details, langText({ en: "Location", "zh-CN": "地点", th: "สถานที่" }), assistantResultLocation(item));
+  appendQueryResultDetail(details, langText({ en: "Floor / zone", "zh-CN": "楼层 / 区域代码", th: "ชั้น / รหัสโซน" }), queryResultFloorZoneLabel(item));
+  appendQueryResultDetail(details, confidence?.label || langText({ en: "Confidence", "zh-CN": "置信度", th: "ความมั่นใจ" }), confidence?.value || "");
+  appendQueryResultDetail(details, langText({ en: "Timestamp", "zh-CN": "时间戳", th: "เวลา" }), formatDateTime(item.created_at || item.updated_at || item.event_date));
+
+  const actions = document.createElement("div");
+  actions.className = "query-result-actions";
+  const openButton = document.createElement("button");
+  openButton.type = "button";
+  openButton.className = "ghost-button small-button";
+  openButton.textContent = langText({ en: "View report", "zh-CN": "查看报告", th: "ดูรายงาน" });
+  openButton.addEventListener("click", () => navigateTo("query", Number(item.id) || null));
+  actions.append(openButton);
+
+  body.append(head, details, actions);
+  card.append(media, body);
+  return card;
+}
+
+function createQuerySubmissionSummary(queryRecord, { query = "" } = {}) {
+  const card = document.createElement("article");
+  card.className = "query-submission-card";
+  const title = document.createElement("h4");
+  title.textContent = langText({ en: "Question submitted", "zh-CN": "已提交问题", th: "ส่งคำถามแล้ว" });
+  const text = document.createElement("p");
+  text.textContent = query || queryRecord?.message || "";
+  const details = document.createElement("dl");
+  details.className = "query-result-details";
+  appendQueryResultDetail(details, langText({ en: "Timestamp", "zh-CN": "时间戳", th: "เวลา" }), formatDateTime(queryRecord?.created_at));
+  if (queryRecord?.attachment?.url) {
+    appendQueryResultDetail(details, langText({ en: "Image context", "zh-CN": "图片上下文", th: "บริบทรูปภาพ" }), queryRecord.attachment.name || "Uploaded image");
+  }
+  card.append(title, text, details);
+  if (queryRecord?.attachment?.url) {
+    const preview = createAttachmentPreview(queryRecord.attachment);
+    if (preview) {
+      preview.classList.add("query-attachment-preview");
+      card.append(preview);
+    }
+  }
+  appendQueryAdminControls(card, queryRecord);
+  return card;
+}
+
+function renderStructuredQueryResults({ query = "", queryRecord = null, results = [], matchingQuestions = [], suggestedQuery = "", statusText = "", isLoading = false } = {}) {
+  queryMessages.replaceChildren();
+  queryEmptyState.classList.toggle("is-hidden", Boolean(queryRecord || results.length || statusText || isLoading));
+
+  if (!queryRecord && !results.length && !statusText && !isLoading) {
+    return;
+  }
+
+  if (queryRecord || query) {
+    queryMessages.append(createQuerySubmissionSummary(queryRecord, { query }));
+  }
+
+  const summary = document.createElement("section");
+  summary.className = "query-results-summary";
+  const heading = document.createElement("div");
+  heading.className = "query-results-head";
+  const title = document.createElement("h4");
+  title.textContent = langText({ en: "Matching items", "zh-CN": "匹配物品", th: "รายการที่ตรงกัน" });
+  const count = document.createElement("span");
+  count.className = "query-confidence-badge";
+  count.textContent = isLoading ? "..." : String(results.length);
+  heading.append(title, count);
+  summary.append(heading);
+
+  const queryLine = document.createElement("p");
+  queryLine.className = "query-results-meta";
+  queryLine.textContent = suggestedQuery && suggestedQuery !== query ? `${query} -> ${suggestedQuery}` : query;
+  if (queryLine.textContent) summary.append(queryLine);
+
+  if (isLoading) {
+    const loading = document.createElement("p");
+    loading.className = "status-message";
+    loading.textContent = statusText || langText({ en: "Finding structured matches...", "zh-CN": "正在查找结构化匹配...", th: "กำลังค้นหารายการที่ตรงกัน..." });
+    summary.append(loading);
+  } else if (results.length) {
+    const list = document.createElement("div");
+    list.className = "query-results-list";
+    const topScore = Math.max(...results.map(queryResultScore), 0);
+    results.forEach((match, index) => {
+      const card = createQueryResultCard(match, index, topScore);
+      if (card) list.append(card);
+    });
+    summary.append(list);
+  } else {
+    const empty = document.createElement("p");
+    empty.className = "status-message";
+    empty.textContent = statusText || langText({
+      en: "No matching items found. Try a color, item type, room code, or building name.",
+      "zh-CN": "未找到匹配物品。可尝试颜色、物品类型、房间代码或建筑名称。",
+      th: "ไม่พบรายการที่ตรงกัน ลองระบุสี ประเภทสิ่งของ รหัสห้อง หรือชื่ออาคาร",
+    });
+    summary.append(empty);
+  }
+
+  if (!isLoading && matchingQuestions.length) {
+    const related = document.createElement("div");
+    related.className = "query-results-list";
+    const relatedTitle = document.createElement("h4");
+    relatedTitle.textContent = langText({ en: "Related public questions", "zh-CN": "相关公开问题", th: "คำถามสาธารณะที่เกี่ยวข้อง" });
+    related.append(relatedTitle);
+    matchingQuestions.slice(0, 4).forEach((question) => {
+      const card = document.createElement("article");
+      card.className = "question-board-card";
+      const text = document.createElement("p");
+      text.className = "query-text";
+      text.textContent = question.question_text || "";
+      const meta = document.createElement("p");
+      meta.className = "query-results-meta";
+      meta.textContent = [
+        question.location_hint || "",
+        `${Number(question.reply_count || 0)} ${langText({ en: "replies", "zh-CN": "条回复", th: "คำตอบ" })}`,
+        formatDateTime(question.created_at),
+      ].filter(Boolean).join(" • ");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "ghost-button small-button";
+      button.textContent = langText({ en: "Open thread", "zh-CN": "打开主题", th: "เปิดเธรด" });
+      button.addEventListener("click", () => openQuestionThread(question.id));
+      card.append(text, meta, button);
+      related.append(card);
+    });
+    summary.append(related);
+  }
+
+  queryMessages.append(summary);
+  scrollQueryMessagesToBottom();
+}
+
 function renderQueryMessages(messages) {
   updateQueryEmptyState();
-  queryMessages.replaceChildren();
-  queryEmptyState.classList.toggle("is-hidden", messages.length > 0);
+  const latest = latestUserQueryMessage(messages);
+  renderStructuredQueryResults({
+    query: latest?.message || "",
+    queryRecord: latest,
+    results: state.queryStructuredResults || [],
+    statusText: latest ? langText({
+      en: "Question saved. Submit a lookup to refresh matches.",
+      "zh-CN": "问题已保存。提交查询可刷新匹配结果。",
+      th: "บันทึกคำถามแล้ว ส่งการค้นหาเพื่ออัปเดตผลลัพธ์",
+    }) : "",
+  });
+}
 
-  messages.forEach((entry) => {
-    const bubble = document.createElement("article");
-    const isSystem = entry.role === "system";
-    bubble.className = `query-bubble ${isSystem ? "is-system" : "is-user"}`;
+function isCurrentQueryScope(itemId = null) {
+  return state.currentView === "query"
+    && ((state.currentQueryItem?.id || null) === (itemId || null));
+}
 
-    const metaRow = document.createElement("div");
-    metaRow.className = "query-meta-row";
-    metaRow.append(createMiniAvatar(entry.user_identity || (isSystem ? "System" : "User"), entry.avatar_url || ""));
+async function refreshStructuredQueryResults(queryRecord, item = null, { requestToken = null, force = false } = {}) {
+  if (!queryRecord?.message) {
+    renderStructuredQueryResults();
+    return null;
+  }
+  const itemId = item?.id || null;
+  const cacheKey = queryResultCacheKey(itemId, queryRecord);
+  const cached = state.queryResultCache.get(cacheKey);
+  if (cached && !force) {
+    state.queryStructuredResults = cached.results || [];
+    renderStructuredQueryResults(cached);
+    return cached;
+  }
 
-    const meta = document.createElement("p");
-    meta.className = "query-meta";
-    meta.textContent = `${entry.user_identity || (isSystem ? "System" : "User")} • ${formatDateTime(entry.created_at)}`;
-    metaRow.append(meta);
-
-    const text = document.createElement("p");
-    text.className = "query-text";
-    text.textContent = entry.message || "";
-
-    bubble.append(metaRow, text);
-
-    if (entry.attachment?.url) {
-      const attachment = document.createElement("a");
-      attachment.className = "query-attachment";
-      attachment.href = entry.attachment.url.startsWith("/")
-        ? `${API_BASE}${entry.attachment.url}`
-        : entry.attachment.url;
-      attachment.target = "_blank";
-      attachment.rel = "noopener noreferrer";
-      attachment.textContent = `${entry.attachment.name || "Attachment"} • ${formatFileSize(entry.attachment.size || 0)}`;
-      bubble.append(attachment);
-      const preview = createAttachmentPreview(entry.attachment);
-      if (preview) {
-        preview.classList.add("query-attachment-preview");
-        bubble.append(preview);
-      }
-    }
-
-    appendQueryAdminControls(bubble, entry);
-    queryMessages.append(bubble);
+  renderStructuredQueryResults({
+    query: queryRecord.message,
+    queryRecord,
+    isLoading: true,
   });
 
-  scrollQueryMessagesToBottom();
+  try {
+    const searchText = querySearchText(queryRecord.message, item);
+    const data = await sendAssistantRequest({
+      message: searchText,
+      executeSearch: true,
+      query: searchText,
+    });
+    if ((requestToken && state.queryRequestToken !== requestToken) || !isCurrentQueryScope(itemId)) {
+      return null;
+    }
+    const payload = {
+      query: queryRecord.message,
+      queryRecord,
+      results: Array.isArray(data.results) ? data.results : [],
+      suggestedQuery: data.suggested_query || queryRecord.message,
+    };
+    state.queryStructuredResults = payload.results;
+    state.queryResultCache.set(cacheKey, payload);
+    renderStructuredQueryResults(payload);
+    return payload;
+  } catch (error) {
+    if ((requestToken && state.queryRequestToken !== requestToken) || !isCurrentQueryScope(itemId)) {
+      return null;
+    }
+    state.queryStructuredResults = [];
+    renderStructuredQueryResults({
+      query: queryRecord.message,
+      queryRecord,
+      results: [],
+      statusText: error.message || langText({ en: "Could not load structured matches.", "zh-CN": "无法加载结构化匹配结果。", th: "ไม่สามารถโหลดผลลัพธ์แบบโครงสร้างได้" }),
+    });
+    logClientError("loading structured query results failed", error, { itemId });
+    return null;
+  }
 }
 
 function handleQueryItemSelection() {
@@ -7032,6 +10835,228 @@ function handleQueryItemSelection() {
   state.currentQueryItem = nextItem;
   persistCurrentItemId(nextItemId);
   navigateTo("query", nextItemId);
+}
+
+function questionTypeLabel(type = "") {
+  const normalized = String(type || "").toLowerCase();
+  if (normalized === "seen_item") return langText({ en: "Did anyone see my item?", "zh-CN": "有人看到我的物品吗？", th: "มีใครเห็นสิ่งของของฉันไหม" });
+  if (normalized === "has_this_been_found") return langText({ en: "Has this been found?", "zh-CN": "这个找到了吗？", th: "พบสิ่งนี้แล้วหรือยัง" });
+  return langText({ en: "Lost something not listed", "zh-CN": "遗失了未列出的物品", th: "ทำของหายที่ยังไม่มีในรายการ" });
+}
+
+function questionReplyTypeLabel(type = "") {
+  const normalized = String(type || "").toLowerCase();
+  if (normalized === "suggestion") return langText({ en: "Suggested item", "zh-CN": "建议物品", th: "แนะนำสิ่งของ" });
+  if (normalized === "confirmation") return langText({ en: "Confirmation", "zh-CN": "确认", th: "ยืนยัน" });
+  return langText({ en: "Reply", "zh-CN": "回复", th: "ตอบกลับ" });
+}
+
+function renderQuestionBoard(questions = state.questionBoard) {
+  if (!questionBoardList) return;
+  questionBoardList.replaceChildren();
+  if (!questions.length) {
+    const empty = document.createElement("p");
+    empty.className = "status-message";
+    empty.textContent = langText({ en: "No public questions yet.", "zh-CN": "暂时没有公开问题。", th: "ยังไม่มีคำถามสาธารณะ" });
+    questionBoardList.append(empty);
+    return;
+  }
+
+  questions.forEach((question) => {
+    const card = document.createElement("article");
+    card.className = "question-board-card";
+    card.classList.toggle("is-active", state.activeQuestionThread?.id === question.id);
+
+    const head = document.createElement("div");
+    head.className = "query-results-head";
+    const title = document.createElement("h4");
+    title.textContent = question.question_text || "";
+    const badge = document.createElement("span");
+    badge.className = "query-confidence-badge";
+    badge.textContent = String(question.reply_count || 0);
+    badge.title = langText({ en: "Replies", "zh-CN": "回复数", th: "จำนวนคำตอบ" });
+    head.append(title, badge);
+
+    const meta = document.createElement("p");
+    meta.className = "query-results-meta";
+    meta.textContent = [
+      questionTypeLabel(question.question_type),
+      question.location_hint ? `${langText({ en: "Location", "zh-CN": "地点", th: "สถานที่" })}: ${question.location_hint}` : "",
+      formatDateTime(question.created_at),
+    ].filter(Boolean).join(" • ");
+
+    card.append(head, meta);
+    if (question.attachment?.url) {
+      const preview = createAttachmentPreview(question.attachment);
+      if (preview) {
+        preview.classList.add("query-attachment-preview");
+        card.append(preview);
+      }
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "query-result-actions";
+    const openButton = document.createElement("button");
+    openButton.type = "button";
+    openButton.className = "primary-button small-button";
+    openButton.textContent = langText({ en: "Open thread", "zh-CN": "打开主题", th: "เปิดเธรด" });
+    openButton.addEventListener("click", () => openQuestionThread(question.id));
+    actions.append(openButton);
+    card.append(actions);
+    questionBoardList.append(card);
+  });
+}
+
+async function loadQuestionBoard({ openQuestionId = state.pendingQuestionThreadId || null } = {}) {
+  try {
+    const data = await apiFetch("/questions");
+    state.questionBoard = Array.isArray(data.questions) ? data.questions : [];
+    renderQuestionBoard();
+    if (openQuestionId) {
+      state.pendingQuestionThreadId = null;
+      await openQuestionThread(openQuestionId);
+    }
+  } catch (error) {
+    questionBoardList?.replaceChildren();
+    const message = document.createElement("p");
+    message.className = "status-message is-error";
+    message.textContent = error.message;
+    questionBoardList?.append(message);
+    logClientError("loading question board failed", error);
+  }
+}
+
+function renderQuestionThread(question) {
+  state.activeQuestionThread = question || null;
+  questionThreadPanel?.classList.toggle("is-hidden", !question);
+  if (!question) {
+    questionThreadBody?.replaceChildren();
+    setMessage(questionReplyMessage, "");
+    return;
+  }
+
+  questionThreadTitle.textContent = question.question_text || "";
+  questionThreadMeta.textContent = [
+    questionTypeLabel(question.question_type),
+    question.location_hint || "",
+    formatDateTime(question.created_at),
+  ].filter(Boolean).join(" • ");
+  questionThreadBody.replaceChildren();
+
+  const original = document.createElement("article");
+  original.className = "question-thread-entry is-question";
+  const originalMeta = document.createElement("p");
+  originalMeta.className = "query-results-meta";
+  originalMeta.textContent = `${question.user_identity || "User"} • ${formatDateTime(question.created_at)}`;
+  const originalText = document.createElement("p");
+  originalText.className = "query-text";
+  originalText.textContent = question.question_text || "";
+  original.append(originalMeta, originalText);
+  if (question.attachment?.url) {
+    const preview = createAttachmentPreview(question.attachment);
+    if (preview) original.append(preview);
+  }
+  questionThreadBody.append(original);
+
+  const replies = Array.isArray(question.replies) ? question.replies : [];
+  if (!replies.length) {
+    const empty = document.createElement("p");
+    empty.className = "status-message";
+    empty.textContent = langText({ en: "No replies yet.", "zh-CN": "还没有回复。", th: "ยังไม่มีคำตอบ" });
+    questionThreadBody.append(empty);
+  }
+  replies.forEach((reply) => {
+    const entry = document.createElement("article");
+    entry.className = "question-thread-entry";
+    const meta = document.createElement("p");
+    meta.className = "query-results-meta";
+    meta.textContent = `${questionReplyTypeLabel(reply.reply_type)} • ${reply.user_identity || "User"} • ${formatDateTime(reply.created_at)}`;
+    const text = document.createElement("p");
+    text.className = "query-text";
+    text.textContent = reply.message || "";
+    entry.append(meta, text);
+    if (reply.attachment?.url) {
+      const preview = createAttachmentPreview(reply.attachment);
+      if (preview) entry.append(preview);
+    }
+    questionThreadBody.append(entry);
+  });
+  renderQuestionBoard();
+}
+
+async function openQuestionThread(questionId) {
+  if (!questionId) return;
+  try {
+    const data = await apiFetch(`/questions/${questionId}`);
+    renderQuestionThread(data.question || null);
+    questionThreadPanel?.scrollIntoView({ block: "nearest" });
+  } catch (error) {
+    setMessage(queryMessage, error.message, true);
+    logClientError("opening question thread failed", error, { questionId });
+  }
+}
+
+function closeQuestionThread() {
+  renderQuestionThread(null);
+}
+
+async function submitQuestionReply(event) {
+  event.preventDefault();
+  const question = state.activeQuestionThread;
+  if (!question?.id || questionReplySubmitButton?.disabled) return;
+  const message = questionReplyInput.value.trim();
+  if (!message) {
+    setMessage(questionReplyMessage, langText({ en: "Type a reply first.", "zh-CN": "请先输入回复。", th: "กรุณาพิมพ์คำตอบก่อน" }), true);
+    return;
+  }
+  const fileValidation = validateChatFile(state.selectedQuestionReplyFile);
+  if (fileValidation) {
+    setMessage(questionReplyMessage, fileValidation, true);
+    return;
+  }
+
+  setButtonLoading(questionReplySubmitButton, true);
+  setMessage(questionReplyMessage, langText({ en: "Posting reply...", "zh-CN": "正在发布回复...", th: "กำลังส่งคำตอบ..." }));
+  try {
+    const uploadFile = state.selectedQuestionReplyFile
+      ? await prepareUploadFile(state.selectedQuestionReplyFile, "query", {
+          compress: progressCopy("queryCompress"),
+          prepare: progressCopy("queryPrepare"),
+        })
+      : null;
+    let data;
+    if (uploadFile) {
+      const formData = new FormData();
+      formData.set("message", message);
+      formData.set("reply_type", questionReplyTypeSelect?.value || "reply");
+      formData.set("file", uploadFile);
+      data = await apiFetch(`/questions/${question.id}/replies`, {
+        method: "POST",
+        body: formData,
+      });
+    } else {
+      data = await apiFetch(`/questions/${question.id}/replies`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message,
+          reply_type: questionReplyTypeSelect?.value || "reply",
+        }),
+      });
+    }
+    questionReplyInput.value = "";
+    clearSelectedQuestionReplyFile();
+    renderQuestionThread(data.question || null);
+    await loadQuestionBoard();
+    await loadNotifications();
+    setMessage(questionReplyMessage, data.message || langText({ en: "Reply posted.", "zh-CN": "回复已发布。", th: "ส่งคำตอบแล้ว" }));
+    triggerHaptic("success");
+  } catch (error) {
+    setMessage(questionReplyMessage, error.message, true);
+    logClientError("posting question reply failed", error, { questionId: question.id });
+  } finally {
+    setButtonLoading(questionReplySubmitButton, false);
+  }
 }
 
 async function loadQueryPage(itemId) {
@@ -7074,9 +11099,25 @@ async function loadQueryPage(itemId) {
     const messages = Array.isArray(queryData?.queries) ? queryData.queries : [];
     renderQueryContext(item);
     state.queryMessages = messages;
+    state.queryStructuredResults = [];
+    if (Array.isArray(queryData?.questions)) {
+      state.questionBoard = queryData.questions;
+      renderQuestionBoard();
+    } else {
+      await loadQuestionBoard();
+    }
     renderQueryMessages(messages);
     renderQuerySuggestions(queryData?.suggestions || [], item, messages);
     setLoadingLine(queryLoading, false);
+    if (state.pendingQuestionThreadId) {
+      const pendingQuestionId = state.pendingQuestionThreadId;
+      state.pendingQuestionThreadId = null;
+      await openQuestionThread(pendingQuestionId);
+    }
+    const latest = latestUserQueryMessage(messages);
+    if (latest) {
+      await refreshStructuredQueryResults(latest, item, { requestToken });
+    }
   } catch (error) {
     if (state.queryRequestToken !== requestToken || state.currentView !== "query") {
       return;
@@ -7097,6 +11138,8 @@ async function submitQuery(event) {
     itemId,
     item: state.currentQueryItem || null,
     message: value,
+    questionType: queryTypeSelect?.value || "lost_not_listed",
+    locationHint: queryLocationInput?.value?.trim() || "",
     file: state.selectedQueryFile,
   };
   const fileValidationMessage = validateChatFile(queryDraft.file);
@@ -7107,9 +11150,9 @@ async function submitQuery(event) {
   }
   if (!value) {
     const shortMessage = langText({
-      en: "Type a message first.",
-      "zh-CN": "请先输入消息。",
-      th: "กรุณาพิมพ์ข้อความก่อน",
+      en: "Type a question first.",
+      "zh-CN": "请先输入问题。",
+      th: "กรุณาพิมพ์คำถามก่อน",
     });
     setMessage(queryMessage, shortMessage, true);
     setWarningCard(queryWarningCard, shortMessage);
@@ -7120,16 +11163,16 @@ async function submitQuery(event) {
     type: "query",
     title: queryDraft.item
       ? langText({
-          en: `Query: ${queryDraft.item.title || "item"}`,
-          "zh-CN": `咨询：${queryDraft.item.title || "物品"}`,
-          th: `ข้อความ: ${queryDraft.item.title || "สิ่งของ"}`,
+          en: `Lookup: ${queryDraft.item.title || "item"}`,
+          "zh-CN": `查询：${queryDraft.item.title || "物品"}`,
+          th: `ค้นหา: ${queryDraft.item.title || "สิ่งของ"}`,
         })
-      : langText({ en: "General query", "zh-CN": "一般咨询", th: "ข้อความทั่วไป" }),
+      : langText({ en: "General lookup", "zh-CN": "一般查询", th: "การค้นหาทั่วไป" }),
     stage: progressCopy("queryPrepare"),
     detail: langText({
-      en: "Sending in the background. You can keep navigating.",
-      "zh-CN": "正在后台发送。你可以继续浏览。",
-      th: "กำลังส่งในพื้นหลัง คุณสามารถไปหน้าอื่นต่อได้",
+      en: "Saving the question and preparing structured matches.",
+      "zh-CN": "正在保存问题并准备结构化匹配结果。",
+      th: "กำลังบันทึกคำถามและเตรียมผลลัพธ์แบบโครงสร้าง",
     }),
     progress: 0,
     status: "running",
@@ -7139,7 +11182,7 @@ async function submitQuery(event) {
   state.progressActivityIds.query = activityId;
   setButtonLoading(querySubmitButton, true);
   setProgress("query", 0, progressCopy("queryPrepare"), true);
-  setMessage(queryMessage, langText({ en: "Sending your message...", "zh-CN": "正在发送消息...", th: "กำลังส่งข้อความ..." }));
+  setMessage(queryMessage, langText({ en: "Submitting your question...", "zh-CN": "正在提交问题...", th: "กำลังส่งคำถาม..." }));
   setWarningCard(queryWarningCard, "");
   try {
     const path = queryDraft.itemId ? `/items/${queryDraft.itemId}/query` : "/query";
@@ -7152,6 +11195,8 @@ async function submitQuery(event) {
       const formData = new FormData();
       formData.set("message", queryDraft.message);
       formData.set("language", currentLanguage());
+      formData.set("question_type", queryDraft.questionType);
+      formData.set("location_hint", queryDraft.locationHint);
       formData.set("file", uploadFile);
       data = await apiRequestWithProgress(path, {
         method: "POST",
@@ -7160,7 +11205,12 @@ async function submitQuery(event) {
         onUploadComplete: () => startProcessingProgress("query", progressCopy("queryProcess")),
       });
     } else {
-      const requestBody = JSON.stringify({ message: queryDraft.message, language: currentLanguage() });
+      const requestBody = JSON.stringify({
+        message: queryDraft.message,
+        language: currentLanguage(),
+        question_type: queryDraft.questionType,
+        location_hint: queryDraft.locationHint,
+      });
       setProgress("query", 20, progressCopy("queryUpload"), true);
       data = await apiRequestWithProgress(path, {
         method: "POST",
@@ -7179,31 +11229,56 @@ async function submitQuery(event) {
       && ((state.currentQueryItem?.id || null) === (queryDraft.itemId || null));
     if (stillOnSameQuery) {
       queryInput.value = "";
+      if (queryLocationInput) {
+        queryLocationInput.value = "";
+      }
       clearSelectedQueryFile();
       state.queryMessages = nextMessages;
+      state.queryStructuredResults = [];
+      if (Array.isArray(data.questions)) {
+        state.questionBoard = data.questions;
+        renderQuestionBoard();
+      }
+      if (data.question?.id) {
+        renderQuestionThread(data.question);
+      }
       renderQueryMessages(state.queryMessages);
       renderQuerySuggestions(data.suggestions || [], state.currentQueryItem, state.queryMessages);
+      const latest = latestUserQueryMessage(state.queryMessages);
+      if (Array.isArray(data.matches)) {
+        const payload = {
+          query: latest?.message || queryDraft.message,
+          queryRecord: latest || null,
+          results: data.matches,
+          matchingQuestions: Array.isArray(data.matching_questions) ? data.matching_questions : [],
+          suggestedQuery: queryDraft.message,
+        };
+        state.queryStructuredResults = payload.results;
+        renderStructuredQueryResults(payload);
+      } else if (latest) {
+        await refreshStructuredQueryResults(latest, state.currentQueryItem, { force: true });
+      }
     }
     await completeProgress("query");
     completeActivity(activityId, {
       title: queryDraft.item
         ? langText({
-            en: `Query sent: ${queryDraft.item.title || "item"}`,
-            "zh-CN": `咨询已发送：${queryDraft.item.title || "物品"}`,
-            th: `ส่งข้อความแล้ว: ${queryDraft.item.title || "สิ่งของ"}`,
+            en: `Lookup complete: ${queryDraft.item.title || "item"}`,
+            "zh-CN": `查询完成：${queryDraft.item.title || "物品"}`,
+            th: `ค้นหาเสร็จแล้ว: ${queryDraft.item.title || "สิ่งของ"}`,
           })
-        : langText({ en: "General query sent", "zh-CN": "一般咨询已发送", th: "ส่งข้อความทั่วไปแล้ว" }),
-      stage: langText({ en: "Message sent", "zh-CN": "消息已发送", th: "ส่งข้อความแล้ว" }),
+        : langText({ en: "General lookup complete", "zh-CN": "一般查询完成", th: "ค้นหาทั่วไปเสร็จแล้ว" }),
+      stage: langText({ en: "Results updated", "zh-CN": "结果已更新", th: "อัปเดตผลลัพธ์แล้ว" }),
       detail: langText({
-        en: "Your message is saved in the conversation.",
-        "zh-CN": "你的消息已保存到对话中。",
-        th: "ข้อความของคุณถูกบันทึกในบทสนทนาแล้ว",
+        en: "Your question is saved and structured matches are shown.",
+        "zh-CN": "你的问题已保存，并显示结构化匹配结果。",
+        th: "บันทึกคำถามแล้วและแสดงผลลัพธ์แบบโครงสร้าง",
       }),
       target: "query",
       itemId: queryDraft.itemId,
     });
     if (stillOnSameQuery) {
-      setMessage(queryMessage, langText({ en: "Message sent successfully.", "zh-CN": "消息已发送成功。", th: "ส่งข้อความเรียบร้อยแล้ว" }));
+      setMessage(queryMessage, langText({ en: "Question submitted. Results updated.", "zh-CN": "问题已提交，结果已更新。", th: "ส่งคำถามแล้ว อัปเดตผลลัพธ์แล้ว" }));
     }
     triggerHaptic("success");
     if (stillOnSameQuery) {
@@ -7217,19 +11292,19 @@ async function submitQuery(event) {
     failActivity(activityId, error, {
       title: queryDraft.item
         ? langText({
-            en: `Query failed: ${queryDraft.item.title || "item"}`,
-            "zh-CN": `咨询失败：${queryDraft.item.title || "物品"}`,
-            th: `ส่งข้อความไม่สำเร็จ: ${queryDraft.item.title || "สิ่งของ"}`,
+            en: `Lookup failed: ${queryDraft.item.title || "item"}`,
+            "zh-CN": `查询失败：${queryDraft.item.title || "物品"}`,
+            th: `ค้นหาไม่สำเร็จ: ${queryDraft.item.title || "สิ่งของ"}`,
           })
-        : langText({ en: "General query failed", "zh-CN": "一般咨询失败", th: "ส่งข้อความทั่วไปไม่สำเร็จ" }),
+        : langText({ en: "General lookup failed", "zh-CN": "一般查询失败", th: "ค้นหาทั่วไปไม่สำเร็จ" }),
       target: "query",
       itemId: queryDraft.itemId,
     });
     if (stillOnSameQuery) {
       setMessage(queryMessage, langText({
-        en: `Could not send your message: ${error.message}`,
-        "zh-CN": `消息发送失败：${error.message}`,
-        th: `ไม่สามารถส่งข้อความได้: ${error.message}`,
+        en: `Could not submit your question: ${error.message}`,
+        "zh-CN": `问题提交失败：${error.message}`,
+        th: `ไม่สามารถส่งคำถามได้: ${error.message}`,
       }), true);
       setWarningCard(queryWarningCard, error.message);
     }
@@ -7240,8 +11315,608 @@ async function submitQuery(event) {
   }
 }
 
+function setAssistantMode(mode = "chat", { focus = true } = {}) {
+  const normalizedMode = mode === "query" ? "query" : "chat";
+  state.assistantMode = normalizedMode;
+
+  assistantChatModeButton?.classList.toggle("is-active", normalizedMode === "chat");
+  assistantQueryModeButton?.classList.toggle("is-active", normalizedMode === "query");
+  assistantChatModeButton?.setAttribute("aria-selected", normalizedMode === "chat" ? "true" : "false");
+  assistantQueryModeButton?.setAttribute("aria-selected", normalizedMode === "query" ? "true" : "false");
+  assistantChatModePanel?.classList.toggle("is-hidden", normalizedMode !== "chat");
+  assistantQueryModePanel?.classList.toggle("is-hidden", normalizedMode !== "query");
+
+  if (!focus) return;
+  window.requestAnimationFrame(() => {
+    (normalizedMode === "query" ? assistantQueryInput : assistantInput)?.focus();
+  });
+}
+
+function assistantWelcomeCopy() {
+  return langText({
+    en: "Tell me what you lost, where you were, or which report you are checking.",
+    "zh-CN": "告诉我你丢了什么、在哪里，或想查看哪条报告。",
+    th: "บอกฉันว่าสิ่งของที่หายคืออะไร อยู่ที่ไหน หรือกำลังตรวจสอบรายงานใด",
+  });
+}
+
+function assistantResultItem(match) {
+  return match?.item || match || null;
+}
+
+function assistantResultScore(match) {
+  const numeric = Number(match?.score ?? match?.match_score ?? 0);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function assistantResultImageSource(item) {
+  return resolveImageUrl(item) || normalizeImageUrl(item?.image?.path || "");
+}
+
+function assistantResultLocation(item) {
+  const location = item?.location_path || [item?.secondary_location, item?.location].filter(Boolean).join(" > ");
+  if (!location) {
+    return langText({ en: "Unknown location", "zh-CN": "未知地点", th: "ไม่ทราบสถานที่" });
+  }
+  return String(location).includes(">") ? locationPathLabel(location) : localizeValue(location);
+}
+
+function assistantResultConfidence(match, item) {
+  const aiConfidence = analysisConfidenceValue(item);
+  if (aiConfidence > 0) {
+    return {
+      label: langText({ en: "AI confidence", "zh-CN": "AI 置信度", th: "ความมั่นใจของ AI" }),
+      value: `${aiConfidence}%`,
+    };
+  }
+  const score = assistantResultScore(match);
+  if (score > 0) {
+    return {
+      label: langText({ en: "Match confidence", "zh-CN": "匹配置信度", th: "ความมั่นใจในการจับคู่" }),
+      value: `${Math.max(1, Math.min(100, Math.round(score)))}%`,
+    };
+  }
+  return null;
+}
+
+function appendAssistantResultDetail(list, label, value) {
+  if (!value && value !== 0) return;
+  const row = document.createElement("div");
+  const dt = document.createElement("dt");
+  const dd = document.createElement("dd");
+  dt.textContent = label;
+  dd.textContent = String(value);
+  row.append(dt, dd);
+  list.append(row);
+}
+
+function createAssistantResultCard(match, index = 0, topScore = 0) {
+  const item = assistantResultItem(match);
+  if (!item) return null;
+
+  const score = assistantResultScore(match);
+  const confidence = assistantResultConfidence(match, item);
+  const card = document.createElement("article");
+  card.className = "assistant-result-card match-found-card";
+  if (index === 0 && score > 0) {
+    card.classList.add("is-strongest");
+  } else if (topScore > 0 && score < topScore) {
+    card.classList.add("is-weaker");
+  }
+
+  const media = document.createElement("button");
+  media.type = "button";
+  media.className = "assistant-result-media";
+  const imageSource = assistantResultImageSource(item);
+  if (canPreviewImage(imageSource)) {
+    const image = document.createElement("img");
+    image.src = imageSource;
+    image.alt = item.title || "Matched item";
+    image.loading = "lazy";
+    image.decoding = "async";
+    image.addEventListener("error", () => {
+      media.classList.remove("has-image");
+      media.replaceChildren(document.createTextNode(langText({ en: "No image", "zh-CN": "无图片", th: "ไม่มีรูป" })));
+    }, { once: true });
+    media.classList.add("has-image");
+    media.append(image);
+    media.addEventListener("click", () => openImagePreview(imageSource, item.title || "Matched item", item.description || ""));
+  } else {
+    media.textContent = langText({ en: "No image", "zh-CN": "无图片", th: "ไม่มีรูป" });
+    media.disabled = true;
+  }
+
+  const body = document.createElement("div");
+  body.className = "assistant-result-body";
+
+  const head = document.createElement("div");
+  head.className = "assistant-result-head";
+  const title = document.createElement("h4");
+  title.textContent = `#${item.id || "?"} ${item.title || langText({ en: "Untitled report", "zh-CN": "未命名报告", th: "รายงานไม่มีชื่อ" })}`;
+  head.append(title);
+  if (confidence) {
+    const badge = document.createElement("span");
+    badge.className = "assistant-score-badge";
+    badge.textContent = confidence.value;
+    badge.title = confidence.label;
+    head.append(badge);
+  }
+
+  const details = document.createElement("dl");
+  details.className = "assistant-result-details";
+  appendAssistantResultDetail(details, langText({ en: "Location", "zh-CN": "地点", th: "สถานที่" }), assistantResultLocation(item));
+  appendAssistantResultDetail(details, confidence?.label || langText({ en: "Confidence", "zh-CN": "置信度", th: "ความมั่นใจ" }), confidence?.value || "");
+  appendAssistantResultDetail(details, langText({ en: "Reported", "zh-CN": "报告时间", th: "รายงานเมื่อ" }), formatDateTime(item.created_at || item.updated_at || item.event_date));
+
+  const actions = document.createElement("div");
+  actions.className = "assistant-result-actions";
+  const openButton = document.createElement("button");
+  openButton.type = "button";
+  openButton.className = "ghost-button small-button";
+  openButton.textContent = langText({ en: "View report", "zh-CN": "查看报告", th: "ดูรายงาน" });
+  openButton.addEventListener("click", () => navigateTo("query", Number(item.id) || null));
+  actions.append(openButton);
+
+  body.append(head, details, actions);
+  card.append(media, body);
+  return card;
+}
+
+function currentAssistantDraftLocation() {
+  const selected = structuredLocationFromSelection();
+  if (selected?.label) return selected.label;
+  const active = activeLocationLabel();
+  if (active) return active;
+  const reportInput = String(optionalLocationInput?.value || "").trim();
+  return reportInput || "";
+}
+
+function assistantLocationFromText(text = "") {
+  const value = String(text || "");
+  const roomCode = value.match(/\b[ASP]\d{3}\b/i)?.[0] || "";
+  if (roomCode) {
+    const manual = manualLocationFromInput(roomCode);
+    if (manual?.label) return manual.label;
+  }
+  const normalized = normalizeLocationText(value);
+  const location = state.locations.find((candidate) => {
+    const names = [candidate.name, candidate.label, candidate.id].map(normalizeLocationText).filter(Boolean);
+    return names.some((name) => normalized.includes(name));
+  });
+  if (location) {
+    const floorMatch = value.match(/\bfloor\s*([1-9])\b/i) || value.match(/\blevel\s*([1-9])\b/i);
+    if (floorMatch) {
+      const floor = floorForLabel(location, floorLabelForNumber(Number(floorMatch[1])));
+      if (floor) return locationFloorPath(location, floor);
+    }
+    return location.name;
+  }
+  return currentAssistantDraftLocation();
+}
+
+function assistantItemPhraseFromText(text = "") {
+  const value = String(text || "").trim();
+  const match = value.match(/\b(?:lost|missing|misplaced|looking for|find)\s+(?:my|a|an|the)?\s*([^.,;!?]+)/i);
+  const rawPhrase = (match?.[1] || value)
+    .replace(/\b(?:near|at|in|on|around|by|last seen|from)\b.*$/i, "")
+    .replace(/\b(?:please|can you|help me|write|draft|claim|report)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return rawPhrase || langText({ en: "lost item", "zh-CN": "遗失物品", th: "สิ่งของที่หาย" });
+}
+
+function buildAssistantClaimDraft(sourceText = "") {
+  const source = String(sourceText || "").trim();
+  const itemPhrase = assistantItemPhraseFromText(source);
+  const location = assistantLocationFromText(source);
+  const color = (source.match(/\b(black|white|blue|red|green|yellow|pink|purple|orange|grey|gray|silver|gold|brown)\b/i)?.[1] || "").toLowerCase();
+  const itemName = titleCase(color && !normalizeLocationText(itemPhrase).includes(color) ? `${color} ${itemPhrase}` : itemPhrase);
+  const locationText = location || langText({ en: "location not specified", "zh-CN": "地点未指定", th: "ยังไม่ได้ระบุสถานที่" });
+  const identifying = langText({
+    en: "Add brand, stickers, scratches, contents, initials, or another unique mark.",
+    "zh-CN": "请补充品牌、贴纸、划痕、内容物、姓名缩写或其他独特标记。",
+    th: "เพิ่มยี่ห้อ สติกเกอร์ รอยตำหนิ สิ่งของข้างใน ชื่อย่อ หรือจุดสังเกตเฉพาะ",
+  });
+
+  return {
+    title: itemName,
+    location: locationText,
+    reason: langText({
+      en: `I am drafting this claim because I believe the ${itemName.toLowerCase()} is my lost item.`,
+      "zh-CN": `我创建这条认领草稿，因为我认为${itemName}是我遗失的物品。`,
+      th: `ฉันส่งข้อมูลนี้เพราะคิดว่า ${itemName} เป็นสิ่งของที่ฉันทำหาย`,
+    }),
+    description: langText({
+      en: `${itemName}, last seen at ${locationText}. ${identifying}`,
+      "zh-CN": `${itemName}，最后看到地点：${locationText}。${identifying}`,
+      th: `${itemName} พบเห็นครั้งสุดท้ายที่ ${locationText}. ${identifying}`,
+    }),
+    identifyingInfo: identifying,
+    source,
+  };
+}
+
+function shouldGenerateAssistantClaimDraft(message = "") {
+  const text = String(message || "").toLowerCase();
+  if (!text) return false;
+  if (/\bhow\s+(?:do|can|to)\b/.test(text)) return false;
+  return /\b(?:i\s+lost|lost\s+my|lost\s+a|lost\s+an|misplaced|missing\s+my|draft\s+(?:a\s+)?claim|write\s+(?:a\s+)?claim)\b/.test(text);
+}
+
+function renderAssistantClaimDraft(container, draft) {
+  if (!draft) return;
+  const card = document.createElement("article");
+  card.className = "assistant-claim-draft";
+
+  const heading = document.createElement("h4");
+  heading.textContent = langText({ en: "Private claim draft", "zh-CN": "私人认领草稿", th: "แบบร่างคำขอส่วนตัว" });
+
+  const fields = document.createElement("dl");
+  fields.className = "assistant-draft-fields";
+  appendAssistantResultDetail(fields, langText({ en: "Item", "zh-CN": "物品", th: "สิ่งของ" }), draft.title);
+  appendAssistantResultDetail(fields, langText({ en: "Location", "zh-CN": "地点", th: "สถานที่" }), draft.location);
+  appendAssistantResultDetail(fields, langText({ en: "Description", "zh-CN": "描述", th: "คำอธิบาย" }), draft.description);
+  appendAssistantResultDetail(fields, langText({ en: "Identifying info", "zh-CN": "识别信息", th: "ข้อมูลระบุตัวตน" }), draft.identifyingInfo);
+
+  const actions = document.createElement("div");
+  actions.className = "assistant-result-actions";
+  const useButton = document.createElement("button");
+  useButton.type = "button";
+  useButton.className = "primary-button small-button";
+  useButton.textContent = langText({ en: "Open draft builder", "zh-CN": "打开草稿构建器", th: "เปิดตัวสร้างแบบร่าง" });
+  useButton.addEventListener("click", () => applyAssistantClaimDraft(draft));
+  actions.append(useButton);
+
+  card.append(heading, fields, actions);
+  container.append(card);
+}
+
+function applyAssistantClaimDraft(draft) {
+  if (!draft) return;
+  openClaimDialog(null, null, draft);
+  setMessage(claimMessage, langText({
+    en: "Draft loaded. Select an existing report or keep it as a new private draft context.",
+    "zh-CN": "草稿已载入。请选择现有报告，或保留为新的私人草稿上下文。",
+    th: "โหลดแบบร่างแล้ว เลือกรายงานที่มีอยู่หรือเก็บเป็นบริบทแบบร่างส่วนตัวใหม่",
+  }));
+}
+
+function assistantMessageTextFromError(error) {
+  return langText({
+    en: `I could not reach the assistant endpoint: ${error.message}`,
+    "zh-CN": `无法连接助手接口：${error.message}`,
+    th: `ไม่สามารถเชื่อมต่อผู้ช่วยได้: ${error.message}`,
+  });
+}
+
+function scrollAssistantToBottom() {
+  if (!assistantMessages) return;
+  window.requestAnimationFrame(() => {
+    assistantMessages.scrollTop = assistantMessages.scrollHeight;
+  });
+}
+
+function pushAssistantMessage(message) {
+  state.assistantMessages.push({
+    role: message.role || "assistant",
+    text: message.text || "",
+    suggestedQuery: message.suggestedQuery || "",
+    canExecuteSearch: Boolean(message.canExecuteSearch),
+    results: Array.isArray(message.results) ? message.results : [],
+    likelyMatches: Array.isArray(message.likelyMatches) ? message.likelyMatches : [],
+    claimDraft: message.claimDraft || null,
+  });
+  renderAssistantMessages();
+}
+
+function renderAssistantResults(container, matches = [], { limit = 4 } = {}) {
+  const visibleMatches = matches.slice(0, limit);
+  if (!visibleMatches.length) return;
+
+  const list = document.createElement("div");
+  list.className = "assistant-results";
+  const topScore = Math.max(...visibleMatches.map(assistantResultScore), 0);
+  visibleMatches.forEach((match, index) => {
+    const card = createAssistantResultCard(match, index, topScore);
+    if (card) list.append(card);
+  });
+  if (list.children.length) {
+    container.append(list);
+  }
+}
+
+function renderAssistantMessages() {
+  if (!assistantMessages) return;
+  assistantMessages.replaceChildren();
+  state.assistantMessages.forEach((entry) => {
+    const bubble = document.createElement("article");
+    bubble.className = `assistant-message ${entry.role === "user" ? "is-user" : "is-assistant"}`;
+    const text = document.createElement("p");
+    text.textContent = entry.text || "";
+    bubble.append(text);
+
+    if (entry.suggestedQuery) {
+      const queryRow = document.createElement("div");
+      queryRow.className = "assistant-query-row";
+      const queryChip = document.createElement("span");
+      queryChip.className = "assistant-query-chip";
+      queryChip.textContent = entry.suggestedQuery;
+      queryRow.append(queryChip);
+      if (entry.canExecuteSearch) {
+        const runButton = document.createElement("button");
+        runButton.type = "button";
+        runButton.className = "ghost-button small-button";
+        runButton.textContent = langText({ en: "Run search", "zh-CN": "运行搜索", th: "ค้นหา" });
+        runButton.addEventListener("click", () => runAssistantSearch(entry.suggestedQuery));
+        queryRow.append(runButton);
+      }
+      const openReportsButton = document.createElement("button");
+      openReportsButton.type = "button";
+      openReportsButton.className = "ghost-button small-button";
+      openReportsButton.textContent = langText({ en: "Open reports", "zh-CN": "打开报告", th: "เปิดรายงาน" });
+      openReportsButton.addEventListener("click", () => openAssistantQueryInReports(entry.suggestedQuery));
+      queryRow.append(openReportsButton);
+      bubble.append(queryRow);
+    }
+
+    renderAssistantClaimDraft(bubble, entry.claimDraft);
+    renderAssistantResults(bubble, entry.results.length ? entry.results : entry.likelyMatches);
+    assistantMessages.append(bubble);
+  });
+  scrollAssistantToBottom();
+}
+
+function ensureAssistantWelcome() {
+  if (state.assistantMessages.length) return;
+  pushAssistantMessage({ role: "assistant", text: assistantWelcomeCopy() });
+}
+
+function openAssistantPanel() {
+  assistantPanel?.classList.remove("is-hidden");
+  assistantLauncherButtons.forEach((button) => button.setAttribute("aria-expanded", "true"));
+  chatbotDebugState.modalStateChanged = true;
+  logChatbotDebug("open-panel");
+  ensureAssistantWelcome();
+  window.requestAnimationFrame(() => {
+    assistantPanel?.focus({ preventScroll: true });
+    (state.assistantMode === "query" ? assistantQueryInput : assistantInput)?.focus();
+  });
+}
+
+function closeAssistantPanel() {
+  assistantPanel?.classList.add("is-hidden");
+  assistantLauncherButtons.forEach((button) => button.setAttribute("aria-expanded", "false"));
+  chatbotDebugState.modalStateChanged = true;
+  logChatbotDebug("close-panel");
+}
+
+function openAssistantQueryInReports(query) {
+  const value = String(query || "").trim();
+  if (value && searchInput) {
+    searchInput.value = value;
+    invalidateSearchCache();
+  }
+  navigateTo("reports");
+  if (value) {
+    void loadItems();
+  }
+}
+
+async function sendAssistantRequest({ message, executeSearch = false, query = "" }) {
+  return apiFetch("/assistant/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message,
+      language: currentLanguage(),
+      execute_search: executeSearch,
+      query,
+    }),
+  });
+}
+
+async function submitAssistantChat(event) {
+  event.preventDefault();
+  if (state.assistantRequestInFlight) return;
+  const message = assistantInput.value.trim();
+  if (!message) {
+    setMessage(assistantStatus, langText({ en: "Type a message first.", "zh-CN": "请先输入消息。", th: "กรุณาพิมพ์ข้อความก่อน" }), true);
+    return;
+  }
+
+  state.assistantLastMessage = message;
+  state.assistantRequestInFlight = true;
+  setButtonLoading(assistantSubmitButton, true);
+  setMessage(assistantStatus, langText({ en: "Thinking...", "zh-CN": "正在思考...", th: "กำลังคิด..." }));
+  assistantInput.value = "";
+  pushAssistantMessage({ role: "user", text: message });
+
+  try {
+    const data = await sendAssistantRequest({ message });
+    state.assistantLastQuery = data.suggested_query || "";
+    pushAssistantMessage({
+      role: "assistant",
+      text: data.reply || assistantWelcomeCopy(),
+      suggestedQuery: data.suggested_query || "",
+      canExecuteSearch: data.can_execute_search,
+      likelyMatches: data.likely_matches || [],
+      results: data.results || [],
+    });
+    if (shouldGenerateAssistantClaimDraft(message)) {
+      pushAssistantMessage({
+        role: "assistant",
+        text: langText({ en: "Structured claim draft", "zh-CN": "结构化认领草稿", th: "แบบร่างคำขอแบบมีโครงสร้าง" }),
+        claimDraft: buildAssistantClaimDraft(message),
+      });
+    }
+    setMessage(assistantStatus, "");
+    triggerHaptic("success");
+  } catch (error) {
+    pushAssistantMessage({ role: "assistant", text: assistantMessageTextFromError(error) });
+    setMessage(assistantStatus, error.message, true);
+    logClientError("assistant chat failed", error);
+  } finally {
+    state.assistantRequestInFlight = false;
+    setButtonLoading(assistantSubmitButton, false);
+  }
+}
+
+async function runAssistantSearch(query) {
+  const searchQuery = String(query || state.assistantLastQuery || "").trim();
+  const message = state.assistantLastMessage || searchQuery || "Search reports";
+  if (!searchQuery || state.assistantRequestInFlight) return;
+
+  state.assistantRequestInFlight = true;
+  setButtonLoading(assistantSubmitButton, true);
+  setMessage(assistantStatus, langText({ en: "Searching reports...", "zh-CN": "正在搜索报告...", th: "กำลังค้นหารายงาน..." }));
+  try {
+    const data = await sendAssistantRequest({ message, executeSearch: true, query: searchQuery });
+    pushAssistantMessage({
+      role: "assistant",
+      text: data.reply || langText({ en: "Search complete.", "zh-CN": "搜索完成。", th: "ค้นหาเสร็จแล้ว" }),
+      suggestedQuery: data.suggested_query || searchQuery,
+      canExecuteSearch: false,
+      likelyMatches: [],
+      results: data.results || [],
+    });
+    setMessage(assistantStatus, "");
+    triggerHaptic("success");
+  } catch (error) {
+    pushAssistantMessage({ role: "assistant", text: assistantMessageTextFromError(error) });
+    setMessage(assistantStatus, error.message, true);
+    logClientError("assistant search failed", error, { query: searchQuery });
+  } finally {
+    state.assistantRequestInFlight = false;
+    setButtonLoading(assistantSubmitButton, false);
+  }
+}
+
+function handleAssistantClaimDraft() {
+  const source = assistantInput.value.trim() || state.assistantLastMessage || "";
+  if (!source) {
+    setMessage(assistantStatus, langText({
+      en: "Type what you lost first.",
+      "zh-CN": "请先输入你遗失的物品。",
+      th: "กรุณาพิมพ์สิ่งที่คุณทำหายก่อน",
+    }), true);
+    return;
+  }
+  const draft = buildAssistantClaimDraft(source);
+  assistantInput.value = "";
+  pushAssistantMessage({
+    role: "assistant",
+    text: langText({ en: "Structured claim draft", "zh-CN": "结构化认领草稿", th: "แบบร่างคำขอแบบมีโครงสร้าง" }),
+    claimDraft: draft,
+  });
+  setMessage(assistantStatus, "");
+}
+
+function renderAssistantQueryResults({ query = "", results = [], suggestedQuery = "", actions = [] } = {}) {
+  if (!assistantQueryResults) return;
+  assistantQueryResults.replaceChildren();
+
+  const panel = document.createElement("article");
+  panel.className = "assistant-query-summary";
+
+  const heading = document.createElement("div");
+  heading.className = "assistant-query-summary-head";
+  const title = document.createElement("h4");
+  title.textContent = langText({ en: "Matched items", "zh-CN": "匹配物品", th: "รายการที่ตรงกัน" });
+  const count = document.createElement("span");
+  count.className = "assistant-score-badge";
+  count.textContent = String(results.length);
+  heading.append(title, count);
+
+  const queryLine = document.createElement("p");
+  queryLine.className = "assistant-structured-meta";
+  queryLine.textContent = suggestedQuery && suggestedQuery !== query ? `${query} -> ${suggestedQuery}` : query;
+
+  panel.append(heading, queryLine);
+  if (results.length) {
+    renderAssistantResults(panel, results, { limit: 10 });
+  } else {
+    const empty = document.createElement("p");
+    empty.className = "status-message";
+    empty.textContent = langText({
+      en: "No ranked matches. Try fewer words, a category, or a campus location.",
+      "zh-CN": "没有排序匹配结果。可以减少关键词，或输入分类、校园地点。",
+      th: "ไม่พบรายการที่ตรงกัน ลองใช้คำให้น้อยลง หมวดหมู่ หรือสถานที่ในโรงเรียน",
+    });
+    panel.append(empty);
+  }
+
+  const suggestions = uniqueValues([
+    suggestedQuery,
+    ...actions.map((action) => typeof action === "string" ? action : action?.label || action?.query || ""),
+  ].filter(Boolean)).slice(0, 4);
+  if (suggestions.length) {
+    const suggestionRow = document.createElement("div");
+    suggestionRow.className = "assistant-query-suggestions";
+    suggestions.forEach((suggestion) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "ghost-button small-button";
+      button.textContent = suggestion;
+      button.addEventListener("click", () => {
+        assistantQueryInput.value = suggestion;
+        assistantQueryForm?.requestSubmit();
+      });
+      suggestionRow.append(button);
+    });
+    panel.append(suggestionRow);
+  }
+
+  assistantQueryResults.append(panel);
+}
+
+async function submitAssistantQuery(event) {
+  event.preventDefault();
+  if (state.assistantRequestInFlight) return;
+  const query = assistantQueryInput.value.trim();
+  if (!query) {
+    setMessage(assistantQueryStatus, langText({
+      en: "Enter a search query first.",
+      "zh-CN": "请先输入搜索内容。",
+      th: "กรุณาใส่คำค้นหาก่อน",
+    }), true);
+    return;
+  }
+
+  state.assistantQueryLastQuery = query;
+  state.assistantRequestInFlight = true;
+  setButtonLoading(assistantQuerySubmitButton, true);
+  setMessage(assistantQueryStatus, langText({ en: "Searching...", "zh-CN": "正在搜索...", th: "กำลังค้นหา..." }));
+  assistantQueryResults?.replaceChildren();
+
+  try {
+    const data = await sendAssistantRequest({ message: query, executeSearch: true, query });
+    const results = Array.isArray(data.results) ? data.results : [];
+    state.assistantQueryResults = results;
+    renderAssistantQueryResults({
+      query,
+      results,
+      suggestedQuery: data.suggested_query || query,
+      actions: data.suggested_actions || [],
+    });
+    setMessage(assistantQueryStatus, "");
+    triggerHaptic("success");
+  } catch (error) {
+    setMessage(assistantQueryStatus, error.message, true);
+    assistantQueryResults.replaceChildren();
+    const message = document.createElement("p");
+    message.className = "status-message is-error";
+    message.textContent = error.message;
+    assistantQueryResults.append(message);
+    logClientError("assistant structured query failed", error, { query });
+  } finally {
+    state.assistantRequestInFlight = false;
+    setButtonLoading(assistantQuerySubmitButton, false);
+  }
+}
+
 async function submitAuth(event) {
   event.preventDefault();
+  const shouldPlayIntro = state.authView === "login";
   const registerError = validateRegisterFields();
   if (registerError) {
     setMessage(authMessage, registerError, true);
@@ -7280,7 +11955,7 @@ async function submitAuth(event) {
     setMessage(authMessage, state.authView === "login"
       ? langText({ en: "Logged in.", "zh-CN": "已登录。", th: "เข้าสู่ระบบแล้ว" })
       : langText({ en: "Account created.", "zh-CN": "账号已创建。", th: "สร้างบัญชีแล้ว" }));
-    await enterAuthenticatedApp();
+    await enterAuthenticatedApp({ playIntro: shouldPlayIntro });
   } catch (error) {
     setMessage(authMessage, error.message, true);
     logClientError("authentication failed", error, { view: state.authView });
@@ -7307,15 +11982,19 @@ async function restoreSession() {
   }
 }
 
-async function enterAuthenticatedApp() {
-  showAppShell();
+async function enterAuthenticatedApp({ playIntro = false } = {}) {
+  const introPromise = playIntro ? playLoginLoadingVideo() : Promise.resolve(false);
+  if (!playIntro) {
+    showAppShell();
+  }
   renderCurrentAccountChip();
   syncModeUi();
   prefillReporter();
   dateInput.value = todayIso();
   updateLocationUi();
   renderAccount();
-  await Promise.all([
+  const loadPromise = Promise.all([
+    loadMapSystem(),
     loadFilters(),
     loadItems(),
     loadRoomItems(),
@@ -7325,9 +12004,22 @@ async function enterAuthenticatedApp() {
     loadStatsSummary(),
     currentUserCanAdmin() ? loadAdminData() : Promise.resolve(),
   ]);
+  await Promise.all([loadPromise, introPromise]);
+  if (playIntro) {
+    hideLoginLoadingVideo();
+    showAppShell();
+  }
   startNotificationPolling();
-  await activateRoute(readRoute());
-  await maybeStartTutorial();
+  if (playIntro) {
+    const mapHash = buildHash("map");
+    if (window.location.hash !== mapHash) {
+      window.location.hash = mapHash;
+    }
+    await activateRoute({ section: "map", itemId: null });
+  } else {
+    await activateRoute(readRoute());
+    await maybeStartTutorial();
+  }
 }
 
 async function submitReport(event) {
@@ -7418,6 +12110,14 @@ async function submitReport(event) {
     const item = data.item;
     if (uploadFile && item?.id) {
       state.previewUrls.set(item.id, URL.createObjectURL(uploadFile));
+    }
+    if (item?.id) {
+      state.items = [
+        item,
+        ...state.items.filter((existingItem) => existingItem.id !== item.id),
+      ];
+      invalidateSearchCache();
+      renderLocationScopedSurfaces();
     }
     form.reset();
     state.selectedFile = null;
@@ -7561,6 +12261,7 @@ async function uploadProfileImage() {
     triggerHaptic("success");
     invalidateSearchCache();
     state.queryCache.clear();
+    state.queryResultCache.clear();
     await Promise.all([
       loadItems(),
       loadNotifications(),
@@ -8427,17 +13128,60 @@ function confirmRoomPreviewSelection() {
   openClaimDialog(item, analysis);
 }
 
-function openClaimDialog(item, previewAnalysis = null) {
-  if (item.claimed) {
+function renderClaimDraftItemOptions(selectedItem = null) {
+  if (!claimItemSelect) return;
+  const selectedId = selectedItem?.id ? String(selectedItem.id) : "";
+  claimItemSelect.replaceChildren(new Option(langText({
+    en: "Create new claim draft context",
+    "zh-CN": "创建新的认领草稿上下文",
+    th: "สร้างบริบทแบบร่างคำขอใหม่",
+  }), ""));
+  const seen = new Set();
+  const items = [...(state.queryItems || []), ...(state.items || [])].filter((item) => {
+    if (!item?.id || seen.has(item.id) || item.claimed) return false;
+    seen.add(item.id);
+    return true;
+  });
+  items.forEach((item) => {
+    const label = [item.title, localizeValue(item.location), `#${item.id}`].filter(Boolean).join(" • ");
+    claimItemSelect.append(new Option(label, String(item.id)));
+  });
+  claimItemSelect.value = selectedId;
+}
+
+function handleClaimDraftItemSelection() {
+  const itemId = Number(claimItemSelect?.value || "") || null;
+  const item = itemId ? findItemById(itemId) : null;
+  state.activeClaimItem = item;
+  claimItemLabel.textContent = item
+    ? `${item.title} • ${item.location}`
+    : langText({ en: "New private claim draft context", "zh-CN": "新的私人认领草稿上下文", th: "บริบทแบบร่างคำขอส่วนตัวใหม่" });
+  if (item && !claimDraftTitleInput.value.trim()) {
+    claimDraftTitleInput.value = `${item.title} claim`;
+  }
+}
+
+function openClaimDialog(item = null, previewAnalysis = null, draft = null) {
+  if (item?.claimed) {
     setMessage(uploadMessage, langText({ en: "This item has already been marked as claimed.", "zh-CN": "该物品已被标记为已认领。", th: "สิ่งของนี้ถูกทำเครื่องหมายว่ารับคืนแล้ว" }), true);
     return;
   }
 
-  state.activeClaimItem = item;
+  state.activeClaimItem = item || null;
   state.roomPreviewAnalysis = previewAnalysis;
   claimForm.reset();
+  renderClaimDraftItemOptions(item);
   setMessage(claimMessage, "");
-  claimItemLabel.textContent = `${item.title} • ${item.location}`;
+  claimItemLabel.textContent = item
+    ? `${item.title} • ${item.location}`
+    : langText({ en: "Choose a report to attach this draft, or save it as new draft context.", "zh-CN": "请选择要关联的报告，或保存为新的草稿上下文。", th: "เลือกรายงานเพื่อแนบแบบร่าง หรือบันทึกเป็นบริบทแบบร่างใหม่" });
+  claimDraftTitleInput.value = draft?.title || (item ? `${item.title} claim` : "");
+  if (draft) {
+    claimReasonInput.value = draft.reason || draft.claim_reason || "";
+    claimDescriptionInput.value = draft.description || draft.item_description || "";
+    claimLocationInput.value = draft.location || draft.lost_location || "";
+    claimIdentifyingInput.value = draft.identifyingInfo || draft.identifying_info || "";
+  }
   if (previewAnalysis) {
     claimReasonInput.value = langText({
       en: "The circled detail matches my item.",
@@ -8463,20 +13207,18 @@ function closeClaimModal() {
 
 async function submitClaim(event) {
   event.preventDefault();
-  const activeClaimItem = state.activeClaimItem;
-  if (!activeClaimItem) return;
+  const selectedItemId = Number(claimItemSelect?.value || "") || null;
+  const activeClaimItem = selectedItemId ? findItemById(selectedItemId) : state.activeClaimItem;
 
   const validationMessage = validateClaimForm();
   if (validationMessage) {
     setMessage(claimMessage, validationMessage, true);
     return;
   }
-  if (!window.confirm(langText({ en: "Submit this claim for review?", "zh-CN": "提交这条认领以供审核？", th: "ส่งคำขอนี้เพื่อให้ผู้ดูแลตรวจสอบหรือไม่" }))) {
-    return;
-  }
 
   const claimDraft = {
-    item: activeClaimItem,
+    item: activeClaimItem || null,
+    title: claimDraftTitleInput.value.trim(),
     reason: claimReasonInput.value.trim(),
     description: claimDescriptionInput.value.trim(),
     lostLocation: claimLocationInput.value.trim(),
@@ -8488,34 +13230,36 @@ async function submitClaim(event) {
   const activityId = createActivity({
     type: "claim",
     title: langText({
-      en: `Claim: ${claimDraft.item.title || "item"}`,
-      "zh-CN": `认领：${claimDraft.item.title || "物品"}`,
-      th: `คำขอ: ${claimDraft.item.title || "สิ่งของ"}`,
+      en: `Draft: ${claimDraft.item?.title || claimDraft.title || "claim"}`,
+      "zh-CN": `草稿：${claimDraft.item?.title || claimDraft.title || "认领"}`,
+      th: `แบบร่าง: ${claimDraft.item?.title || claimDraft.title || "คำขอ"}`,
     }),
-    stage: langText({ en: "Submitting claim", "zh-CN": "正在提交认领", th: "กำลังส่งคำขอ" }),
+    stage: langText({ en: "Saving draft", "zh-CN": "正在保存草稿", th: "กำลังบันทึกแบบร่าง" }),
     detail: langText({
-      en: "Submitting in the background. You can close this form.",
-      "zh-CN": "正在后台提交。你可以关闭这个表单。",
-      th: "กำลังส่งในพื้นหลัง คุณสามารถปิดแบบฟอร์มนี้ได้",
+      en: "Saving a private draft. It will not be submitted until you send it from My Claims.",
+      "zh-CN": "正在保存私人草稿。你稍后可在我的认领中提交。",
+      th: "กำลังบันทึกแบบร่างส่วนตัว จะยังไม่ส่งจนกว่าคุณจะส่งจากหน้าคำขอของฉัน",
     }),
     progress: 15,
     status: "running",
     target: "claims",
-    itemId: claimDraft.item.id,
+    itemId: claimDraft.item?.id || null,
   });
   state.progressActivityIds.claim = activityId;
   setButtonLoading(claimSubmitButton, true);
-  setMessage(claimMessage, langText({ en: "Sending your claim for review...", "zh-CN": "正在发送认领审核...", th: "กำลังส่งคำขอเพื่อให้ผู้ดูแลตรวจสอบ..." }));
+  setMessage(claimMessage, langText({ en: "Saving private claim draft...", "zh-CN": "正在保存私人认领草稿...", th: "กำลังบันทึกแบบร่างคำขอส่วนตัว..." }));
   updateActivity(activityId, {
     progress: 35,
-    stage: langText({ en: "Checking ownership details", "zh-CN": "正在核验所有权信息", th: "กำลังตรวจสอบรายละเอียดความเป็นเจ้าของ" }),
+    stage: langText({ en: "Preparing draft", "zh-CN": "正在准备草稿", th: "กำลังเตรียมแบบร่าง" }),
   });
 
   try {
-    const data = await apiFetch(`/items/${claimDraft.item.id}/claim`, {
+    const data = await apiFetch("/claim-drafts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        item_id: claimDraft.item?.id || null,
+        title: claimDraft.title || claimDraft.item?.title || "",
         claim_reason: claimDraft.reason,
         item_description: claimDraft.description,
         lost_location: claimDraft.lostLocation,
@@ -8523,25 +13267,26 @@ async function submitClaim(event) {
         visual_selection: claimDraft.visualSelection,
         visual_summary: claimDraft.visualSummary,
         visual_tags: claimDraft.visualTags,
+        source: "claim-builder",
       }),
     });
     updateActivity(activityId, {
-      sourceKey: data.claim?.id ? `claim:${data.claim.id}` : "",
-      sourceStatus: "pending",
-      progress: 68,
-      status: "waiting",
-      stage: langText({ en: "Pending review", "zh-CN": "等待审核", th: "รอตรวจสอบ" }),
+      sourceKey: data.draft?.draft_id ? `claim-draft:${data.draft.draft_id}` : "",
+      sourceStatus: "draft",
+      progress: 100,
+      status: "success",
+      stage: langText({ en: "Draft saved", "zh-CN": "草稿已保存", th: "บันทึกแบบร่างแล้ว" }),
       detail: langText({
-        en: "Awaiting admin review. We'll notify you when the decision is ready.",
-        "zh-CN": "正在等待管理员审核。决定完成后我们会通知你。",
-        th: "กำลังรอผู้ดูแลตรวจสอบ เราจะแจ้งให้ทราบเมื่อมีผลการตัดสิน",
+        en: "Open My Claims when you are ready to submit it for review.",
+        "zh-CN": "准备好后，在我的认领中提交审核。",
+        th: "เปิดหน้าคำขอของฉันเมื่อพร้อมส่งตรวจสอบ",
       }),
-      claimId: data.claim?.id || null,
+      claimId: data.draft?.draft_id || null,
     });
     setMessage(claimMessage, langText({
-      en: "Your claim has been sent for review. You'll be notified when it's checked.",
-      "zh-CN": "你的认领已发送审核，核查完成后我们会通知你。",
-      th: "ส่งคำขอของคุณไปตรวจสอบแล้ว เราจะแจ้งให้ทราบเมื่อมีการตรวจสอบเสร็จสิ้น",
+      en: "Claim draft saved. Submit it from My Claims when ready.",
+      "zh-CN": "认领草稿已保存。准备好后可在我的认领中提交。",
+      th: "บันทึกแบบร่างคำขอแล้ว ส่งจากหน้าคำขอของฉันเมื่อพร้อม",
     }));
     triggerHaptic("success");
     invalidateSearchCache();
@@ -8550,21 +13295,21 @@ async function submitClaim(event) {
   } catch (error) {
     failActivity(activityId, error, {
       title: langText({
-        en: `Claim failed: ${claimDraft.item.title || "item"}`,
-        "zh-CN": `认领失败：${claimDraft.item.title || "物品"}`,
-        th: `ส่งคำขอไม่สำเร็จ: ${claimDraft.item.title || "สิ่งของ"}`,
+        en: `Draft failed: ${claimDraft.item?.title || claimDraft.title || "claim"}`,
+        "zh-CN": `草稿失败：${claimDraft.item?.title || claimDraft.title || "认领"}`,
+        th: `บันทึกแบบร่างไม่สำเร็จ: ${claimDraft.item?.title || claimDraft.title || "คำขอ"}`,
       }),
       target: "claims",
-      itemId: claimDraft.item.id,
+      itemId: claimDraft.item?.id || null,
     });
     if (claimDialog.open) {
       setMessage(claimMessage, langText({
-        en: `Could not submit your claim: ${error.message}`,
-        "zh-CN": `认领提交失败：${error.message}`,
-        th: `ไม่สามารถส่งคำขอได้: ${error.message}`,
+        en: `Could not save your draft: ${error.message}`,
+        "zh-CN": `草稿保存失败：${error.message}`,
+        th: `ไม่สามารถบันทึกแบบร่างได้: ${error.message}`,
       }), true);
     }
-    logClientError("submitting claim failed", error, { itemId: claimDraft.item.id });
+    logClientError("saving claim draft failed", error, { itemId: claimDraft.item?.id || null });
   } finally {
     clearProgressActivity("claim");
     setButtonLoading(claimSubmitButton, false);
@@ -8605,6 +13350,13 @@ function selectFile(file) {
     updateReportSubmitState();
     return;
   }
+  const validationError = validateReportImageFile(file);
+  if (validationError) {
+    setMessage(uploadMessage, validationError, true);
+    setWarningCard(reportWarningCard, validationError);
+    state.selectedFile = null;
+    return;
+  }
   state.selectedFile = file;
   dropTitle.textContent = file.name;
   dropHint.textContent = `${Math.max(1, Math.round(file.size / 1024))} KB selected`;
@@ -8622,6 +13374,7 @@ function resetPreviewUrls() {
 }
 
 function logout() {
+  stopQueryCamera();
   clearSession();
   closeTutorial({ markSeen: false, rememberSession: false });
   closeReportModal();
@@ -8640,6 +13393,7 @@ function logout() {
   }
   state.searchCache.clear();
   state.queryCache.clear();
+  state.queryResultCache.clear();
   state.items = [];
   state.roomItems = [];
   state.returnedItems = [];
@@ -8658,12 +13412,46 @@ function logout() {
   state.adminClaims = [];
   state.adminAudits = [];
   state.aiInspectionLogs = [];
+  state.mapImageUrl = MAP_IMAGE_URL;
+  state.mapImageVersion = Date.now();
+  state.loadingVideoUrl = LOGIN_LOADING_VIDEO_URL;
+  state.locations = normalizeSchoolLocations(SCHOOL_LOCATIONS);
+  state.mapZones = [...SCHOOL_ZONES];
+  state.mapRegions = [];
+  state.mapStats = { regions: {}, zones: {} };
+  state.selectedZone = null;
+  state.selectedBox = null;
+  state.expandedBox = null;
+  state.selectedFloor = null;
+  state.selectedLocation = null;
+  state.selectedSubLocation = null;
+  state.heatmapEnabled = true;
+  state.cameraZoomState = { scale: 1, x: 0.5, y: 0.5 };
+  state.activeReportFormContext = false;
+  state.hoverLocation = null;
+  state.hoverState = null;
+  state.expandedMapTarget = null;
   state.adminMonitor = emptyAdminMonitor();
   state.adminTab = "users";
   state.statsSummary = { items_returned_this_week: 0 };
+  state.activeLocationFilter = "";
+  state.locationFilterSource = "";
+  state.locationDrawerOpen = false;
   state.currentQueryItem = null;
   state.queryMessages = [];
+  state.queryStructuredResults = [];
   state.selectedQueryFile = null;
+  state.selectedQuestionReplyFile = null;
+  state.questionBoard = [];
+  state.activeQuestionThread = null;
+  state.pendingQuestionThreadId = null;
+  state.assistantMessages = [];
+  state.assistantMode = "chat";
+  state.assistantLastQuery = "";
+  state.assistantLastMessage = "";
+  state.assistantRequestInFlight = false;
+  state.assistantQueryLastQuery = "";
+  state.assistantQueryResults = [];
   state.tutorialDismissedForSession = false;
   state.panelState = {};
   state.autoMinimizedReports = false;
@@ -8691,6 +13479,15 @@ function logout() {
   notificationPageList?.replaceChildren();
   notificationDropdown.classList.add("is-hidden");
   queryMessages.replaceChildren();
+  questionBoardList?.replaceChildren();
+  questionThreadBody?.replaceChildren();
+  questionThreadPanel?.classList.add("is-hidden");
+  assistantMessages?.replaceChildren();
+  assistantQueryResults?.replaceChildren();
+  assistantInput.value = "";
+  assistantQueryInput.value = "";
+  setAssistantMode("chat", { focus: false });
+  closeAssistantPanel();
   showAdminButton.classList.add("is-hidden");
   showReportItemButton?.classList.remove("is-hidden");
   closeNewWindowMenu();
@@ -8703,6 +13500,8 @@ function logout() {
   setWarningCard(roomWarningCard, "");
   setWarningCard(returnedWarningCard, "");
   setMessage(queryMessage, "");
+  setMessage(assistantStatus, "");
+  setMessage(assistantQueryStatus, "");
   setMessage(profileImageMessage, "");
   setMessage(roomUploadMessage, "");
   setMessage(returnedMessage, "");
@@ -8714,6 +13513,8 @@ function logout() {
   renderActivityTracker();
   form.reset();
   clearSelectedQueryFile();
+  clearSelectedQuestionReplyFile();
+  stopReportCamera();
   updateReportSubmitState();
   switchAdminTab("users");
   persistCurrentItemId(null);
@@ -8734,6 +13535,7 @@ function bindEvents() {
     [authPasswordToggle, "click", () => setAuthPasswordVisibility(authPassword?.type === "password"), "password visibility"],
     [authConfirmPasswordToggle, "click", () => setAuthConfirmPasswordVisibility(authConfirmPassword?.type === "password"), "confirm password visibility"],
     [showDashboardButton, "click", () => navigateTo("dashboard"), "dashboard nav"],
+    [showMapButton, "click", () => navigateTo("map"), "school map nav"],
     [showReportsButton, "click", () => navigateTo("reports"), "reports nav"],
     [showReportItemButton, "click", openReportModal, "report item nav"],
     [showRoomButton, "click", () => navigateTo("room"), "room nav"],
@@ -8747,18 +13549,41 @@ function bindEvents() {
     [topbarReportButton, "click", openReportModal, "topbar report"],
     [topbarRefreshButton, "click", () => { void refreshCurrentView(); }, "topbar refresh"],
     [topbarAccountButton, "click", () => navigateTo("account"), "topbar account"],
-    [sidebarLauncherButton, "click", () => openPanel("sidebar"), "sidebar launcher"],
+    [sidebarLauncherButton, "click", openLocationDrawer, "location browser launcher"],
+    [sidebarDrawerBackdrop, "click", closeLocationDrawer, "location browser backdrop"],
     [sidebarCollapseButton, "click", toggleSidebarCollapse, "sidebar collapse"],
     [sidebarModeSelect, "change", () => setSidebarMode(sidebarModeSelect.value), "sidebar mode"],
+    [mapBackButton, "click", () => goBackToPreviousRoute("dashboard"), "school map back"],
+    [mapResetButton, "click", () => clearMapNavigation(), "school map campus reset"],
+    [locationBackButton, "click", returnFromLocationFilter, "location filter back"],
+    [clearLocationFilterButton, "click", () => setActiveLocationFilter("", { load: true, closeDrawer: false }), "clear location filter"],
     [queryBackButton, "click", () => navigateTo("reports"), "query back"],
     [themeToggleButton, "click", toggleThemeMode, "theme toggle"],
     [openReportModalButton, "click", openReportModal, "open report modal"],
+    [assistantCloseButton, "click", closeAssistantPanel, "close assistant panel"],
+    [assistantChatModeButton, "click", () => setAssistantMode("chat"), "assistant chat mode"],
+    [assistantQueryModeButton, "click", () => setAssistantMode("query"), "assistant query mode"],
+    [assistantClaimDraftButton, "click", handleAssistantClaimDraft, "assistant claim draft"],
+    [assistantForm, "submit", submitAssistantChat, "assistant form submit"],
+    [assistantQueryForm, "submit", submitAssistantQuery, "assistant query form submit"],
     [dashboardReportButton, "click", openReportModal, "dashboard report"],
     [dashboardRefreshButton, "click", () => { void refreshCurrentView(); }, "dashboard refresh"],
     [closeReportDialog, "click", closeReportModal, "close report modal"],
     [logoutButton, "click", logout, "logout"],
     [form, "submit", submitReport, "report form submit"],
     [imageInput, "change", () => selectFile(imageInput?.files?.[0] || null), "report image input"],
+    [reportCameraInput, "change", () => selectFile(reportCameraInput?.files?.[0] || null), "report camera input"],
+    [reportCameraButton, "click", () => { void openReportCamera(); }, "report camera button"],
+    [reportCameraCaptureButton, "click", async () => {
+      try {
+        await captureReportCameraPhoto();
+      } catch (error) {
+        setMessage(uploadMessage, error.message, true);
+        setWarningCard(reportWarningCard, error.message);
+        logClientError("capturing report camera photo failed", error);
+      }
+    }, "report camera capture"],
+    [reportCameraCancelButton, "click", stopReportCamera, "report camera cancel"],
     [refreshButton, "click", loadItems, "refresh reports"],
     [refreshRoomButton, "click", loadRoomItems, "refresh room"],
     [refreshReturnedButton, "click", loadReturnedItems, "refresh returned"],
@@ -8773,16 +13598,41 @@ function bindEvents() {
     [adminInspectionTab, "click", () => switchAdminTab("inspection"), "admin inspection tab"],
     [startOllamaButton, "click", () => { void updateOllamaService("start", startOllamaButton); }, "start ollama"],
     [stopOllamaButton, "click", () => { void updateOllamaService("stop", stopOllamaButton); }, "stop ollama"],
+    [schoolMapImage, "load", () => syncMapImageAspect(schoolMapImage), "school map image load"],
     [searchInput, "input", debounceLoadItems, "report search"],
     [categoryFilter, "change", loadItems, "category filter"],
     [statusFilter, "change", loadItems, "status filter"],
-    [locationFilter, "change", loadItems, "location filter"],
-    [optionalLocationInput, "input", updateLocationUi, "manual location input"],
+    [locationFilter, "change", () => setActiveLocationFilter(locationFilter.value, {
+      updateSelect: false,
+      load: true,
+      focusDashboard: false,
+      closeDrawer: false,
+      source: "manual",
+    }), "location filter"],
+    [optionalLocationInput, "input", handleManualLocationInput, "manual location input"],
     [queryItemSelect, "change", handleQueryItemSelection, "query item select"],
     [queryForm, "submit", submitQuery, "query form submit"],
     [queryFileInput, "change", () => selectQueryFile(queryFileInput?.files?.[0] || null), "query file input"],
+    [queryCameraInput, "change", () => selectQueryFile(queryCameraInput?.files?.[0] || null), "query camera input"],
+    [queryCameraButton, "click", () => { void openQueryCamera(); }, "query camera button"],
+    [queryCameraCaptureButton, "click", async () => {
+      try {
+        await captureQueryCameraPhoto();
+      } catch (error) {
+        setMessage(queryMessage, error.message, true);
+        setWarningCard(queryWarningCard, error.message);
+        logClientError("capturing query camera photo failed", error);
+      }
+    }, "query camera capture"],
+    [queryCameraCancelButton, "click", stopQueryCamera, "query camera cancel"],
     [queryFileRemoveButton, "click", clearSelectedQueryFile, "clear query file"],
     [queryClearThreadButton, "click", clearCurrentQueryThread, "clear query thread"],
+    [refreshQuestionBoardButton, "click", () => loadQuestionBoard(), "refresh question board"],
+    [closeQuestionThreadButton, "click", closeQuestionThread, "close question thread"],
+    [questionReplyForm, "submit", submitQuestionReply, "question reply form submit"],
+    [questionReplyFileInput, "change", () => selectQuestionReplyFile(questionReplyFileInput?.files?.[0] || null), "question reply file input"],
+    [questionReplyFileRemoveButton, "click", clearSelectedQuestionReplyFile, "clear question reply file"],
+    [claimItemSelect, "change", handleClaimDraftItemSelection, "claim draft item select"],
     [claimForm, "submit", submitClaim, "claim form submit"],
     [cancelClaimButton, "click", closeClaimModal, "cancel claim"],
     [closeClaimDialog, "click", closeClaimModal, "close claim dialog"],
@@ -8837,6 +13687,11 @@ function bindEvents() {
     bindListener(target, eventName, handler, { label });
   });
 
+  chatbotDebugState.clickHandlerAttached = bindListener(openAssistantButton, "click", openAssistantPanel, {
+    label: "open assistant panel",
+  });
+  logChatbotDebug("listener-bound");
+
   newWindowMenuButtons.forEach((button) => {
     bindListener(button, "click", () => openNewWindowTarget(button.dataset.newWindowTarget || "reports"), {
       label: `new window ${button.dataset.newWindowTarget || "unknown"}`,
@@ -8848,6 +13703,18 @@ function bindEvents() {
       label: `dashboard link ${button.dataset.dashboardTarget || "reports"}`,
     });
   });
+
+  locationBrowserButtons.forEach((button) => {
+    bindListener(button, "click", () => handleLocationBrowserClick(button), {
+      label: `location filter ${button.dataset.locationFilter || "all"}`,
+    });
+  });
+
+  bindListener(locationBrowserTree, "click", (event) => {
+    const button = event.target?.closest?.("[data-location-filter]");
+    if (!button || !locationBrowserTree.contains(button)) return;
+    handleLocationBrowserClick(button);
+  }, { label: "location browser tree" });
 
   bindListener(languageSelect, "change", async () => {
     setLanguage(languageSelect.value);
@@ -8863,6 +13730,7 @@ function bindEvents() {
         logClientError("saving language preference failed", error);
       }
       await Promise.all([
+        loadMapSystem(),
         loadFilters(),
         loadItems(),
         loadRoomItems(),
@@ -8930,6 +13798,18 @@ function bindEvents() {
       queryForm?.requestSubmit();
     }
   }, { label: "query submit shortcut" });
+  bindListener(assistantInput, "keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      assistantForm?.requestSubmit();
+    }
+  }, { label: "assistant submit shortcut" });
+  bindListener(assistantQueryInput, "keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      assistantQueryForm?.requestSubmit();
+    }
+  }, { label: "assistant structured query shortcut" });
   bindListener(queryInput, "focus", ensureQueryComposerVisible, { label: "query input focus" });
   bindListener(queryInput, "input", ensureQueryComposerVisible, { label: "query input resize guard" });
 
@@ -9018,6 +13898,9 @@ function bindEvents() {
   bindListener(document, "keydown", (event) => {
     if (event.key === "Escape") {
       closeNewWindowMenu();
+      if (state.locationDrawerOpen) {
+        closeLocationDrawer();
+      }
     }
   }, { label: "document escape dismiss" });
 
@@ -9049,7 +13932,7 @@ async function initUI() {
   }
   uiInitialized = true;
   ensureLayoutStructure();
-  ensureGlobalBackground();
+  ensureLoginBackground();
   initializeTheme();
   setLanguage(state.language);
   setAuthView("login");

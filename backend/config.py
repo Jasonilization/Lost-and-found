@@ -28,10 +28,10 @@ def load_env_file(path: Path = ENV_FILE) -> None:
             os.environ[key] = _strip_env_value(value)
 
 
-def normalize_http_url(value: str, default: str) -> str:
+def normalize_http_url(value: str, default: str = "") -> str:
     host = (value or default).strip().rstrip("/")
     if not host:
-        host = default
+        return ""
     if "://" not in host:
         host = f"http://{host}"
     return host.rstrip("/")
@@ -40,8 +40,6 @@ def normalize_http_url(value: str, default: str) -> str:
 load_env_file()
 
 OLLAMA_HOST = normalize_http_url(
-    os.getenv("OLLAMA_HOST", os.getenv("OLLAMA_URL", "http://localhost:11434")),
-    "http://localhost:11434",
+    os.getenv("OLLAMA_HOST", os.getenv("OLLAMA_URL", "")),
 )
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", os.getenv("OLLAMA_TEXT_MODEL", "llama3:8b")).strip() or "llama3:8b"
-

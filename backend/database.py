@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
@@ -8,8 +9,11 @@ from pathlib import Path
 from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
+from backend.db_ready import run_with_database_retries
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+LOGGER = logging.getLogger(__name__)
 
 if not DATABASE_URL:
     DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data")).expanduser().resolve()
@@ -46,6 +50,9 @@ class LostFoundItem(Base):
     tags_json = Column(Text, default="[]")
     ai_summary = Column(Text, default="")
     image_path = Column(String, nullable=True)
+    llava_analysis_json = Column(Text, default="{}")
+    ai_analysis_status = Column(String, default="success", nullable=False)
+    unverified_ai_analysis = Column(Boolean, default=False, nullable=False)
     search_text = Column(Text, default="")
     tag_source = Column(String, default="fallback-text")
     submitted_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
@@ -90,6 +97,18 @@ class LostFoundItem(Base):
             if text_value and text_value not in cleaned:
                 cleaned.append(text_value)
         self.tags_json = json.dumps(cleaned[:8])
+
+    @property
+    def llava_analysis(self) -> dict:
+        try:
+            value = json.loads(self.llava_analysis_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+
+    @llava_analysis.setter
+    def llava_analysis(self, value: dict) -> None:
+        self.llava_analysis_json = json.dumps(value or {})
 
     @property
     def evidence_images(self) -> list[str]:
@@ -147,6 +166,27 @@ class Claim(Base):
     visual_summary = Column(Text, default="")
     visual_tags_json = Column(Text, default="[]")
     status = Column(String, default="pending", index=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ClaimDraft(Base):
+    __tablename__ = "claim_drafts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    item_id = Column(Integer, ForeignKey("lost_found_items.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    title = Column(String, default="", nullable=False)
+    claim_reason = Column(Text, default="", nullable=False)
+    item_description = Column(Text, default="", nullable=False)
+    lost_location = Column(String, default="", nullable=False)
+    identifying_info = Column(Text, default="", nullable=False)
+    visual_selection_json = Column(Text, default="{}")
+    visual_summary = Column(Text, default="")
+    visual_tags_json = Column(Text, default="[]")
+    source = Column(String, default="manual", index=True)
+    status = Column(String, default="draft", index=True, nullable=False)
+    submitted_claim_id = Column(Integer, ForeignKey("claims.id"), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -230,6 +270,42 @@ class QueryMessage(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class QuestionPost(Base):
+    __tablename__ = "question_posts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    item_id = Column(Integer, ForeignKey("lost_found_items.id"), nullable=True, index=True)
+    question_text = Column(Text, nullable=False)
+    question_type = Column(String, default="lost_not_listed", index=True, nullable=False)
+    location_hint = Column(String, default="", index=True)
+    language = Column(String, default="en", nullable=False)
+    attachment_name = Column(String, default="")
+    attachment_path = Column(String, default="")
+    attachment_size = Column(Integer, nullable=True)
+    attachment_mime_type = Column(String, default="")
+    direct_chat_thread_id = Column(String, default="", index=True)
+    direct_chat_started_at = Column(DateTime, nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class QuestionReply(Base):
+    __tablename__ = "question_replies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    question_id = Column(Integer, ForeignKey("question_posts.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    message = Column(Text, nullable=False)
+    reply_type = Column(String, default="reply", index=True, nullable=False)
+    suggested_item_id = Column(Integer, ForeignKey("lost_found_items.id"), nullable=True, index=True)
+    attachment_name = Column(String, default="")
+    attachment_path = Column(String, default="")
+    attachment_size = Column(Integer, nullable=True)
+    attachment_mime_type = Column(String, default="")
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
 
@@ -288,6 +364,7 @@ class Notification(Base):
     message = Column(Text, default="")
     related_item_id = Column(Integer, ForeignKey("lost_found_items.id"), nullable=True, index=True)
     related_claim_id = Column(Integer, ForeignKey("claims.id"), nullable=True, index=True)
+    related_question_id = Column(Integer, ForeignKey("question_posts.id"), nullable=True, index=True)
     read_at = Column(DateTime, nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -314,6 +391,20 @@ class UploadObject(Base):
     size = Column(Integer, default=0, nullable=False)
     content = Column(LargeBinary, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class MapRegion(Base):
+    __tablename__ = "map_regions"
+
+    id = Column(String, primary_key=True, index=True)
+    label = Column(String, nullable=False, index=True)
+    zone = Column(String, nullable=False, index=True)
+    x = Column(Float, nullable=False)
+    y = Column(Float, nullable=False)
+    width = Column(Float, nullable=False)
+    height = Column(Float, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 def _dialect_column_sql(column_sql: str) -> str:
@@ -366,6 +457,9 @@ def _init_db_unlocked() -> None:
     _add_column_if_missing("lost_found_items", "returned_at", "DATETIME")
     _add_column_if_missing("lost_found_items", "returned_by_claim_id", "INTEGER")
     _add_column_if_missing("lost_found_items", "tag_source", "VARCHAR DEFAULT 'fallback-text'")
+    _add_column_if_missing("lost_found_items", "llava_analysis_json", "TEXT DEFAULT '{}'")
+    _add_column_if_missing("lost_found_items", "ai_analysis_status", "VARCHAR NOT NULL DEFAULT 'success'")
+    _add_column_if_missing("lost_found_items", "unverified_ai_analysis", "BOOLEAN NOT NULL DEFAULT 0")
     _add_column_if_missing("lost_found_items", "evidence_details", "TEXT DEFAULT ''")
     _add_column_if_missing("lost_found_items", "evidence_images_json", "TEXT DEFAULT '[]'")
     _add_column_if_missing("lost_found_items", "evidence_summary", "TEXT DEFAULT ''")
@@ -392,6 +486,9 @@ def _init_db_unlocked() -> None:
     _add_column_if_missing("claims", "visual_selection_json", "TEXT DEFAULT '{}'")
     _add_column_if_missing("claims", "visual_summary", "TEXT DEFAULT ''")
     _add_column_if_missing("claims", "visual_tags_json", "TEXT DEFAULT '[]'")
+    _add_column_if_missing("claim_drafts", "source", "VARCHAR DEFAULT 'manual'")
+    _add_column_if_missing("claim_drafts", "status", "VARCHAR NOT NULL DEFAULT 'draft'")
+    _add_column_if_missing("claim_drafts", "submitted_claim_id", "INTEGER")
     _add_column_if_missing("item_queries", "role", "VARCHAR NOT NULL DEFAULT 'user'")
     _add_column_if_missing("query_messages", "chat_mode", "VARCHAR NOT NULL DEFAULT 'message'")
     _add_column_if_missing("query_messages", "language", "VARCHAR NOT NULL DEFAULT 'en'")
@@ -406,6 +503,7 @@ def _init_db_unlocked() -> None:
     _add_column_if_missing("ai_inspection_logs", "model_size", "VARCHAR DEFAULT ''")
     _add_column_if_missing("ai_inspection_logs", "fallback_triggered", "BOOLEAN NOT NULL DEFAULT 0")
     _add_column_if_missing("ai_inspection_logs", "request_metadata_json", "TEXT DEFAULT '{}'")
+    _add_column_if_missing("notifications", "related_question_id", "INTEGER")
     _create_index_if_missing("ix_lost_found_items_submitted_by_user_id", "lost_found_items", "submitted_by_user_id")
     _create_index_if_missing("ix_lost_found_items_is_room_item", "lost_found_items", "is_room_item")
     _create_index_if_missing("ix_lost_found_items_room_recorded_at", "lost_found_items", "room_recorded_at")
@@ -418,6 +516,15 @@ def _init_db_unlocked() -> None:
     _create_index_if_missing("ix_lost_found_items_deleted_by_user_id", "lost_found_items", "deleted_by_user_id")
     _create_index_if_missing("ix_ai_inspection_logs_user_id", "ai_inspection_logs", "user_id")
     _create_index_if_missing("ix_ai_inspection_logs_feature", "ai_inspection_logs", "feature")
+    _create_index_if_missing("ix_claim_drafts_item_id", "claim_drafts", "item_id")
+    _create_index_if_missing("ix_claim_drafts_user_id", "claim_drafts", "user_id")
+    _create_index_if_missing("ix_claim_drafts_source", "claim_drafts", "source")
+    _create_index_if_missing("ix_claim_drafts_status", "claim_drafts", "status")
+    _create_index_if_missing("ix_claim_drafts_submitted_claim_id", "claim_drafts", "submitted_claim_id")
+    _create_index_if_missing("ix_notifications_related_question_id", "notifications", "related_question_id")
+    _create_index_if_missing("ix_map_regions_label", "map_regions", "label")
+    _create_index_if_missing("ix_map_regions_zone", "map_regions", "zone")
+    _create_index_if_missing("ix_map_regions_created_at", "map_regions", "created_at")
 
 
 def init_db() -> None:
@@ -425,10 +532,13 @@ def init_db() -> None:
         _init_db_unlocked()
         return
 
-    with engine.connect() as connection:
-        connection.execute(text("SELECT pg_advisory_lock(:lock_id)"), {"lock_id": POSTGRES_INIT_LOCK_ID})
-        try:
-            _init_db_unlocked()
-        finally:
-            connection.execute(text("SELECT pg_advisory_unlock(:lock_id)"), {"lock_id": POSTGRES_INIT_LOCK_ID})
-            connection.commit()
+    def initialize_postgres() -> None:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT pg_advisory_lock(:lock_id)"), {"lock_id": POSTGRES_INIT_LOCK_ID})
+            try:
+                _init_db_unlocked()
+            finally:
+                connection.execute(text("SELECT pg_advisory_unlock(:lock_id)"), {"lock_id": POSTGRES_INIT_LOCK_ID})
+                connection.commit()
+
+    run_with_database_retries(initialize_postgres, operation_name="PostgreSQL database initialization", logger=LOGGER)

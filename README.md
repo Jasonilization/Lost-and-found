@@ -83,7 +83,7 @@ In the examples below:
 
 - Manager Pi IP: `192.168.1.100`
 - Stack name: `mystack`
-- Docker image: `yourname/lostfound-web:latest`
+- Docker image: `yourname/lostfound:20260529102030-a1b2c3d4e5f6`
 
 Replace those values with your real values.
 
@@ -201,37 +201,42 @@ docker node update --label-add lostfound.db=true pi-manager
 
 The `docker-compose.yml` file requires this label. Without it, the `db` service will stay pending because Swarm does not know which Pi is allowed to run PostgreSQL.
 
-## Step 6: Build And Push The Web Image
+## Step 6: Build And Push The Web Image From The Mac
 
 This part is very important:
 
-Swarm does not build images automatically.
+Swarm does not build images.
 
 When you run `docker stack deploy`, Swarm tells each node to run an image. Every node must be able to pull that same image.
 
-Recommended approach:
+The deterministic pipeline is:
 
-1. Build the image for Raspberry Pi ARM64.
-2. Push it to Docker Hub or another registry.
-3. Tell the stack to use that image.
+1. The Mac builds a Pi-compatible image.
+2. The Mac tags it as `registry/lostfound:<version>`.
+3. The Mac pushes it to a registry the Pis can pull from.
+4. The Pi manager deploys that exact tag.
 
-From the project root, run:
+On the Mac, use Docker Desktop's `desktop-linux` context and set a registry namespace:
 
 ```bash
 docker login
-docker buildx build --platform linux/arm64 \
-  -t yourname/lostfound-web:latest \
-  --push .
+docker context use desktop-linux
+IMAGE_REGISTRY=yourname ./build.sh
 ```
 
-Replace `yourname` with your Docker Hub username or registry namespace.
+Use `IMAGE_REGISTRY=docker.io/yourname` for Docker Hub, or a private registry such as `IMAGE_REGISTRY=clanker:5000` if all Swarm nodes can pull from it.
 
-Why `linux/arm64` matters:
+`build.sh` writes the exact image tag to `.deploy/lostfound-image.env` and prints it. The recommended image naming scheme is:
 
-- Raspberry Pi OS 64-bit runs ARM64.
-- Many laptops build `linux/amd64` images by default.
-- An AMD64 image will not run correctly on a Raspberry Pi.
-- `docker buildx build --platform linux/arm64 --push` builds the Pi-compatible image and pushes it where the Pis can pull it.
+```text
+<registry-or-namespace>/lostfound:<YYYYMMDDHHMMSS>-<git-sha>
+```
+
+Example:
+
+```text
+yourname/lostfound:20260529102030-a1b2c3d4e5f6
+```
 
 For a private registry or private Docker Hub image, make sure every node can pull the image. You may need to log in on each Pi or deploy with `--with-registry-auth`.
 
@@ -240,7 +245,7 @@ For a private registry or private Docker Hub image, make sure every node can pul
 Run these on the manager Pi before deploying the stack:
 
 ```bash
-export APP_IMAGE='yourname/lostfound-web:latest'
+export APP_IMAGE='yourname/lostfound:20260529102030-a1b2c3d4e5f6'
 export POSTGRES_PASSWORD='change-this-to-a-long-random-database-password'
 export ADMIN_USERNAME='admin'
 export ADMIN_PASSWORD='change-this-admin-password'
@@ -261,21 +266,18 @@ Important:
 
 - Set `POSTGRES_PASSWORD` before the first deploy.
 - Do not casually change `POSTGRES_PASSWORD` after PostgreSQL has already created its database volume.
+- Use the exact `APP_IMAGE` tag emitted by `build.sh`; do not deploy `latest`.
 - This stack has `max_replicas_per_node: 1` for the web service, so `WEB_REPLICAS=2` needs at least two available nodes. `WEB_REPLICAS=5` needs at least five available nodes unless you edit that placement rule.
 
 ## Step 8: Deploy The Stack
 
-Run this on the manager Pi from the project directory:
+Run this on `clanker`, the Swarm manager, from the project directory:
 
 ```bash
-docker stack deploy -c docker-compose.yml mystack
+./deploy.sh
 ```
 
-If the image is private, use:
-
-```bash
-docker stack deploy --with-registry-auth -c docker-compose.yml mystack
-```
+`deploy.sh` validates that it is running on `clanker`, that Docker Desktop is not an active Swarm node, and that at least one Ready/Active worker exists. It then pulls `APP_IMAGE` and runs `docker stack deploy -c docker-compose.yml mystack`.
 
 This command creates:
 
@@ -559,7 +561,7 @@ Common fixes:
 - Try pulling the image directly on a worker Pi:
 
 ```bash
-docker pull yourname/lostfound-web:latest
+docker pull yourname/lostfound:20260529102030-a1b2c3d4e5f6
 ```
 
 ### Replicas not starting
@@ -637,18 +639,16 @@ docker service ps mystack_web --no-trunc
 
 ## Rolling Updates
 
-Build and push a new ARM image tag:
+Build and push a new ARM image tag from the Mac:
 
 ```bash
-docker buildx build --platform linux/arm64 \
-  -t yourname/lostfound-web:2026-05-28 \
-  --push .
+IMAGE_REGISTRY=yourname ./build.sh
 ```
 
-Update the web service:
+Deploy that exact image from `clanker`:
 
 ```bash
-docker service update --image yourname/lostfound-web:2026-05-28 mystack_web
+APP_IMAGE=yourname/lostfound:20260529102030-a1b2c3d4e5f6 ./deploy.sh
 docker service ps mystack_web
 docker service logs mystack_web
 ```
@@ -678,16 +678,32 @@ SQLite is for local development only. Do not use SQLite for a replicated Swarm d
 
 AI features are optional.
 
-In Swarm, `OLLAMA_HOST=http://localhost:11434` is usually wrong because `localhost` means the web container itself.
+In Swarm, `OLLAMA_HOST=http://localhost:11434` is wrong because `localhost` means the web container itself.
 
-Use one of these instead:
-
-```bash
-export OLLAMA_HOST=http://<OLLAMA_NODE_LAN_IP>:11434
-```
-
-or deploy an Ollama service on the overlay network and use:
+For Docker Desktop on the same Mac as Ollama:
 
 ```bash
-export OLLAMA_HOST=http://ollama:11434
+export SWARM_OLLAMA_HOST=http://host.docker.internal:11434
+./deploy.sh
 ```
+
+For Raspberry Pis calling Ollama on your Mac, first make Ollama listen on the Mac's LAN interface. Restart Ollama after setting this:
+
+```bash
+launchctl setenv OLLAMA_HOST 0.0.0.0:11434
+```
+
+Then set the Pi deployment URL to the Mac's LAN IP:
+
+```bash
+export SWARM_OLLAMA_HOST=http://<MAC_LAN_IP>:11434
+./deploy.sh
+```
+
+Verify from a Pi before deploying:
+
+```bash
+curl http://<MAC_LAN_IP>:11434/api/tags
+```
+
+If you deploy an Ollama service on the overlay network instead, use `SWARM_OLLAMA_HOST=http://ollama:11434`.

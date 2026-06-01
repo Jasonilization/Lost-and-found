@@ -25,12 +25,14 @@ $logDir = if ($env:LOG_DIR) { $env:LOG_DIR } else { ".\logs" }
 $dataDir = if ($env:DATA_DIR) { $env:DATA_DIR } else { ".\data" }
 
 if (-not $env:OLLAMA_HOST) {
-  $env:OLLAMA_HOST = if ($env:OLLAMA_URL) { $env:OLLAMA_URL } else { "http://localhost:11434" }
+  $env:OLLAMA_HOST = if ($env:OLLAMA_URL) { $env:OLLAMA_URL } else { "" }
 }
-if ($env:OLLAMA_HOST -notmatch '^https?://') {
+if ($env:OLLAMA_HOST -and $env:OLLAMA_HOST -notmatch '^https?://') {
   $env:OLLAMA_HOST = "http://$($env:OLLAMA_HOST)"
 }
-$env:OLLAMA_HOST = $env:OLLAMA_HOST.TrimEnd("/")
+if ($env:OLLAMA_HOST) {
+  $env:OLLAMA_HOST = $env:OLLAMA_HOST.TrimEnd("/")
+}
 if (-not $env:OLLAMA_MODEL) {
   $env:OLLAMA_MODEL = if ($env:OLLAMA_TEXT_MODEL) { $env:OLLAMA_TEXT_MODEL } else { "llama3:8b" }
 }

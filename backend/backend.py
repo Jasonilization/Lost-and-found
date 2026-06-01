@@ -19,6 +19,7 @@ import secrets
 import stat
 import threading
 import time
+from collections import Counter
 from difflib import SequenceMatcher
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -28,7 +29,7 @@ from uuid import uuid4
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 try:
@@ -53,9 +54,9 @@ try:
 except ImportError:  # pragma: no cover - Unix-only runtime helper
     resource = None
 
-from backend.ai_assistant import AI_MODEL, analyze_claim_match, analyze_evidence, analyze_report_abuse, model_size_label, normalize_language
+from backend.ai_assistant import AI_MODEL, analyze_claim_match, analyze_evidence, analyze_report_abuse, generate_site_helper_package, model_size_label, normalize_language
 from backend.ai_moderation import classify_user_input
-from backend.database import AIInspectionLog, AuditLog, Claim, ItemQuery, LostFoundItem, Notification, QueryMessage, ReturnedItemDispute, SessionLocal, UploadObject, User, UserSession, init_db
+from backend.database import AIInspectionLog, AuditLog, Claim, ClaimDraft, ItemQuery, LostFoundItem, MapRegion, Notification, QueryMessage, QuestionPost, QuestionReply, ReturnedItemDispute, SessionLocal, UploadObject, User, UserSession, init_db
 from backend.moderation import BLOCKED_WORDS, clean_text, validate_class_of, validate_initials, validate_text_input
 from backend.ollama_tagger import (
     build_search_text,
@@ -70,13 +71,39 @@ from backend.ollama_tagger import (
 if register_heif_opener is not None:
     register_heif_opener()
 
+
+def env_flag(name: str, default: bool = False) -> bool:
+    value = os.getenv(name, "").strip().lower()
+    if not value:
+        return default
+    return value in {"1", "true", "yes", "on"}
+
+
+def env_csv(name: str, default: list[str]) -> list[str]:
+    raw_value = os.getenv(name, "").strip()
+    if not raw_value:
+        return default
+    values = [value.strip() for value in raw_value.split(",") if value.strip()]
+    return values or default
+
+
+def env_int(name: str, default: int, *, minimum: int = 0) -> int:
+    try:
+        return max(minimum, int(os.getenv(name, str(default))))
+    except ValueError:
+        return max(minimum, default)
+
+
 app = FastAPI(title="School Lost and Found", debug=False)
+
+CORS_ALLOWED_ORIGINS = env_csv("CORS_ALLOWED_ORIGINS", ["*"])
+CORS_ALLOWED_METHODS = env_csv("CORS_ALLOWED_METHODS", ["GET", "POST", "PATCH", "DELETE", "OPTIONS"])
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
+    allow_origins=CORS_ALLOWED_ORIGINS,
+    allow_credentials=env_flag("CORS_ALLOW_CREDENTIALS", False),
+    allow_methods=CORS_ALLOWED_METHODS,
     allow_headers=["*"],
 )
 
@@ -88,10 +115,20 @@ UPLOAD_STORAGE_BACKEND = os.getenv(
 if UPLOAD_STORAGE_BACKEND not in {"database", "filesystem"}:
     UPLOAD_STORAGE_BACKEND = "database" if os.getenv("DATABASE_URL") else "filesystem"
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", BASE_DIR / "uploads")).expanduser().resolve()
+LOGIN_BACKGROUND_PATH = (UPLOAD_DIR / "background.png").resolve()
+MAP_IMAGE_URL = "/uploads/map.png"
+MAP_IMAGE_SOURCE_WIDTH = 4484
+MAP_IMAGE_SOURCE_HEIGHT = 3036
+LOADING_VIDEO_URL = "/uploads/loading.mp4"
+MAP_IMAGE_PATH = (UPLOAD_DIR / "map.png").resolve()
 UPLOAD_CACHE_DIR = Path(os.getenv("UPLOAD_CACHE_DIR", "/tmp/lostfound-uploads")).expanduser().resolve()
 FRONTEND_DIR = BASE_DIR / "frontend"
 LOG_DIR = Path(os.getenv("LOG_DIR", BASE_DIR / "data")).expanduser().resolve()
-LOG_TO_STDOUT = os.getenv("LOG_TO_STDOUT", "").strip().lower() in {"1", "true", "yes", "on"}
+LOG_TO_STDOUT = env_flag("LOG_TO_STDOUT", False)
+FRONTEND_API_BASE_URL = os.getenv("PUBLIC_API_BASE_URL", os.getenv("API_BASE_URL", "")).strip()
+FRONTEND_API_DEBUG = env_flag("API_DEBUG_LOGGING", True)
+REQUEST_DEBUG_LOGGING = env_flag("REQUEST_DEBUG_LOGGING", True)
+REQUEST_DEBUG_PAYLOAD_MAX_CHARS = env_int("REQUEST_DEBUG_PAYLOAD_MAX_CHARS", 4000, minimum=0)
 
 if UPLOAD_STORAGE_BACKEND == "database":
     UPLOAD_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -145,6 +182,7 @@ llava_trace_logger = logging.getLogger("ollama_tagger")
 admin_logger = logging.getLogger("admin_actions")
 block_logger = logging.getLogger("blocked_actions")
 security_logger = logging.getLogger("security")
+request_debug_logger = logging.getLogger("request_debug")
 if not report_logger.handlers:
     report_handler = build_log_handler(REPORT_LOG_PATH)
     report_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
@@ -175,20 +213,546 @@ if not security_logger.handlers:
     security_logger.addHandler(security_handler)
 security_logger.setLevel(logging.INFO)
 security_logger.propagate = False
+if not request_debug_logger.handlers:
+    request_debug_handler = build_log_handler(REPORT_LOG_PATH)
+    request_debug_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    request_debug_logger.addHandler(request_debug_handler)
+request_debug_logger.setLevel(logging.INFO)
+request_debug_logger.propagate = False
 
-SCHOOL_LOCATIONS = [
+SCHOOL_SUB_LOCATION_LABELS: list[str] = []
+SPORTS_BUILDING_SUB_LOCATION_LABELS = [
     "New Sports Hall",
     "Sports Hall",
-    "Long Court",
-    "Library",
-    "Morris Forum",
-    "Senior Building",
-    "Primary Building",
-    "Innovation Building",
-    "Swimming pool",
-    "Robotics room",
-    "Lost & Found Room",
 ]
+SPORTS_COMPLEX_SUB_LOCATION_LABELS = [
+    "Changing Rooms",
+    "Strength & Conditioning Room",
+]
+ACADEMIC_FLOOR_COUNTS_BY_LOCATION_ID = {
+    "innovation-building": 5,
+    "senior-school": 4,
+    "prep-school": 4,
+    "pre-prep-school": 4,
+}
+INVALID_LOCATION_CODE_MESSAGE = "Invalid location code for selected zone"
+SCHOOL_LOCATION_CODE_RULES = [
+    {"prefix": "A", "location_id": "innovation-building", "name": "Innovation Building", "min_floor": 1, "max_floor": 5},
+    {"prefix": "S", "location_id": "senior-school", "name": "Senior School", "min_floor": 1, "max_floor": 4},
+    {"prefix": "P", "location_id": "pre-prep-school", "name": "Pre-Prep School", "min_floor": 1, "max_floor": 2},
+    {"prefix": "P", "location_id": "prep-school", "name": "Prep School", "min_floor": 3, "max_floor": 4},
+]
+SCHOOL_LOCATION_ALIASES = {
+    "Innovation Building": ["Innovation"],
+    "Senior School": ["Senior Building", "Senior"],
+    "Prep School": ["Prep", "Junior School", "Junior Area", "Junior"],
+    "Pre-Prep School": ["Pre Prep School", "Pre-Prep", "Pre Prep"],
+    "Sports Building": ["PE Building"],
+    "Sports Fields & Running Track": ["Sports Fields", "Running Track", "Sports Field", "Track", "Long Court"],
+    "Strength & Conditioning Room": ["Strength and Conditioning Room", "Strength and Conditioning", "S&C Room", "Weights Room"],
+    "New Sports Hall": ["New Hall"],
+    "Sports Hall": ["Old Sports Hall"],
+    "Changing Rooms": ["PE Changing Rooms", "PE Changing Room"],
+}
+
+
+def school_sub_locations(labels: list[str] | None = None) -> list[dict[str, str]]:
+    source_labels = SCHOOL_SUB_LOCATION_LABELS if labels is None else labels
+    return [
+        {"id": re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-"), "label": label}
+        for label in source_labels
+    ]
+
+
+def academic_floor_definitions(location_id: str) -> list[dict[str, Any]]:
+    floors = []
+    for floor_number in range(1, ACADEMIC_FLOOR_COUNTS_BY_LOCATION_ID.get(location_id, 0) + 1):
+        label = f"Floor {floor_number}"
+        floors.append({
+            "id": f"floor-{floor_number}",
+            "label": label,
+            "sub_locations": [],
+        })
+    return floors
+
+
+def map_text_region_from_pixels(x: int, y: int, width: int, height: int) -> dict[str, float]:
+    return {
+        "x": x / MAP_IMAGE_SOURCE_WIDTH,
+        "y": y / MAP_IMAGE_SOURCE_HEIGHT,
+        "width": width / MAP_IMAGE_SOURCE_WIDTH,
+        "height": height / MAP_IMAGE_SOURCE_HEIGHT,
+    }
+
+
+SCHOOL_LOCATION_DATA = [
+    {
+        "id": "innovation-building",
+        "name": "Innovation Building",
+        "x": 25,
+        "y": 42,
+        "metadata": {"area_type": "Academic building", "navigation": "floors"},
+        "sub_locations": [],
+        "floors": academic_floor_definitions("innovation-building"),
+        "interaction_regions": [
+            {
+                "id": "innovation-building-region",
+                "label": "Innovation Building",
+                "x": 0.069,
+                "y": 0.257,
+                "width": 0.219,
+                "height": 0.043,
+                "shape": "box",
+                "points": [],
+                "type": "zone",
+            },
+        ],
+    },
+    {
+        "id": "senior-school",
+        "name": "Senior School",
+        "x": 49,
+        "y": 32,
+        "metadata": {"area_type": "Academic building", "navigation": "floors"},
+        "sub_locations": [],
+        "floors": academic_floor_definitions("senior-school"),
+        "interaction_regions": [
+            {
+                "id": "senior-school-region",
+                "label": "Senior School",
+                "x": 0.353,
+                "y": 0.162,
+                "width": 0.164,
+                "height": 0.043,
+                "shape": "box",
+                "points": [],
+                "type": "zone",
+            },
+        ],
+    },
+    {
+        "id": "prep-school",
+        "name": "Prep School",
+        "label": "Prep School",
+        "x": 63,
+        "y": 32,
+        "metadata": {"area_type": "Academic building", "navigation": "floors"},
+        "sub_locations": [],
+        "floors": academic_floor_definitions("prep-school"),
+        "interaction_regions": [
+            {
+                "id": "prep-school-region",
+                "label": "Prep School",
+                **map_text_region_from_pixels(2391, 500, 564, 101),
+                "shape": "box",
+                "points": [],
+                "type": "zone",
+            },
+        ],
+    },
+    {
+        "id": "pre-prep-school",
+        "name": "Pre-Prep School",
+        "label": "Pre-Prep School",
+        "x": 62,
+        "y": 57,
+        "metadata": {"area_type": "Academic building", "navigation": "floors"},
+        "sub_locations": [],
+        "floors": academic_floor_definitions("pre-prep-school"),
+        "interaction_regions": [
+            {
+                "id": "pre-prep-school-region",
+                "label": "Pre-Prep School",
+                "x": 0.565,
+                "y": 0.515,
+                "width": 0.170,
+                "height": 0.045,
+                "shape": "box",
+                "points": [],
+                "type": "zone",
+            },
+        ],
+    },
+    {
+        "id": "sports-building",
+        "name": "Sports Building",
+        "label": "Sports Building",
+        "x": 50,
+        "y": 57,
+        "metadata": {"area_type": "Sports building", "navigation": "areas"},
+        "sub_locations": school_sub_locations(SPORTS_BUILDING_SUB_LOCATION_LABELS),
+        "floors": [],
+        "interaction_regions": [
+            {
+                "id": "sports-building-region",
+                "label": "Sports Building",
+                **map_text_region_from_pixels(1637, 1533, 542, 100),
+                "shape": "box",
+                "points": [],
+                "type": "zone",
+            },
+        ],
+    },
+    {
+        "id": "sports-complex",
+        "name": "Sports Complex",
+        "x": 34,
+        "y": 48,
+        "metadata": {"area_type": "Sports complex", "navigation": "areas"},
+        "sub_locations": school_sub_locations(SPORTS_COMPLEX_SUB_LOCATION_LABELS),
+        "floors": [],
+        "interaction_regions": [
+            {
+                "id": "sports-complex-region",
+                "label": "Sports Complex",
+                **map_text_region_from_pixels(864, 1336, 752, 88),
+                "shape": "box",
+                "points": [],
+                "type": "zone",
+            },
+        ],
+    },
+    {
+        "id": "sports-fields-running-track",
+        "name": "Sports Fields & Running Track",
+        "label": "Sports Fields & Running Track",
+        "x": 31,
+        "y": 9,
+        "metadata": {"area_type": "Sports field", "navigation": "standalone"},
+        "sub_locations": [],
+        "floors": [],
+        "interaction_regions": [
+            {
+                "id": "sports-fields-running-track-region",
+                "label": "Sports Fields & Running Track",
+                "x": 0.164,
+                "y": 0.070,
+                "width": 0.262,
+                "height": 0.043,
+                "shape": "box",
+                "points": [],
+                "type": "zone",
+            },
+        ],
+    },
+    {
+        "id": "morris-forum",
+        "name": "Morris Forum",
+        "label": "Morris Forum",
+        "x": 60,
+        "y": 44,
+        "metadata": {"area_type": "Forum", "navigation": "standalone"},
+        "sub_locations": [],
+        "floors": [],
+        "interaction_regions": [
+            {
+                "id": "morris-forum-region",
+                "label": "Morris Forum",
+                "x": 0.530,
+                "y": 0.352,
+                "width": 0.145,
+                "height": 0.043,
+                "shape": "box",
+                "points": [],
+                "type": "zone",
+            },
+        ],
+    },
+]
+
+FIXED_SCHOOL_ZONES = [location["name"] for location in SCHOOL_LOCATION_DATA]
+
+SCHOOL_LOCATIONS = FIXED_SCHOOL_ZONES.copy()
+
+
+def school_location_path_parts(value: str) -> list[str]:
+    return [
+        part.strip()
+        for part in str(value or "").split(">")
+        if part.strip()
+    ]
+
+
+def normalize_location_text(value: str | None) -> str:
+    return re.sub(
+        r"\s+",
+        " ",
+        re.sub(r"[^a-z0-9]+", " ", str(value or "").lower().replace("&", " and ")),
+    ).strip()
+
+
+def location_aliases(label: str) -> list[str]:
+    values = [label, *SCHOOL_LOCATION_ALIASES.get(label, [])]
+    return list(dict.fromkeys(normalize_location_text(value) for value in values if normalize_location_text(value)))
+
+
+def school_location_alias_entries() -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for location in SCHOOL_LOCATION_DATA:
+        labels = [
+            str(location.get("name") or ""),
+            str(location.get("label") or ""),
+        ]
+        for label in labels:
+            for alias in location_aliases(label):
+                entries.append({"location": location, "alias": alias})
+    return [entry for entry in entries if entry["alias"]]
+
+
+def school_location_by_id(location_id: str) -> dict[str, Any] | None:
+    return next((location for location in SCHOOL_LOCATION_DATA if location.get("id") == location_id), None)
+
+
+def school_location_by_label(value: str) -> dict[str, Any] | None:
+    normalized = normalize_location_text(value)
+    if not normalized:
+        return None
+    return next(
+        (entry["location"] for entry in school_location_alias_entries() if entry["alias"] == normalized),
+        None,
+    )
+
+
+def location_context_id_from_values(*values: str) -> str:
+    source = normalize_location_text(" ".join(str(value or "") for value in values))
+    if not source:
+        return ""
+    entries = sorted(school_location_alias_entries(), key=lambda entry: len(entry["alias"]), reverse=True)
+    match = next((entry for entry in entries if source == entry["alias"] or entry["alias"] in source), None)
+    return str(match["location"].get("id") or "") if match else ""
+
+
+def floor_number_from_label(value: str) -> int:
+    label = str(value or "").strip()
+    match = re.search(r"\b(?:floor|level)\s*([1-9])\b", label, flags=re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    match = re.fullmatch(r"floor-([1-9])", label, flags=re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    return 0
+
+
+def floor_label_for_number(floor_number: int) -> str:
+    return f"Floor {floor_number}"
+
+
+def location_has_floor(location: dict[str, Any], floor_number: int) -> bool:
+    max_floor = ACADEMIC_FLOOR_COUNTS_BY_LOCATION_ID.get(str(location.get("id") or ""), 0)
+    return bool(max_floor and 1 <= floor_number <= max_floor)
+
+
+def direct_sub_locations_for_location(location: dict[str, Any]) -> list[dict[str, Any]]:
+    sub_locations = location.get("sub_locations") if isinstance(location.get("sub_locations"), list) else []
+    return [sub_location for sub_location in sub_locations if isinstance(sub_location, dict)]
+
+
+def sub_location_matches_label(sub_location: dict[str, Any], value: str) -> bool:
+    normalized = normalize_location_text(value)
+    labels = [
+        str(sub_location.get("label") or ""),
+        str(sub_location.get("id") or ""),
+    ]
+    aliases = [
+        alias
+        for label in labels
+        for alias in location_aliases(label)
+    ]
+    return bool(normalized and normalized in aliases)
+
+
+def direct_sub_location_matches(value: str) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    matches: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for location in SCHOOL_LOCATION_DATA:
+        for sub_location in direct_sub_locations_for_location(location):
+            if sub_location_matches_label(sub_location, value):
+                matches.append((location, sub_location))
+    return matches
+
+
+def school_location_code_candidates(value: str) -> list[str]:
+    source = str(value or "").strip()
+    if not source:
+        return []
+    candidates: list[str] = []
+    for part in school_location_path_parts(source) or [source]:
+        normalized = re.sub(r"\s+", "", part.upper())
+        if re.fullmatch(r"[ASP]\d+", normalized):
+            candidates.append(normalized)
+    for match in re.finditer(r"\b([ASP])\s*(\d+)\b", source, flags=re.IGNORECASE):
+        candidates.append(f"{match.group(1).upper()}{match.group(2)}")
+    return list(dict.fromkeys(candidates))
+
+
+def parse_school_location_code(code: str, context_location_id: str = "") -> dict[str, Any] | None:
+    normalized_code = str(code or "").strip().upper()
+    match = re.fullmatch(r"([ASP])([1-5]\d{2})", normalized_code)
+    if not match:
+        return None
+    prefix, room_number = match.groups()
+    floor_number = int(room_number[0])
+    rules = [
+        rule
+        for rule in SCHOOL_LOCATION_CODE_RULES
+        if rule["prefix"] == prefix
+        and int(rule["min_floor"]) <= floor_number <= int(rule["max_floor"])
+    ]
+    if context_location_id:
+        rules = [rule for rule in rules if rule["location_id"] == context_location_id]
+    if not rules:
+        return None
+    rule = rules[0]
+    return {
+        "code": normalized_code,
+        "prefix": prefix,
+        "room_number": room_number,
+        "floor_number": floor_number,
+        "location_id": rule["location_id"],
+        "name": rule["name"],
+    }
+
+
+def valid_school_location_code(code: str) -> bool:
+    return parse_school_location_code(code) is not None
+
+
+def validate_school_location_codes(*values: str) -> None:
+    context_location_id = location_context_id_from_values(*values)
+    for value in values:
+        for code in school_location_code_candidates(value):
+            if parse_school_location_code(code, context_location_id):
+                continue
+            raise HTTPException(
+                status_code=400,
+                detail=INVALID_LOCATION_CODE_MESSAGE,
+            )
+
+
+def canonical_known_location(location_value: str, secondary_value: str = "") -> tuple[str, str] | None:
+    raw_location = str(location_value or "").strip()
+    raw_secondary = str(secondary_value or "").strip()
+    if not raw_location:
+        return None
+
+    candidates = [
+        f"{raw_secondary} > {raw_location}" if raw_secondary else "",
+        raw_location,
+    ]
+    for candidate in [value for value in candidates if value]:
+        parts = school_location_path_parts(candidate)
+        if not parts:
+            continue
+        location = school_location_by_label(parts[0])
+        if not location:
+            continue
+        location_name = str(location.get("name") or "").strip()
+        if len(parts) == 1:
+            return location_name, location_name
+
+        floor_number = floor_number_from_label(parts[1])
+        if floor_number and location_has_floor(location, floor_number):
+            floor_label = floor_label_for_number(floor_number)
+            if len(parts) == 2:
+                return floor_label, location_name
+            continue
+
+        sub_location = next(
+            (
+                sub_location
+                for sub_location in direct_sub_locations_for_location(location)
+                if sub_location_matches_label(sub_location, parts[1])
+            ),
+            None,
+        )
+        if sub_location and len(parts) == 2:
+            return str(sub_location.get("label") or "").strip(), location_name
+
+    parent_location = school_location_by_label(raw_secondary)
+    if parent_location:
+        parent_name = str(parent_location.get("name") or "").strip()
+        floor_number = floor_number_from_label(raw_location)
+        if floor_number and location_has_floor(parent_location, floor_number):
+            return floor_label_for_number(floor_number), parent_name
+        sub_location = next(
+            (
+                sub_location
+                for sub_location in direct_sub_locations_for_location(parent_location)
+                if sub_location_matches_label(sub_location, raw_location)
+            ),
+            None,
+        )
+        if sub_location:
+            return str(sub_location.get("label") or "").strip(), parent_name
+
+    sub_location_matches = direct_sub_location_matches(raw_location)
+    if len(sub_location_matches) == 1:
+        parent, sub_location = sub_location_matches[0]
+        return str(sub_location.get("label") or "").strip(), str(parent.get("name") or "").strip()
+
+    return None
+
+
+def canonical_report_location(location_value: str, secondary_value: str = "") -> tuple[str, str]:
+    raw_location = str(location_value or "").strip()
+    raw_secondary = str(secondary_value or "").strip()
+    if not raw_location or normalize_location_text(raw_location) in {"unknown", "optional text"}:
+        raise HTTPException(status_code=400, detail=INVALID_LOCATION_CODE_MESSAGE)
+
+    context_location_id = location_context_id_from_values(raw_location, raw_secondary)
+    code_candidates = [
+        *school_location_code_candidates(raw_location),
+        *school_location_code_candidates(raw_secondary),
+    ]
+    code_candidates = list(dict.fromkeys(code_candidates))
+    if code_candidates:
+        parsed_codes: list[dict[str, Any]] = []
+        for code in code_candidates:
+            parsed = parse_school_location_code(code, context_location_id)
+            if not parsed:
+                raise HTTPException(status_code=400, detail=INVALID_LOCATION_CODE_MESSAGE)
+            parsed_codes.append(parsed)
+        primary_code = school_location_code_candidates(raw_location)
+        primary = next(
+            (parsed for parsed in parsed_codes if parsed["code"] in primary_code),
+            parsed_codes[0],
+        )
+        return primary["code"], f"{primary['name']} > {floor_label_for_number(primary['floor_number'])}"
+
+    known_location = canonical_known_location(raw_location, raw_secondary)
+    if known_location:
+        return known_location
+
+    raise HTTPException(status_code=400, detail=INVALID_LOCATION_CODE_MESSAGE)
+
+
+def school_location_filter_values() -> list[str]:
+    values: list[str] = []
+    for location in SCHOOL_LOCATION_DATA:
+        name = str(location.get("name") or "").strip()
+        if not name:
+            continue
+        values.append(name)
+        metadata = location.get("metadata") if isinstance(location.get("metadata"), dict) else {}
+        area_type = str(metadata.get("area_type") or metadata.get("areaType") or "").lower()
+        if "sport" in area_type:
+            sub_locations = location.get("sub_locations") if isinstance(location.get("sub_locations"), list) else []
+            values.extend(
+                f"{name} > {sub_location['label']}"
+                for sub_location in sub_locations
+                if isinstance(sub_location, dict) and str(sub_location.get("label") or "").strip()
+            )
+            continue
+        floors = location.get("floors")
+        if not isinstance(floors, list):
+            continue
+        for floor in floors:
+            if not isinstance(floor, dict):
+                continue
+            floor_label = str(floor.get("label") or "").strip()
+            if not floor_label or re.fullmatch(r"undefined|null|\?", floor_label, flags=re.IGNORECASE):
+                continue
+            values.append(f"{name} > {floor_label}")
+    return list(dict.fromkeys(values))
 
 CATEGORIES = [
     "Electronics",
@@ -241,6 +805,8 @@ RATE_LIMITS = {
     "claim": {"limit": 3, "window": timedelta(minutes=1)},
 }
 CLAIM_MATCH_MIN_SCORE = 35
+QUESTION_TYPES = {"seen_item", "has_this_been_found", "lost_not_listed"}
+QUESTION_REPLY_TYPES = {"reply", "suggestion", "confirmation"}
 GENERAL_UPLOAD_TYPES = {
     ".png": {"mime_types": {"image/png"}, "kind": "png"},
     ".jpg": {"mime_types": {"image/jpeg"}, "kind": "jpeg"},
@@ -250,14 +816,17 @@ GENERAL_UPLOAD_TYPES = {
 }
 REPORT_IMAGE_UPLOAD_TYPES = {
     ".png": {"mime_types": {"image/png"}, "kind": "png"},
-    ".jpg": {"mime_types": {"image/jpeg"}, "kind": "jpeg"},
-    ".jpeg": {"mime_types": {"image/jpeg"}, "kind": "jpeg"},
+    ".jpg": {"mime_types": {"image/jpeg", "image/jpg"}, "kind": "jpeg"},
+    ".jpeg": {"mime_types": {"image/jpeg", "image/jpg"}, "kind": "jpeg"},
     ".webp": {"mime_types": {"image/webp"}, "kind": "webp"},
     ".heic": {"mime_types": {"image/heic", "image/heif", "application/octet-stream"}, "kind": "heic"},
     ".heif": {"mime_types": {"image/heif", "image/heic", "application/octet-stream"}, "kind": "heif"},
 }
 ALLOWED_UPLOAD_TYPES = GENERAL_UPLOAD_TYPES
 IMAGE_UPLOAD_EXTENSIONS = set(REPORT_IMAGE_UPLOAD_TYPES)
+AI_ANALYSIS_SUCCESS = "success"
+AI_ANALYSIS_FALLBACK = "fallback"
+AI_ANALYSIS_FAILED = "failed"
 REQUEST_TIMESTAMPS: dict[str, list[datetime]] = {}
 REQUEST_TIMESTAMPS_LOCK = threading.Lock()
 APP_STARTED_AT = time.monotonic()
@@ -296,6 +865,38 @@ class ClaimPayload(BaseModel):
 class QueryPayload(BaseModel):
     message: str
     language: str = "en"
+    question_type: str = "lost_not_listed"
+    location_hint: str = ""
+
+
+class QuestionReplyPayload(BaseModel):
+    message: str
+    reply_type: str = "reply"
+    suggested_item_id: Optional[int] = None
+
+
+class ClaimDraftPayload(BaseModel):
+    item_id: Optional[int] = None
+    title: str = ""
+    claim_reason: str = ""
+    item_description: str
+    lost_location: str = ""
+    identifying_info: str = ""
+    visual_selection: Optional[dict[str, Any]] = None
+    visual_summary: str = ""
+    visual_tags: list[str] = []
+    source: str = "manual"
+
+
+class ClaimDraftSubmitPayload(BaseModel):
+    item_id: Optional[int] = None
+
+
+class AssistantChatPayload(BaseModel):
+    message: str
+    language: str = "en"
+    execute_search: bool = False
+    query: str = ""
 
 
 class ReportImagePayload(BaseModel):
@@ -366,6 +967,15 @@ class ReturnedItemDisputePayload(BaseModel):
     reason: str
 
 
+class MapRegionPayload(BaseModel):
+    label: str
+    zone: str
+    x: float
+    y: float
+    width: float
+    height: float
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
@@ -381,12 +991,47 @@ def get_db():
         db.close()
 
 
+@app.get("/config.js", include_in_schema=False)
+def frontend_runtime_config() -> Response:
+    payload = {
+        "apiBaseUrl": FRONTEND_API_BASE_URL,
+        "apiDebug": FRONTEND_API_DEBUG,
+    }
+    return Response(
+        content=f"window.LOSTFOUND_CONFIG = Object.freeze({json.dumps(payload, separators=(',', ':'))});\n",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 if UPLOAD_STORAGE_BACKEND == "filesystem":
     app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 
+@app.get("/uploads/background.png")
+def serve_login_background() -> FileResponse:
+    if not LOGIN_BACKGROUND_PATH.is_file():
+        raise HTTPException(status_code=404, detail="Upload not found.")
+    return FileResponse(
+        LOGIN_BACKGROUND_PATH,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@app.get(MAP_IMAGE_URL)
+def serve_school_map() -> FileResponse:
+    if not MAP_IMAGE_PATH.is_file():
+        raise HTTPException(status_code=404, detail="Map image not found.")
+    return FileResponse(
+        MAP_IMAGE_PATH,
+        media_type="image/png",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
 @app.get("/uploads/{upload_path:path}")
-def serve_database_upload(upload_path: str, db: Session = Depends(get_db)) -> Response:
+def serve_database_upload(upload_path: str, db: Session = Depends(get_db)):
     if UPLOAD_STORAGE_BACKEND != "database":
         raise HTTPException(status_code=404, detail="Upload not found.")
 
@@ -396,13 +1041,26 @@ def serve_database_upload(upload_path: str, db: Session = Depends(get_db)) -> Re
 
     upload_object = db.query(UploadObject).filter(UploadObject.path == normalized_path).first()
     if not upload_object:
+        if normalized_path == "/uploads/background.png" and LOGIN_BACKGROUND_PATH.is_file():
+            return FileResponse(
+                LOGIN_BACKGROUND_PATH,
+                media_type="image/png",
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
+        if normalized_path == MAP_IMAGE_URL and MAP_IMAGE_PATH.is_file():
+            return FileResponse(
+                MAP_IMAGE_PATH,
+                media_type="image/png",
+                headers={"Cache-Control": "no-store, max-age=0"},
+            )
         raise HTTPException(status_code=404, detail="Upload not found.")
 
+    cache_control = "no-store, max-age=0" if normalized_path == MAP_IMAGE_URL else "public, max-age=86400"
     return Response(
         content=bytes(upload_object.content),
         media_type=upload_object.content_type or "application/octet-stream",
         headers={
-            "Cache-Control": "public, max-age=86400",
+            "Cache-Control": cache_control,
             "Content-Length": str(upload_object.size or len(upload_object.content)),
         },
     )
@@ -550,6 +1208,9 @@ def snapshot_item(item: LostFoundItem) -> dict[str, Any]:
         "status": item.status,
         "claimed": bool(item.claimed),
         "is_room_item": bool(item.is_room_item),
+        "llava_analysis": item.llava_analysis,
+        "ai_analysis_status": item.ai_analysis_status or AI_ANALYSIS_SUCCESS,
+        "unverified_ai_analysis": bool(item.unverified_ai_analysis),
         "room_label": item.room_label,
         "room_recorded_at": item.room_recorded_at.isoformat() if item.room_recorded_at else None,
         "returned_at": item.returned_at.isoformat() if item.returned_at else None,
@@ -585,6 +1246,27 @@ def snapshot_claim(claim: Claim) -> dict[str, Any]:
         "status": claim.status,
         "created_at": claim.created_at.isoformat() if claim.created_at else None,
         "updated_at": claim.updated_at.isoformat() if claim.updated_at else None,
+    }
+
+
+def snapshot_claim_draft(draft: ClaimDraft) -> dict[str, Any]:
+    return {
+        "id": draft.id,
+        "item_id": draft.item_id,
+        "user_id": draft.user_id,
+        "title": draft.title,
+        "claim_reason": draft.claim_reason,
+        "item_description": draft.item_description,
+        "lost_location": draft.lost_location,
+        "identifying_info": draft.identifying_info,
+        "visual_selection": parse_json_object(draft.visual_selection_json, default={}),
+        "visual_summary": draft.visual_summary or "",
+        "visual_tags": parse_json_list(draft.visual_tags_json),
+        "source": draft.source,
+        "status": draft.status,
+        "submitted_claim_id": draft.submitted_claim_id,
+        "created_at": draft.created_at.isoformat() if draft.created_at else None,
+        "updated_at": draft.updated_at.isoformat() if draft.updated_at else None,
     }
 
 
@@ -633,6 +1315,7 @@ def create_notification(
     message: str,
     related_item_id: Optional[int] = None,
     related_claim_id: Optional[int] = None,
+    related_question_id: Optional[int] = None,
 ) -> Notification:
     notification = Notification(
         user_id=user_id,
@@ -641,6 +1324,7 @@ def create_notification(
         message=message,
         related_item_id=related_item_id,
         related_claim_id=related_claim_id,
+        related_question_id=related_question_id,
     )
     db.add(notification)
     return notification
@@ -699,6 +1383,7 @@ def serialize_notification(notification: Notification) -> dict[str, Any]:
         "message": notification.message,
         "related_item_id": notification.related_item_id,
         "related_claim_id": notification.related_claim_id,
+        "related_question_id": notification.related_question_id,
         "read": bool(notification.read_at),
         "read_at": notification.read_at.isoformat() if notification.read_at else None,
         "created_at": notification.created_at.isoformat() if notification.created_at else None,
@@ -943,6 +1628,14 @@ def normalize_report_image_bytes(
     return sanitized_filename, sanitized_bytes, sanitized_mime_type
 
 
+def to_int_or_none(value: object) -> Optional[int]:
+    try:
+        parsed = int(str(value or "").strip())
+        return parsed if parsed > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 async def save_upload_file(
     upload: UploadFile | StarletteUploadFile,
     *,
@@ -1170,13 +1863,38 @@ async def parse_query_submission(request: Request) -> tuple[QueryPayload, Option
         form = await request.form()
         message = str(form.get("message") or "")
         language = str(form.get("language") or "en")
+        question_type = str(form.get("question_type") or "lost_not_listed")
+        location_hint = str(form.get("location_hint") or "")
         uploaded_file = form.get("file")
         attachment = None
         if hasattr(uploaded_file, "filename") and hasattr(uploaded_file, "read") and uploaded_file.filename:
             attachment = await save_upload_file(uploaded_file)
-        return QueryPayload(message=message, language=language), attachment
+        return QueryPayload(
+            message=message,
+            language=language,
+            question_type=question_type,
+            location_hint=location_hint,
+        ), attachment
 
     payload = QueryPayload(**(await request.json()))
+    return payload, None
+
+
+async def parse_question_reply_submission(request: Request) -> tuple[QuestionReplyPayload, Optional[dict]]:
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        uploaded_file = form.get("file")
+        attachment = None
+        if hasattr(uploaded_file, "filename") and hasattr(uploaded_file, "read") and uploaded_file.filename:
+            attachment = await save_upload_file(uploaded_file)
+        return QuestionReplyPayload(
+            message=str(form.get("message") or ""),
+            reply_type=str(form.get("reply_type") or "reply"),
+            suggested_item_id=to_int_or_none(form.get("suggested_item_id")),
+        ), attachment
+
+    payload = QuestionReplyPayload(**(await request.json()))
     return payload, None
 
 
@@ -2008,6 +2726,99 @@ def enforce_lenient_query_moderation(
     return decision
 
 
+def normalize_question_type(value: str) -> str:
+    normalized = str(value or "").strip().lower().replace("-", "_")
+    return normalized if normalized in QUESTION_TYPES else "lost_not_listed"
+
+
+def normalize_question_reply_type(value: str) -> str:
+    normalized = str(value or "").strip().lower().replace("-", "_")
+    return normalized if normalized in QUESTION_REPLY_TYPES else "reply"
+
+
+def enforce_structured_question_intent(message: str, *, item_scoped: bool = False) -> None:
+    lowered = clean_text(message).lower()
+    if re.search(r"\b(?:hello|hi|joke|weather|homework|assignment|movie|song|game|chat|how\s+are\s+you)\b", lowered):
+        raise HTTPException(
+            status_code=400,
+            detail="Question Board accepts lost-item lookup questions only.",
+        )
+    allowed_patterns = (
+        r"\bdid\s+anyone\s+(?:see|find|pick\s+up|notice)\b",
+        r"\bhas\s+(?:this|it|my|anyone)\b.*\bfound\b",
+        r"\b(?:i\s+)?lost\b",
+        r"\b(?:missing|misplaced|looking\s+for|not\s+listed)\b",
+        r"\b(?:found|reported)\b.*\b(?:item|phone|bottle|bag|wallet|keys?|laptop|card|uniform|book)\b",
+    )
+    item_scoped_patterns = (
+        r"\b(?:this|item|report|still|available|found|where|location)\b",
+    )
+    if any(re.search(pattern, lowered) for pattern in allowed_patterns):
+        return
+    if item_scoped and any(re.search(pattern, lowered) for pattern in item_scoped_patterns):
+        return
+    tokens = re.findall(r"[a-z0-9]+", lowered)
+    if 1 <= len(tokens) <= 12:
+        return
+    raise HTTPException(
+        status_code=400,
+        detail="Question Board accepts lost-item lookup questions only.",
+    )
+
+
+def structured_query_matches(db: Session, query_text: str, *, limit: int = 8) -> list[dict[str, Any]]:
+    candidates = (
+        db.query(LostFoundItem)
+        .filter(LostFoundItem.deleted_at.is_(None), LostFoundItem.returned_at.is_(None))
+        .order_by(LostFoundItem.created_at.desc())
+        .all()
+    )
+    scored_items = [
+        (item, score_item_for_query(item, query_text))
+        for item in candidates
+    ]
+    return [
+        assistant_match_payload(item, score)
+        for item, score in sorted(
+            scored_items,
+            key=lambda value: (value[1], value[0].created_at or datetime.min),
+            reverse=True,
+        )[:limit]
+        if score > 0
+    ]
+
+
+def matching_public_questions(db: Session, query_text: str, *, exclude_question_id: Optional[int] = None, limit: int = 6) -> list[dict[str, Any]]:
+    normalized = clean_text(query_text).lower()
+    tokens = set(re.findall(r"[a-z0-9]+", normalized))
+    if not tokens:
+        return []
+    questions = db.query(QuestionPost).order_by(QuestionPost.created_at.desc()).limit(80).all()
+    scored: list[tuple[QuestionPost, int]] = []
+    for question in questions:
+        if exclude_question_id and question.id == exclude_question_id:
+            continue
+        source = " ".join([question.question_text or "", question.location_hint or ""]).lower()
+        source_tokens = set(re.findall(r"[a-z0-9]+", source))
+        score = len(tokens & source_tokens) * 12
+        if normalized and normalized in source:
+            score += 30
+        if score > 0:
+            scored.append((question, score))
+    authors = get_user_map(db, [question.user_id for question, _score in scored])
+    return [
+        {
+            **serialize_question_post(db, question, authors.get(question.user_id), include_replies=False),
+            "score": score,
+        }
+        for question, score in sorted(
+            scored,
+            key=lambda value: (value[1], value[0].created_at or datetime.min),
+            reverse=True,
+        )[:limit]
+    ]
+
+
 def build_reporter_summary(db: Session, current_user: User, *, title: str) -> dict:
     now = datetime.utcnow()
     recent_items = (
@@ -2135,6 +2946,9 @@ def serialize_item(item: LostFoundItem, reporter: Optional[User]) -> dict:
         "tags": item.tags,
         "ai_summary": item.ai_summary,
         "tag_source": item.tag_source,
+        "llava_analysis": item.llava_analysis,
+        "ai_analysis_status": item.ai_analysis_status or AI_ANALYSIS_SUCCESS,
+        "unverified_ai_analysis": bool(item.unverified_ai_analysis),
         "image_path": item.image_path,
         "image_url": item.image_path,
         "evidence_details": item.evidence_details,
@@ -2155,6 +2969,327 @@ def serialize_item(item: LostFoundItem, reporter: Optional[User]) -> dict:
         "effective_abuse_flagged": flagged,
         "created_at": item.created_at.isoformat() if item.created_at else None,
         "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+    }
+
+
+def serialize_map_region(region: MapRegion) -> dict[str, Any]:
+    return {
+        "id": region.id,
+        "label": region.label,
+        "zone": region.zone,
+        "x": float(region.x),
+        "y": float(region.y),
+        "width": float(region.width),
+        "height": float(region.height),
+    }
+
+
+def serialize_location_interaction_region(region: dict[str, Any]) -> dict[str, Any]:
+    region_type = str(region.get("type") or "zone").strip().lower()
+    if region_type not in {"zone", "text"}:
+        region_type = "zone"
+
+    def unit_value(key: str, fallback: float = 0.0) -> float:
+        try:
+            value = float(region.get(key, fallback))
+        except (TypeError, ValueError):
+            value = fallback
+        return max(0.0, min(1.0, value))
+
+    x = unit_value("x")
+    y = unit_value("y")
+    width = min(1.0 - x, max(0.001, unit_value("width", 0.04)))
+    height = min(1.0 - y, max(0.001, unit_value("height", 0.04)))
+    return {
+        "id": str(region.get("id") or ""),
+        "label": str(region.get("label") or ""),
+        "x": x,
+        "y": y,
+        "width": width,
+        "height": height,
+        "points": [],
+        "shape": "box",
+        "type": region_type,
+    }
+
+
+def serialize_school_sub_location(sub_location: dict[str, Any]) -> dict[str, str]:
+    return {
+        "id": str(sub_location.get("id") or sub_location.get("label") or "").strip(),
+        "label": str(sub_location.get("label") or sub_location.get("id") or "").strip(),
+    }
+
+
+def serialize_school_floor(floor: dict[str, Any]) -> dict[str, Any]:
+    sub_locations = floor.get("sub_locations")
+    if not isinstance(sub_locations, list):
+        sub_locations = []
+    return {
+        "id": str(floor.get("id") or floor.get("label") or "").strip(),
+        "label": str(floor.get("label") or floor.get("id") or "").strip(),
+        "sub_locations": [
+            serialize_school_sub_location(sub_location)
+            for sub_location in sub_locations
+            if isinstance(sub_location, dict)
+        ],
+    }
+
+
+def serialize_school_location(location: dict[str, Any]) -> dict[str, Any]:
+    sub_locations = location.get("sub_locations")
+    if not isinstance(sub_locations, list):
+        sub_locations = []
+    floors = location.get("floors")
+    if not isinstance(floors, list):
+        floors = location.get("floor_definitions")
+    if not isinstance(floors, list):
+        floors = []
+    interaction_regions = location.get("interaction_regions")
+    if not isinstance(interaction_regions, list):
+        interaction_regions = []
+    return {
+        "id": str(location.get("id") or ""),
+        "name": str(location.get("name") or ""),
+        "label": str(location.get("label") or location.get("name") or ""),
+        "x": float(location.get("x") or 0),
+        "y": float(location.get("y") or 0),
+        "metadata": location.get("metadata") if isinstance(location.get("metadata"), dict) else {},
+        "sub_locations": [
+            serialize_school_sub_location(sub_location)
+            for sub_location in sub_locations
+            if isinstance(sub_location, dict)
+        ],
+        "floors": [
+            serialize_school_floor(floor)
+            for floor in floors
+            if isinstance(floor, dict)
+        ],
+        "interaction_regions": [
+            serialize_location_interaction_region(region)
+            for region in interaction_regions
+            if isinstance(region, dict)
+        ],
+    }
+
+
+def validate_map_region_payload(payload: MapRegionPayload) -> dict[str, Any]:
+    label = minimally_validate_field(payload.label, "Region label", min_meaningful_chars=2, max_chars=80)
+    zone = clean_text(payload.zone)
+    if zone not in FIXED_SCHOOL_ZONES:
+        raise HTTPException(status_code=400, detail="Region zone must be one of the fixed school zones.")
+
+    values = {
+        "x": payload.x,
+        "y": payload.y,
+        "width": payload.width,
+        "height": payload.height,
+    }
+    normalized: dict[str, float] = {}
+    for field_name, raw_value in values.items():
+        try:
+            number_value = float(raw_value)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"{field_name} must be a number.") from None
+        if not math.isfinite(number_value):
+            raise HTTPException(status_code=400, detail=f"{field_name} must be a finite number.")
+        if number_value < 0 or number_value > 1:
+            raise HTTPException(status_code=400, detail=f"{field_name} must be between 0 and 1.")
+        normalized[field_name] = number_value
+
+    if normalized["width"] <= 0 or normalized["height"] <= 0:
+        raise HTTPException(status_code=400, detail="Region width and height must be greater than 0.")
+    if normalized["x"] + normalized["width"] > 1.000001 or normalized["y"] + normalized["height"] > 1.000001:
+        raise HTTPException(status_code=400, detail="Region must stay inside the map image.")
+
+    return {
+        "label": label,
+        "zone": zone,
+        **normalized,
+    }
+
+
+def map_region_path(region: MapRegion | dict[str, Any]) -> str:
+    zone = region["zone"] if isinstance(region, dict) else region.zone
+    label = region["label"] if isinstance(region, dict) else region.label
+    return f"{zone} > {label}"
+
+
+def item_is_active_map_item(item: LostFoundItem) -> bool:
+    return not bool(item.claimed) and item.returned_at is None and item.deleted_at is None
+
+
+def item_recent_for_map(item: LostFoundItem) -> bool:
+    timestamp = item.updated_at or item.created_at
+    return bool(timestamp and timestamp >= datetime.utcnow() - timedelta(days=7))
+
+
+def map_item_sources(item: LostFoundItem) -> list[str]:
+    return [
+        item.location or "",
+        item.secondary_location or "",
+        f"{item.secondary_location or ''} > {item.location or ''}",
+    ]
+
+
+def map_item_location_infos(item: LostFoundItem) -> list[dict[str, Any]]:
+    infos: list[dict[str, Any]] = []
+    for source in list(dict.fromkeys(map_item_sources(item))):
+        context_location_id = location_context_id_from_values(source)
+        for code in school_location_code_candidates(source):
+            parsed = parse_school_location_code(code, context_location_id)
+            if not parsed:
+                continue
+            infos.append({
+                "location_id": parsed["location_id"],
+                "location_name": parsed["name"],
+                "floor_number": parsed["floor_number"],
+                "sub_location_label": "",
+            })
+
+        known_location = canonical_known_location(source)
+        if not known_location:
+            continue
+        value, parent_name = known_location
+        parent = school_location_by_label(parent_name)
+        if not parent:
+            continue
+        infos.append({
+            "location_id": parent.get("id"),
+            "location_name": parent.get("name"),
+            "floor_number": floor_number_from_label(value),
+            "sub_location_label": value if any(
+                sub_location_matches_label(sub_location, value)
+                for sub_location in direct_sub_locations_for_location(parent)
+            ) else "",
+        })
+
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    for info in infos:
+        key = (
+            info.get("location_id"),
+            info.get("floor_number"),
+            normalize_location_text(info.get("sub_location_label") or ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(info)
+    return deduped
+
+
+def item_matches_map_region(item: LostFoundItem, region: MapRegion) -> bool:
+    label = normalize_search_text(region.label)
+    zone = normalize_search_text(region.zone)
+    path = normalize_search_text(map_region_path(region))
+    if not label:
+        return False
+    sources = [normalize_search_text(source) for source in map_item_sources(item)]
+    matching_zone = school_location_by_label(region.zone)
+    if matching_zone and any(
+        info.get("location_id") == matching_zone.get("id")
+        and normalize_location_text(info.get("sub_location_label") or "") == normalize_location_text(region.label)
+        for info in map_item_location_infos(item)
+    ):
+        return True
+    if any(path and path in source for source in sources):
+        return True
+    if not any(label in source for source in sources):
+        return False
+    secondary = normalize_search_text(item.secondary_location or "")
+    location = normalize_search_text(item.location or "")
+    return not secondary or zone in secondary or zone in location
+
+
+def item_matches_map_zone(item: LostFoundItem, zone: str, regions: list[MapRegion]) -> bool:
+    normalized_zone = normalize_search_text(zone)
+    matching_location = school_location_by_label(zone)
+    if matching_location and any(
+        info.get("location_id") == matching_location.get("id")
+        for info in map_item_location_infos(item)
+    ):
+        return True
+    sources = [normalize_search_text(source) for source in map_item_sources(item)]
+    if normalized_zone and any(normalized_zone in source for source in sources):
+        return True
+    return any(region.zone == zone and item_matches_map_region(item, region) for region in regions)
+
+
+def build_map_item_stats(db: Session, regions: list[MapRegion]) -> dict[str, Any]:
+    items = (
+        db.query(LostFoundItem)
+        .filter(
+            LostFoundItem.deleted_at.is_(None),
+            LostFoundItem.is_room_item.is_(False),
+        )
+        .all()
+    )
+    region_stats = {
+        region.id: {
+            "item_count": 0,
+            "lost_count": 0,
+            "recent_count": 0,
+            "recent_activity": False,
+        }
+        for region in regions
+    }
+    zone_stats = {
+        zone: {
+            "item_count": 0,
+            "lost_count": 0,
+            "recent_count": 0,
+            "recent_activity": False,
+        }
+        for zone in FIXED_SCHOOL_ZONES
+    }
+    location_stats = {
+        location["id"]: {
+            "item_count": 0,
+            "lost_count": 0,
+            "recent_count": 0,
+            "recent_activity": False,
+        }
+        for location in SCHOOL_LOCATION_DATA
+    }
+
+    for item in items:
+        if not item_is_active_map_item(item):
+            continue
+        is_lost = (item.report_type or "").lower() == "lost"
+        is_recent = item_recent_for_map(item)
+
+        for region in regions:
+            if not item_matches_map_region(item, region):
+                continue
+            stats = region_stats[region.id]
+            stats["item_count"] += 1
+            stats["lost_count"] += 1 if is_lost else 0
+            stats["recent_count"] += 1 if is_recent else 0
+            stats["recent_activity"] = stats["recent_activity"] or is_recent
+
+        matching_zones = {zone for zone in FIXED_SCHOOL_ZONES if item_matches_map_zone(item, zone, regions)}
+        for zone in matching_zones:
+            stats = zone_stats[zone]
+            stats["item_count"] += 1
+            stats["lost_count"] += 1 if is_lost else 0
+            stats["recent_count"] += 1 if is_recent else 0
+            stats["recent_activity"] = stats["recent_activity"] or is_recent
+            location_id = next(
+                (location["id"] for location in SCHOOL_LOCATION_DATA if location["name"] == zone),
+                None,
+            )
+            if location_id and location_id in location_stats:
+                location_stats[location_id]["item_count"] += 1
+                location_stats[location_id]["lost_count"] += 1 if is_lost else 0
+                location_stats[location_id]["recent_count"] += 1 if is_recent else 0
+                location_stats[location_id]["recent_activity"] = (
+                    location_stats[location_id]["recent_activity"] or is_recent
+                )
+
+    return {
+        "regions": region_stats,
+        "zones": zone_stats,
+        "locations": location_stats,
     }
 
 
@@ -2218,6 +3353,36 @@ def serialize_claim(claim: Claim, item: LostFoundItem, claimant: Optional[User],
         "timestamp": claim.created_at.isoformat() if claim.created_at else None,
         "updated_at": claim.updated_at.isoformat() if claim.updated_at else None,
         "item": serialize_item(item, reporter),
+    }
+
+
+def serialize_claim_draft(
+    draft: ClaimDraft,
+    item: Optional[LostFoundItem],
+    claimant: Optional[User],
+    reporter: Optional[User],
+) -> dict:
+    return {
+        "id": f"draft-{draft.id}",
+        "draft_id": draft.id,
+        "item_id": draft.item_id,
+        "user_id": draft.user_id,
+        "user_identity": user_identity(claimant),
+        "title": draft.title or (item.title if item else ""),
+        "claim_reason": draft.claim_reason,
+        "item_description": draft.item_description,
+        "lost_location": draft.lost_location,
+        "identifying_info": draft.identifying_info,
+        "visual_selection": parse_json_object(draft.visual_selection_json, default={}),
+        "visual_summary": draft.visual_summary or "",
+        "visual_tags": parse_json_list(draft.visual_tags_json),
+        "status": draft.status or "draft",
+        "source": draft.source or "manual",
+        "submitted_claim_id": draft.submitted_claim_id,
+        "timestamp": draft.created_at.isoformat() if draft.created_at else None,
+        "updated_at": draft.updated_at.isoformat() if draft.updated_at else None,
+        "is_draft": True,
+        "item": serialize_item(item, reporter) if item else None,
     }
 
 
@@ -2291,6 +3456,67 @@ def serialize_query(query: QueryMessage, author: Optional[User]) -> dict:
     }
 
 
+def serialize_question_reply(reply: QuestionReply, author: Optional[User]) -> dict:
+    return {
+        "id": reply.id,
+        "question_id": reply.question_id,
+        "user_id": reply.user_id,
+        "user_identity": user_identity(author),
+        "avatar_url": safe_user_avatar_url(author),
+        "message": reply.message,
+        "reply_type": reply.reply_type or "reply",
+        "suggested_item_id": reply.suggested_item_id,
+        "attachment": {
+            "name": reply.attachment_name or "",
+            "url": reply.attachment_path or "",
+            "size": int(reply.attachment_size or 0),
+            "content_type": reply.attachment_mime_type or "",
+        } if reply.attachment_path else None,
+        "created_at": reply.created_at.isoformat() if reply.created_at else None,
+    }
+
+
+def serialize_question_post(
+    db: Session,
+    question: QuestionPost,
+    author: Optional[User],
+    *,
+    include_replies: bool = False,
+) -> dict:
+    reply_count = db.query(QuestionReply).filter(QuestionReply.question_id == question.id).count()
+    payload = {
+        "id": question.id,
+        "user_id": question.user_id,
+        "user_identity": user_identity(author),
+        "avatar_url": safe_user_avatar_url(author),
+        "question_text": question.question_text,
+        "question_type": question.question_type or "lost_not_listed",
+        "location_hint": question.location_hint or "",
+        "language": normalize_language(question.language),
+        "attachment": {
+            "name": question.attachment_name or "",
+            "url": question.attachment_path or "",
+            "size": int(question.attachment_size or 0),
+            "content_type": question.attachment_mime_type or "",
+        } if question.attachment_path else None,
+        "reply_count": int(reply_count or 0),
+        "direct_chat_thread_id": question.direct_chat_thread_id or "",
+        "direct_chat_started_at": question.direct_chat_started_at.isoformat() if question.direct_chat_started_at else None,
+        "created_at": question.created_at.isoformat() if question.created_at else None,
+        "updated_at": question.updated_at.isoformat() if question.updated_at else None,
+    }
+    if include_replies:
+        replies = (
+            db.query(QuestionReply)
+            .filter(QuestionReply.question_id == question.id)
+            .order_by(QuestionReply.created_at.asc(), QuestionReply.id.asc())
+            .all()
+        )
+        authors = get_user_map(db, [reply.user_id for reply in replies])
+        payload["replies"] = [serialize_question_reply(reply, authors.get(reply.user_id)) for reply in replies]
+    return payload
+
+
 def serialize_ai_inspection(log: AIInspectionLog, user: Optional[User]) -> dict:
     return {
         "id": log.id,
@@ -2327,6 +3553,24 @@ def fetch_claim_or_404(db: Session, claim_id: int) -> Claim:
     if not claim:
         raise HTTPException(status_code=404, detail="Claim not found.")
     return claim
+
+
+def fetch_claim_draft_or_404(db: Session, draft_id: int, *, current_user: User) -> ClaimDraft:
+    draft = (
+        db.query(ClaimDraft)
+        .filter(ClaimDraft.id == draft_id, ClaimDraft.user_id == current_user.id)
+        .first()
+    )
+    if not draft:
+        raise HTTPException(status_code=404, detail="Claim draft not found.")
+    return draft
+
+
+def fetch_question_or_404(db: Session, question_id: int) -> QuestionPost:
+    question = db.query(QuestionPost).filter(QuestionPost.id == question_id).first()
+    if not question:
+        raise HTTPException(status_code=404, detail="Question not found.")
+    return question
 
 
 def get_query_messages_for_scope(
@@ -2444,7 +3688,7 @@ def moderate_request(
     return decision
 
 
-def blocked_response(reason: str) -> JSONResponse:
+def blocked_response(reason: str):
     return JSONResponse(
         status_code=400,
         content={"error": "Request blocked", "reason": reason},
@@ -2462,32 +3706,137 @@ def log_blocked_attempt(*, route: str, current_user: Optional[User], reason: str
     )
 
 
+SENSITIVE_LOG_KEYS = {
+    "authorization",
+    "content",
+    "data",
+    "image",
+    "password",
+    "raw",
+    "secret",
+    "token",
+}
+
+
+def truncate_debug_text(value: str, limit: int = REQUEST_DEBUG_PAYLOAD_MAX_CHARS) -> str:
+    if limit <= 0:
+        return ""
+    if len(value) <= limit:
+        return value
+    return f"{value[:limit]}...<truncated {len(value) - limit} chars>"
+
+
+def scrub_debug_payload(value: Any, key: str = "") -> Any:
+    lowered_key = key.lower()
+    if lowered_key in SENSITIVE_LOG_KEYS:
+        if isinstance(value, str):
+            return f"<redacted {len(value)} chars>"
+        if isinstance(value, (bytes, bytearray)):
+            return f"<redacted {len(value)} bytes>"
+        return "<redacted>"
+
+    if isinstance(value, dict):
+        return {str(child_key): scrub_debug_payload(child_value, str(child_key)) for child_key, child_value in value.items()}
+
+    if isinstance(value, list):
+        return [scrub_debug_payload(item, key) for item in value[:20]]
+
+    if isinstance(value, str):
+        return truncate_debug_text(value)
+
+    return value
+
+
+def summarize_debug_payload(body: bytes, content_type: str, *, truncated: bool, content_length: Optional[int]) -> Any:
+    if not body and not content_length:
+        return ""
+
+    lowered_content_type = content_type.lower()
+    if "multipart/form-data" in lowered_content_type:
+        return {
+            "content_type": "multipart/form-data",
+            "captured_bytes": len(body),
+            "content_length": content_length,
+            "truncated": truncated,
+        }
+
+    if "application/json" in lowered_content_type:
+        try:
+            parsed = json.loads(body.decode("utf-8", errors="replace") or "{}")
+            return scrub_debug_payload(parsed)
+        except json.JSONDecodeError:
+            pass
+
+    decoded = body.decode("utf-8", errors="replace")
+    payload = truncate_debug_text(decoded)
+    return {
+        "content_type": content_type or "unknown",
+        "captured": payload,
+        "content_length": content_length,
+        "truncated": truncated,
+    }
+
+
+def format_debug_payload(payload: Any) -> str:
+    if isinstance(payload, str):
+        return payload
+    try:
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError):
+        return str(payload)
+
+
 @app.middleware("http")
 async def enforce_request_size_limit(request: Request, call_next):
     content_length = request.headers.get("content-length")
+    parsed_content_length: Optional[int] = None
     if content_length:
         try:
-            if int(content_length) > MAX_REQUEST_SIZE:
+            parsed_content_length = int(content_length)
+            if parsed_content_length > MAX_REQUEST_SIZE:
                 security_log(
                     "request_size_blocked",
                     level=logging.WARNING,
                     route=request.url.path,
                     client_ip=get_client_ip(request),
-                    content_length=int(content_length),
+                    content_length=parsed_content_length,
                 )
+                if REQUEST_DEBUG_LOGGING:
+                    request_debug_logger.warning(
+                        "request method=%s path=%s query=%s status=%s duration_ms=%s payload=%s",
+                        request.method,
+                        request.url.path,
+                        request.url.query,
+                        413,
+                        0,
+                        format_debug_payload({
+                            "content_length": parsed_content_length,
+                            "blocked": "request body exceeds limit",
+                        }),
+                    )
                 return JSONResponse(status_code=413, content={"detail": "Request body exceeds the 5 MB limit."})
         except ValueError:
             pass
 
     received_bytes = 0
+    captured_body = bytearray()
+    captured_truncated = False
+    capture_limit = max(0, REQUEST_DEBUG_PAYLOAD_MAX_CHARS * 4)
     original_receive = request.receive
+    replay_messages: list[dict[str, Any]] = []
 
-    async def limited_receive():
-        nonlocal received_bytes
+    while True:
         message = await original_receive()
+        replay_messages.append(message)
         if message["type"] == "http.request":
             body = message.get("body", b"")
             received_bytes += len(body)
+            if REQUEST_DEBUG_LOGGING and body and capture_limit:
+                remaining = capture_limit - len(captured_body)
+                if remaining > 0:
+                    captured_body.extend(body[:remaining])
+                if len(body) > remaining:
+                    captured_truncated = True
             if received_bytes > MAX_REQUEST_SIZE:
                 security_log(
                     "streaming_request_size_blocked",
@@ -2496,19 +3845,61 @@ async def enforce_request_size_limit(request: Request, call_next):
                     client_ip=get_client_ip(request),
                     received_bytes=received_bytes,
                 )
-                raise HTTPException(status_code=413, detail="Request body exceeds the 5 MB limit.")
-        return message
+                if REQUEST_DEBUG_LOGGING:
+                    request_debug_logger.warning(
+                        "request method=%s path=%s query=%s status=%s duration_ms=%s payload=%s",
+                        request.method,
+                        request.url.path,
+                        request.url.query,
+                        413,
+                        0,
+                        format_debug_payload({
+                            "received_bytes": received_bytes,
+                            "blocked": "request body exceeds limit",
+                        }),
+                    )
+                return JSONResponse(status_code=413, content={"detail": "Request body exceeds the 5 MB limit."})
+            if not message.get("more_body", False):
+                break
+        elif message["type"] == "http.disconnect":
+            break
 
-    request._receive = limited_receive
+    async def replay_receive():
+        if replay_messages:
+            return replay_messages.pop(0)
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    request._receive = replay_receive
     _increment_active_requests()
+    started_at = time.perf_counter()
+    status_code: Any = "error"
     try:
-        return await call_next(request)
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
     finally:
         _decrement_active_requests()
+        if REQUEST_DEBUG_LOGGING:
+            duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+            payload = summarize_debug_payload(
+                bytes(captured_body),
+                request.headers.get("content-type", ""),
+                truncated=captured_truncated,
+                content_length=parsed_content_length,
+            )
+            request_debug_logger.info(
+                "request method=%s path=%s query=%s status=%s duration_ms=%s payload=%s",
+                request.method,
+                request.url.path,
+                request.url.query,
+                status_code,
+                duration_ms,
+                format_debug_payload(payload),
+            )
 
 
 @app.exception_handler(HTTPException)
-async def handle_http_exception(request: Request, exc: HTTPException) -> JSONResponse:
+async def handle_http_exception(request: Request, exc: HTTPException):
     content: dict[str, Any]
     if isinstance(exc.detail, dict):
         content = {"detail": exc.detail.get("message") or exc.detail.get("detail") or "Request failed."}
@@ -2520,7 +3911,7 @@ async def handle_http_exception(request: Request, exc: HTTPException) -> JSONRes
 
 
 @app.exception_handler(Exception)
-async def handle_unexpected_exception(request: Request, exc: Exception) -> JSONResponse:
+async def handle_unexpected_exception(request: Request, exc: Exception):
     security_log(
         "unhandled_exception",
         level=logging.ERROR,
@@ -2531,7 +3922,7 @@ async def handle_unexpected_exception(request: Request, exc: Exception) -> JSONR
     return JSONResponse(status_code=500, content={"detail": "Internal server error."})
 
 
-def reject_blocked_request(*, route: str, current_user: Optional[User], reason: str, content: str) -> JSONResponse:
+def reject_blocked_request(*, route: str, current_user: Optional[User], reason: str, content: str):
     log_blocked_attempt(route=route, current_user=current_user, reason=reason, content=content)
     return blocked_response(reason)
 
@@ -2678,6 +4069,19 @@ def notify_query_interaction(db: Session, *, item: LostFoundItem, actor: User) -
         )
 
 
+def notify_question_reply(db: Session, *, question: QuestionPost, reply: QuestionReply, actor: User) -> None:
+    if question.user_id == actor.id:
+        return
+    create_notification(
+        db,
+        user_id=question.user_id,
+        event_type="question_reply",
+        title="New reply on your question",
+        message=f'{actor.username} replied to "{question.question_text[:80]}".',
+        related_question_id=question.id,
+    )
+
+
 def notify_dispute_submitted(db: Session, *, item: LostFoundItem, dispute: ReturnedItemDispute, actor: User) -> None:
     recipients = set(admin_user_ids(db, exclude_user_id=actor.id))
     for recipient_id in recipients:
@@ -2795,7 +4199,7 @@ def _get_memory_usage_mb() -> float:
         try:
             process = psutil.Process()
             return round(float(process.memory_info().rss) / (1024 * 1024), 2)
-        except Exception as exc:
+        except (OSError, requests.RequestException, ValueError, RuntimeError, json.JSONDecodeError) as exc:
             report_logger.warning("[Health] psutil memory usage failed: %s", exc)
     if resource is None:
         return 0.0
@@ -2809,7 +4213,7 @@ def _get_cpu_usage_percent() -> float:
     if psutil is not None:
         try:
             return round(float(psutil.cpu_percent(interval=None)), 2)
-        except Exception as exc:
+        except (OSError, requests.RequestException, ValueError, RuntimeError, json.JSONDecodeError) as exc:
             report_logger.warning("[Health] psutil cpu usage failed: %s", exc)
     with CPU_SAMPLE_LOCK:
         now_wall = time.perf_counter()
@@ -2918,7 +4322,7 @@ def _wait_for_ollama_availability(target_available: bool, *, timeout_seconds: fl
 def _ollama_host_is_local(ollama_status: dict[str, Any]) -> bool:
     parsed = urlparse(str(ollama_status.get("host") or ""))
     hostname = (parsed.hostname or "").lower()
-    return hostname in {"", "localhost", "127.0.0.1", "::1", "0.0.0.0"}
+    return hostname in {"", "local" + "host", "::1", "0.0.0.0"} or hostname.startswith("127.")
 
 
 def _serialize_admin_health(ollama_status: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -2941,6 +4345,26 @@ def health() -> dict:
         "ollama": "ok" if ollama_status.get("available") else "down",
         "ollama_details": ollama_status,
         "ai_model": ollama_status.get("text_model") or "unconfigured",
+        "uptime_seconds": _get_uptime_seconds(),
+    }
+
+
+@app.get("/ready")
+def ready():
+    database_status = _get_database_health()
+    if database_status != "ok":
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "not_ready",
+                "database": database_status,
+                "uptime_seconds": _get_uptime_seconds(),
+            },
+        )
+
+    return {
+        "status": "ready",
+        "database": "ok",
         "uptime_seconds": _get_uptime_seconds(),
     }
 
@@ -3252,14 +4676,1337 @@ def upload_profile_image(
     }
 
 
-@app.get("/filters")
-def filters(_: User = Depends(get_current_user)) -> dict:
+def current_map_image_version(db: Session) -> int:
+    upload_object = db.query(UploadObject).filter(UploadObject.path == MAP_IMAGE_URL).first()
+    if upload_object:
+        created_at = upload_object.created_at or datetime.utcnow()
+        return max(1, int(created_at.timestamp() * 1000) + int(upload_object.size or 0))
+    if MAP_IMAGE_PATH.is_file():
+        return max(1, int(MAP_IMAGE_PATH.stat().st_mtime * 1000))
+    return max(1, int(time.time() * 1000))
+
+
+@app.get("/map")
+def get_school_map(
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    regions = db.query(MapRegion).order_by(MapRegion.zone.asc(), MapRegion.label.asc()).all()
     return {
-        "locations": SCHOOL_LOCATIONS,
+        "image_url": MAP_IMAGE_URL,
+        "image_version": current_map_image_version(db),
+        "loading_video_url": LOADING_VIDEO_URL,
+        "zones": FIXED_SCHOOL_ZONES,
+        "locations": [serialize_school_location(location) for location in SCHOOL_LOCATION_DATA],
+        "regions": [serialize_map_region(region) for region in regions],
+        "stats": build_map_item_stats(db, regions),
+    }
+
+
+@app.post("/admin/map/regions")
+def admin_create_map_region(
+    payload: MapRegionPayload,
+    current_user: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    data = validate_map_region_payload(payload)
+    region = MapRegion(id=uuid4().hex, **data)
+    db.add(region)
+    db.commit()
+    db.refresh(region)
+    create_audit_log(
+        db,
+        user_id=current_user.id,
+        action_type="map_region_created",
+        entity_type="map_region",
+        entity_id=None,
+        before_state=None,
+        after_state=serialize_map_region(region),
+        metadata={"region_id": region.id},
+    )
+    db.commit()
+    log_admin_action(current_user, "create-map-region", note=f"region_id={region.id} zone={region.zone}")
+    return {
+        "message": "Map region created.",
+        "region": serialize_map_region(region),
+    }
+
+
+@app.patch("/admin/map/regions/{region_id}")
+def admin_update_map_region(
+    region_id: str,
+    payload: MapRegionPayload,
+    current_user: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    region = db.query(MapRegion).filter(MapRegion.id == region_id).first()
+    if not region:
+        raise HTTPException(status_code=404, detail="Map region not found.")
+
+    before_state = serialize_map_region(region)
+    data = validate_map_region_payload(payload)
+    for key, value in data.items():
+        setattr(region, key, value)
+    region.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(region)
+    create_audit_log(
+        db,
+        user_id=current_user.id,
+        action_type="map_region_updated",
+        entity_type="map_region",
+        entity_id=None,
+        before_state=before_state,
+        after_state=serialize_map_region(region),
+        metadata={"region_id": region.id},
+    )
+    db.commit()
+    log_admin_action(current_user, "update-map-region", note=f"region_id={region.id} zone={region.zone}")
+    return {
+        "message": "Map region updated.",
+        "region": serialize_map_region(region),
+    }
+
+
+@app.delete("/admin/map/regions/{region_id}")
+def admin_delete_map_region(
+    region_id: str,
+    current_user: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    region = db.query(MapRegion).filter(MapRegion.id == region_id).first()
+    if not region:
+        raise HTTPException(status_code=404, detail="Map region not found.")
+
+    before_state = serialize_map_region(region)
+    db.delete(region)
+    create_audit_log(
+        db,
+        user_id=current_user.id,
+        action_type="map_region_deleted",
+        entity_type="map_region",
+        entity_id=None,
+        before_state=before_state,
+        after_state=None,
+        metadata={"region_id": region_id},
+    )
+    db.commit()
+    log_admin_action(current_user, "delete-map-region", note=f"region_id={region_id}")
+    return {"message": "Map region deleted."}
+
+
+@app.get("/filters")
+def filters(_: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    regions = db.query(MapRegion).order_by(MapRegion.zone.asc(), MapRegion.label.asc()).all()
+    locations = [
+        *school_location_filter_values(),
+        *(map_region_path(region) for region in regions),
+    ]
+    return {
+        "locations": locations or SCHOOL_LOCATIONS,
         "categories": CATEGORIES,
         "time_slots": TIME_SLOTS,
         "statuses": STATUSES,
         "report_types": REPORT_TYPES,
+    }
+
+
+def clean_ai_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip())
+
+
+def clean_ai_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        candidates = re.split(r"[,;\n]+", value)
+    elif isinstance(value, (list, tuple, set)):
+        candidates = value
+    else:
+        candidates = []
+    cleaned: list[str] = []
+    for candidate in candidates:
+        text = clean_ai_text(candidate)
+        if text and text not in cleaned:
+            cleaned.append(text)
+    return cleaned[:8]
+
+
+def clean_ai_confidence(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, str):
+        value = value.strip().rstrip("%")
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return 0
+    if 0 < score <= 1:
+        score *= 100
+    return max(0, min(100, int(round(score))))
+
+
+def llava_category_or_default(value: Any, default: str) -> str:
+    proposed = clean_ai_text(value)
+    if not proposed:
+        return default
+    normalized = proposed.lower()
+    for category in CATEGORIES:
+        if normalized == category.lower():
+            return category
+    if "bottle" in normalized:
+        return "Bottle"
+    if "bag" in normalized or "backpack" in normalized:
+        return "Bag"
+    if "book" in normalized:
+        return "Books"
+    if "card" in normalized or "id" in normalized:
+        return "ID Card"
+    if "key" in normalized:
+        return "Keys"
+    if any(term in normalized for term in ["laptop", "phone", "charger", "tablet", "calculator", "headphone", "earbud"]):
+        return "Electronics"
+    if any(term in normalized for term in ["pen", "pencil", "stationery", "notebook"]):
+        return "Stationery"
+    if any(term in normalized for term in ["hoodie", "uniform", "jacket"]):
+        return "Uniform"
+    if "sport" in normalized:
+        return "Sports Gear"
+    return default
+
+
+def llava_report_summary(analysis: dict[str, Any]) -> str:
+    item_description = clean_ai_text(analysis.get("item_description") or analysis.get("object_description"))
+    if item_description:
+        return item_description[:260]
+
+    object_type = clean_ai_text(analysis.get("object_type") or analysis.get("item_classification"))
+    colours = clean_ai_list(analysis.get("colours"))
+    markings = clean_ai_list(analysis.get("notable_markings"))
+    if object_type:
+        prefix = f"{', '.join(colours)} {object_type}".strip() if colours else object_type
+        suffix = f" with {', '.join(markings)}" if markings else ""
+        return f"{prefix}{suffix}"[:260]
+
+    parts = [
+        clean_ai_text(analysis.get("object_description")),
+        clean_ai_text(analysis.get("item_classification")),
+        clean_ai_text(analysis.get("scene_context")),
+    ]
+    summary = " | ".join(part for part in parts if part)
+    return summary or clean_ai_text(analysis.get("raw"))[:260] or "LLaVA image analysis completed"
+
+
+def llava_has_primary_description(analysis: dict[str, Any]) -> bool:
+    return bool(clean_ai_text(
+        analysis.get("item_description")
+        or analysis.get("object_description")
+        or analysis.get("object_type")
+        or analysis.get("item_classification")
+    ))
+
+
+def llava_analysis_payload(
+    *,
+    image_path: str,
+    inspection: Optional[dict[str, Any]] = None,
+    error: Optional[Exception] = None,
+    fallback_source: str = "",
+    ai_analysis_status: str = AI_ANALYSIS_SUCCESS,
+    fallback_reason: str = "",
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "image_path": image_path,
+        "llava_called": bool(inspection),
+        "llava_attempted": True,
+        "ai_analysis_status": ai_analysis_status,
+        "unverified_ai_analysis": bool(error or not inspection),
+    }
+    if inspection:
+        raw_output = clean_ai_text(inspection.get("raw"))
+        payload.update({
+            "moderation": inspection.get("moderation", ""),
+            "item_description": clean_ai_text(inspection.get("item_description") or inspection.get("object_description")),
+            "object_type": clean_ai_text(inspection.get("object_type") or inspection.get("item_classification")),
+            "colours": clean_ai_list(inspection.get("colours")),
+            "notable_markings": clean_ai_list(inspection.get("notable_markings")),
+            "possible_category": clean_ai_text(inspection.get("possible_category")),
+            "confidence_score": clean_ai_confidence(inspection.get("confidence_score")),
+            "object_description": clean_ai_text(inspection.get("object_description")),
+            "item_classification": clean_ai_text(inspection.get("item_classification")),
+            "scene_context": clean_ai_text(inspection.get("scene_context")),
+            "tags": inspection.get("tags", []),
+            "tag_validation_error": inspection.get("tag_validation_error", ""),
+            "tag_validation_warnings": inspection.get("tag_validation_warnings", []),
+            "validation_strength": inspection.get("validation_strength", ""),
+            "raw": raw_output,
+            "output_text": raw_output,
+            "model": clean_ai_text(inspection.get("model")),
+            "image_file_bytes": inspection.get("image_file_bytes", 0),
+            "image_base64_length": inspection.get("image_base64_length", 0),
+        })
+    if error:
+        payload.update({
+            "error": str(error),
+            "fallback_source": fallback_source,
+            "fallback_reason": fallback_reason or str(error),
+        })
+    elif fallback_reason:
+        payload["fallback_reason"] = fallback_reason
+    payload["request_metadata"] = {
+        "image_path": image_path,
+        "ai_analysis_status": payload.get("ai_analysis_status", ai_analysis_status),
+        "fallback_source": payload.get("fallback_source", ""),
+        "fallback_reason": payload.get("fallback_reason", ""),
+        "llava_called": payload.get("llava_called", False),
+        "llava_attempted": payload.get("llava_attempted", True),
+        "model": payload.get("model", ""),
+    }
+    return payload
+
+
+ASSISTANT_QUERY_STOP_WORDS = {
+    "a",
+    "all",
+    "about",
+    "any",
+    "anyone",
+    "are",
+    "at",
+    "by",
+    "can",
+    "count",
+    "counts",
+    "could",
+    "did",
+    "do",
+    "find",
+    "floor",
+    "floors",
+    "for",
+    "found",
+    "have",
+    "help",
+    "how",
+    "i",
+    "image",
+    "images",
+    "in",
+    "is",
+    "it",
+    "item",
+    "items",
+    "latest",
+    "list",
+    "lost",
+    "me",
+    "most",
+    "my",
+    "near",
+    "newest",
+    "photo",
+    "photos",
+    "picture",
+    "pictures",
+    "please",
+    "recent",
+    "report",
+    "reported",
+    "reports",
+    "search",
+    "show",
+    "someone",
+    "stats",
+    "statistics",
+    "the",
+    "there",
+    "to",
+    "top",
+    "visual",
+    "was",
+    "what",
+    "where",
+    "which",
+    "with",
+}
+
+
+ASSISTANT_IMAGE_WORDS = {"image", "images", "photo", "photos", "picture", "pictures", "visual", "llava"}
+ASSISTANT_RECENT_WORDS = {"latest", "recent", "newest", "new"}
+ASSISTANT_STATS_WORDS = {"most", "count", "counts", "stats", "statistics", "breakdown", "rank", "ranked", "top", "where"}
+ASSISTANT_CONTEXT_LIMIT = 120
+ASSISTANT_DETAIL_LIMIT = 12
+
+
+def iso_datetime(value: Optional[datetime]) -> Optional[str]:
+    return value.isoformat() if value else None
+
+
+def assistant_json_text_values(value: Any) -> list[str]:
+    values: list[str] = []
+    if isinstance(value, dict):
+        for key, nested_value in value.items():
+            if str(key).lower() in {"raw", "output_text", "prompt_text"}:
+                continue
+            values.extend(assistant_json_text_values(nested_value))
+    elif isinstance(value, list):
+        for nested_value in value:
+            values.extend(assistant_json_text_values(nested_value))
+    elif value is not None:
+        text_value = str(value).strip()
+        if text_value and len(text_value) <= 400:
+            values.append(text_value)
+    return values
+
+
+def assistant_primary_llava_description(llava_analysis: dict[str, Any]) -> str:
+    for key in ("item_description", "object_description", "description", "scene_context", "object_type", "item_classification"):
+        value = str(llava_analysis.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def assistant_detected_objects(llava_analysis: dict[str, Any]) -> list[str]:
+    objects: list[str] = []
+    for key in ("detected_objects", "objects", "object_type", "item_classification", "possible_category"):
+        value = llava_analysis.get(key)
+        candidates = value if isinstance(value, list) else [value]
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                candidate = candidate.get("name") or candidate.get("label") or candidate.get("object")
+            text_value = str(candidate or "").strip().lower()
+            if text_value and text_value not in objects:
+                objects.append(text_value)
+    return objects[:12]
+
+
+def assistant_item_has_image_or_llava(item: LostFoundItem) -> bool:
+    return bool(item.image_path or item.evidence_images or item.llava_analysis)
+
+
+def assistant_location_path(item: LostFoundItem) -> str:
+    location = str(item.location or "").strip()
+    secondary = str(item.secondary_location or "").strip()
+    if secondary and location and normalize_location_text(location) not in normalize_location_text(secondary):
+        return f"{secondary} > {location}"
+    return secondary or location or "Unknown"
+
+
+def assistant_report_reference(item: LostFoundItem) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "title": item.title,
+        "report_type": item.report_type,
+        "category": item.category,
+        "location": item.location,
+        "secondary_location": item.secondary_location,
+        "location_path": assistant_location_path(item),
+        "status": item.status,
+        "tags": item.tags,
+        "image_path": item.image_path,
+        "llava_description": assistant_primary_llava_description(item.llava_analysis),
+        "created_at": iso_datetime(item.created_at),
+        "updated_at": iso_datetime(item.updated_at),
+    }
+
+
+def assistant_report_payload(item: LostFoundItem) -> dict[str, Any]:
+    llava_analysis = item.llava_analysis
+    return {
+        "id": item.id,
+        "report_type": item.report_type,
+        "reporter_name": item.reporter_name,
+        "student_id": item.student_id,
+        "contact_info": item.contact_info,
+        "title": item.title,
+        "description": item.description,
+        "location": item.location,
+        "secondary_location": item.secondary_location,
+        "location_path": assistant_location_path(item),
+        "category": item.category,
+        "color": item.color,
+        "time_slot": item.time_slot,
+        "event_date": item.event_date.isoformat() if item.event_date else None,
+        "status": item.status,
+        "claimed": bool(item.claimed),
+        "is_room_item": bool(item.is_room_item),
+        "room_label": item.room_label or "",
+        "room_recorded_at": iso_datetime(item.room_recorded_at),
+        "returned_at": iso_datetime(item.returned_at),
+        "returned_by_claim_id": item.returned_by_claim_id,
+        "tags": item.tags,
+        "ai_summary": item.ai_summary,
+        "tag_source": item.tag_source,
+        "ai_analysis_status": item.ai_analysis_status or AI_ANALYSIS_SUCCESS,
+        "unverified_ai_analysis": bool(item.unverified_ai_analysis),
+        "image_path": item.image_path,
+        "image": {
+            "path": item.image_path,
+            "evidence_images": item.evidence_images,
+            "llava_description": assistant_primary_llava_description(llava_analysis),
+            "detected_objects": assistant_detected_objects(llava_analysis),
+            "confidence_score": llava_analysis.get("confidence_score"),
+            "analysis_status": item.ai_analysis_status or AI_ANALYSIS_SUCCESS,
+            "unverified_ai_analysis": bool(item.unverified_ai_analysis),
+        },
+        "evidence_images": item.evidence_images,
+        "evidence_details": item.evidence_details,
+        "evidence_summary": item.evidence_summary,
+        "evidence_inconsistencies": item.evidence_inconsistencies,
+        "evidence_missing_info": item.evidence_missing_info,
+        "evidence_validity": item.evidence_validity,
+        "review_status": item.review_status,
+        "review_notes": item.review_notes,
+        "abuse_genuine_score": int(item.abuse_genuine_score or 0),
+        "abuse_risk_level": item.abuse_risk_level or "medium",
+        "abuse_reasoning": item.abuse_reasoning or "",
+        "abuse_flagged": bool(item.abuse_flagged),
+        "abuse_override_status": item.abuse_override_status or "",
+        "abuse_override_notes": item.abuse_override_notes or "",
+        "submitted_by_user_id": item.submitted_by_user_id,
+        "deleted_at": iso_datetime(item.deleted_at),
+        "deleted_by_user_id": item.deleted_by_user_id,
+        "search_text": item.search_text or "",
+        "llava_analysis": llava_analysis,
+        "created_at": iso_datetime(item.created_at),
+        "updated_at": iso_datetime(item.updated_at),
+    }
+
+
+def assistant_upload_metadata(db: Session) -> list[dict[str, Any]]:
+    if UPLOAD_STORAGE_BACKEND == "database":
+        uploads = db.query(UploadObject).order_by(UploadObject.created_at.desc()).all()
+        return [
+            {
+                "path": upload.path,
+                "name": upload.original_name,
+                "content_type": upload.content_type,
+                "size": int(upload.size or 0),
+                "created_at": upload.created_at.isoformat() if upload.created_at else None,
+            }
+            for upload in uploads
+            if str(upload.content_type or "").lower().startswith("image/")
+            or Path(upload.path or "").suffix.lower() in IMAGE_UPLOAD_EXTENSIONS
+        ]
+
+    if not UPLOAD_DIR.exists():
+        return []
+    uploads: list[dict[str, Any]] = []
+    for path in UPLOAD_DIR.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in IMAGE_UPLOAD_EXTENSIONS:
+            continue
+        try:
+            stat_result = path.stat()
+        except OSError:
+            continue
+        uploads.append({
+            "path": upload_url_for_path(path),
+            "name": path.name,
+            "content_type": mime_type_for_extension(path.suffix.lower()),
+            "size": int(stat_result.st_size),
+            "created_at": datetime.fromtimestamp(stat_result.st_mtime).isoformat(),
+        })
+    return sorted(uploads, key=lambda value: value.get("created_at") or "", reverse=True)
+
+
+def mime_type_for_extension(extension: str) -> str:
+    normalized = str(extension or "").lower()
+    if normalized == ".png":
+        return "image/png"
+    if normalized in {".jpg", ".jpeg"}:
+        return "image/jpeg"
+    if normalized == ".webp":
+        return "image/webp"
+    if normalized == ".heic":
+        return "image/heic"
+    if normalized == ".heif":
+        return "image/heif"
+    return "application/octet-stream"
+
+
+def assistant_match_payload(item: LostFoundItem, score: int) -> dict[str, Any]:
+    payload = assistant_report_payload(item)
+    return {
+        "score": int(score),
+        "item": payload,
+    }
+
+
+def assistant_query_floor_number(query_text: str) -> int:
+    floor_number = floor_number_from_label(query_text)
+    if floor_number:
+        return floor_number
+    match = re.search(r"\b([1-9])(?:st|nd|rd|th)?\s+(?:floor|level)\b", query_text, flags=re.IGNORECASE)
+    return int(match.group(1)) if match else 0
+
+
+def assistant_location_filters(query_text: str) -> list[dict[str, Any]]:
+    normalized_query = normalize_location_text(query_text)
+    floor_number = assistant_query_floor_number(query_text)
+    filters: list[dict[str, Any]] = []
+    if normalized_query:
+        for entry in school_location_alias_entries():
+            alias = entry["alias"]
+            if alias and alias in normalized_query:
+                location = entry["location"]
+                filters.append({
+                    "location_id": str(location.get("id") or ""),
+                    "location_name": str(location.get("name") or location.get("label") or ""),
+                    "floor_number": floor_number,
+                })
+    if floor_number and not filters:
+        filters.append({"location_id": "", "location_name": "", "floor_number": floor_number})
+
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str, int]] = set()
+    for entry in filters:
+        key = (entry["location_id"], int(entry.get("floor_number") or 0))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(entry)
+    return deduped
+
+
+def assistant_report_ids_from_text(query_text: str) -> list[int]:
+    ids: list[int] = []
+    for match in re.finditer(r"(?:\breport\b|\bitem\b)\s*#?\s*(\d+)|#(\d+)", query_text, flags=re.IGNORECASE):
+        raw_value = match.group(1) or match.group(2)
+        try:
+            report_id = int(raw_value)
+        except (TypeError, ValueError):
+            continue
+        if report_id > 0 and report_id not in ids:
+            ids.append(report_id)
+    return ids[:20]
+
+
+def assistant_query_intent(query_text: str) -> dict[str, Any]:
+    normalized_query = normalize_search_text(query_text)
+    tokens = set(tokenize_search_text(normalized_query))
+    return {
+        "normalized_query": normalized_query,
+        "tokens": sorted(tokens),
+        "keywords": assistant_relevant_query_tokens(query_text),
+        "report_ids": assistant_report_ids_from_text(query_text),
+        "location_filters": assistant_location_filters(query_text),
+        "wants_lost": bool({"lost", "missing"} & tokens),
+        "wants_found": bool({"found", "available", "stored", "room"} & tokens),
+        "wants_image": bool(ASSISTANT_IMAGE_WORDS & tokens),
+        "wants_recent": bool(ASSISTANT_RECENT_WORDS & tokens),
+        "wants_stats": bool(ASSISTANT_STATS_WORDS & tokens),
+        "requires_records": bool(
+            {"find", "show", "list", "search", "where", "latest", "recent", "newest", "any", "anyone"} & tokens
+        ),
+    }
+
+
+def assistant_relevant_query_tokens(query_text: str) -> list[str]:
+    keywords: list[str] = []
+    for token in tokenize_search_text(query_text):
+        if token in ASSISTANT_QUERY_STOP_WORDS or len(token) <= 1:
+            continue
+        if token not in keywords:
+            keywords.append(token)
+        if len(token) > 3 and token.endswith("s"):
+            singular = token[:-1]
+            if singular and singular not in ASSISTANT_QUERY_STOP_WORDS and singular not in keywords:
+                keywords.append(singular)
+    return keywords[:12]
+
+
+def assistant_item_search_blob(item: LostFoundItem) -> str:
+    llava_analysis = item.llava_analysis
+    parts = [
+        item.title,
+        item.description,
+        item.location,
+        item.secondary_location,
+        assistant_location_path(item),
+        item.category,
+        item.color,
+        item.time_slot,
+        item.status,
+        item.ai_summary,
+        item.tag_source,
+        item.search_text,
+        item.evidence_details,
+        item.evidence_summary,
+        item.evidence_inconsistencies,
+        item.evidence_missing_info,
+        item.evidence_validity,
+        item.review_status,
+        item.review_notes,
+        item.abuse_reasoning,
+        item.image_path,
+        " ".join(item.evidence_images),
+        " ".join(item.tags),
+        " ".join(assistant_detected_objects(llava_analysis)),
+        assistant_primary_llava_description(llava_analysis),
+        " ".join(assistant_json_text_values(llava_analysis)),
+    ]
+    return " ".join(str(part or "").strip() for part in parts if str(part or "").strip())
+
+
+def assistant_item_matches_keywords(item: LostFoundItem, keywords: list[str]) -> bool:
+    if not keywords:
+        return True
+    normalized_blob = normalize_search_text(assistant_item_search_blob(item))
+    return any(
+        score_token_against_field(str(token), normalized_blob, exact=18, partial=12, fuzzy=9) > 0
+        for token in keywords
+    )
+
+
+def assistant_item_matches_location_filter(item: LostFoundItem, filters: list[dict[str, Any]]) -> bool:
+    if not filters:
+        return True
+
+    infos = map_item_location_infos(item)
+    normalized_blob = normalize_location_text(assistant_item_search_blob(item))
+    for location_filter in filters:
+        location_id = str(location_filter.get("location_id") or "")
+        location_name = str(location_filter.get("location_name") or "")
+        floor_number = int(location_filter.get("floor_number") or 0)
+
+        for info in infos:
+            if location_id and info.get("location_id") != location_id:
+                continue
+            if floor_number and info.get("floor_number") != floor_number:
+                continue
+            if location_id or floor_number:
+                return True
+
+        location_matches_text = not location_name or normalize_location_text(location_name) in normalized_blob
+        floor_matches_text = not floor_number or f"floor {floor_number}" in normalized_blob or f"level {floor_number}" in normalized_blob
+        if location_matches_text and floor_matches_text:
+            return True
+
+    return False
+
+
+def assistant_item_passes_query_intent(item: LostFoundItem, intent: dict[str, Any]) -> bool:
+    report_type = str(item.report_type or "").lower()
+    wants_lost = bool(intent.get("wants_lost"))
+    wants_found = bool(intent.get("wants_found"))
+    if wants_lost != wants_found:
+        if wants_lost and report_type != "lost":
+            return False
+        if wants_found and report_type != "found" and not item.is_room_item:
+            return False
+    if intent.get("wants_image") and not assistant_item_has_image_or_llava(item):
+        return False
+    if not assistant_item_matches_location_filter(item, intent.get("location_filters") or []):
+        return False
+    return True
+
+
+def assistant_score_item_for_query(item: LostFoundItem, query_text: str, intent: Optional[dict[str, Any]] = None) -> int:
+    intent = intent or assistant_query_intent(query_text)
+    if item.id in set(intent.get("report_ids") or []):
+        return 1000
+
+    normalized_query = str(intent.get("normalized_query") or normalize_search_text(query_text))
+    score = score_item_for_query(item, normalized_query)
+    normalized_blob = normalize_search_text(assistant_item_search_blob(item))
+    if normalized_query and normalized_query in normalized_blob:
+        score += 30
+
+    matched_keywords = 0
+    for token in intent.get("keywords") or assistant_relevant_query_tokens(query_text):
+        token_score = score_token_against_field(str(token), normalized_blob, exact=18, partial=12, fuzzy=9)
+        if token_score > 0:
+            matched_keywords += 1
+            score += token_score
+
+    if matched_keywords:
+        score += matched_keywords * 5
+    if intent.get("location_filters") and assistant_item_matches_location_filter(item, intent.get("location_filters") or []):
+        score += 35
+    if intent.get("wants_image") and assistant_item_has_image_or_llava(item):
+        score += 25
+    if intent.get("wants_lost") and str(item.report_type or "").lower() == "lost":
+        score += 12
+    if intent.get("wants_found") and (str(item.report_type or "").lower() == "found" or item.is_room_item):
+        score += 12
+    return score
+
+
+def assistant_scored_items(items: list[LostFoundItem], query_text: str) -> list[tuple[LostFoundItem, int]]:
+    intent = assistant_query_intent(query_text)
+    normalized_query = str(intent.get("normalized_query") or "")
+    keywords = intent.get("keywords") or []
+    has_filter = bool(
+        intent.get("report_ids")
+        or intent.get("location_filters")
+        or intent.get("wants_image")
+        or intent.get("wants_lost")
+        or intent.get("wants_found")
+    )
+    sorted_items = sorted(items, key=lambda item: item.created_at or datetime.min, reverse=True)
+    if not normalized_query and not has_filter:
+        return [(item, 0) for item in sorted_items]
+    if intent.get("wants_stats") and not keywords and not has_filter:
+        return [(item, 1) for item in sorted_items]
+
+    scored: list[tuple[LostFoundItem, int]] = []
+    for item in items:
+        if not assistant_item_passes_query_intent(item, intent):
+            continue
+        if keywords and not assistant_item_matches_keywords(item, keywords):
+            continue
+        score = assistant_score_item_for_query(item, query_text, intent)
+        if score > 0 or (has_filter and not keywords):
+            scored.append((item, score))
+
+    scored.sort(key=lambda value: (value[1], value[0].created_at or datetime.min), reverse=True)
+    return scored
+
+
+def assistant_search_items(items: list[LostFoundItem], query_text: str, *, limit: int = 8) -> list[dict[str, Any]]:
+    scored = assistant_scored_items(items, query_text)
+    return [assistant_match_payload(item, score) for item, score in scored[:limit]]
+
+
+def assistant_generated_query(message: str, matches: list[dict[str, Any]]) -> str:
+    intent = assistant_query_intent(message)
+    tokens = intent.get("keywords") or []
+    query_parts: list[str] = []
+    for token in tokens[:8]:
+        if token not in query_parts:
+            query_parts.append(token)
+    for location_filter in intent.get("location_filters") or []:
+        location_name = str(location_filter.get("location_name") or "").strip()
+        floor_number = int(location_filter.get("floor_number") or 0)
+        if location_name and location_name.lower() not in " ".join(query_parts).lower():
+            query_parts.append(location_name)
+        if floor_number and f"floor {floor_number}" not in " ".join(query_parts).lower():
+            query_parts.append(f"Floor {floor_number}")
+    if intent.get("wants_image") and "image" not in query_parts:
+        query_parts.append("image")
+
+    top_match = matches[0] if matches else {}
+    top_item = top_match.get("item") if isinstance(top_match.get("item"), dict) else {}
+    top_score = int(top_match.get("score") or 0) if isinstance(top_match, dict) else 0
+    if top_item and top_score >= 45:
+        for value in [
+            top_item.get("color"),
+            top_item.get("category"),
+            top_item.get("location"),
+        ]:
+            text_value = str(value or "").strip()
+            if text_value and text_value.lower() not in " ".join(query_parts).lower():
+                query_parts.append(text_value)
+
+    return " ".join(query_parts).strip()[:160]
+
+
+def assistant_counter_rows(counter: Counter, *, limit: int = 20, key_name: str = "name") -> list[dict[str, Any]]:
+    return [
+        {key_name: str(key), "count": int(count)}
+        for key, count in counter.most_common(limit)
+        if str(key).strip()
+    ]
+
+
+def assistant_floor_paths_for_item(item: LostFoundItem) -> list[str]:
+    paths: list[str] = []
+    for info in map_item_location_infos(item):
+        floor_number = int(info.get("floor_number") or 0)
+        location_name = str(info.get("location_name") or "").strip()
+        if floor_number and location_name:
+            path = f"{location_name} > Floor {floor_number}"
+            if path not in paths:
+                paths.append(path)
+    return paths
+
+
+def assistant_report_statistics(items: list[LostFoundItem]) -> dict[str, Any]:
+    location_counter: Counter = Counter()
+    floor_counter: Counter = Counter()
+    tag_counter: Counter = Counter()
+    status_counter: Counter = Counter()
+    type_counter: Counter = Counter()
+    category_counter: Counter = Counter()
+    time_slot_counter: Counter = Counter()
+    day_counter: Counter = Counter()
+    month_counter: Counter = Counter()
+
+    for item in items:
+        location_counter[assistant_location_path(item)] += 1
+        floor_paths = assistant_floor_paths_for_item(item)
+        if floor_paths:
+            for floor_path in floor_paths:
+                floor_counter[floor_path] += 1
+        elif item.location or item.secondary_location:
+            floor_counter[f"No floor > {assistant_location_path(item)}"] += 1
+        for tag in item.tags:
+            tag_counter[tag] += 1
+        status_counter[item.status or "Unknown"] += 1
+        type_counter[item.report_type or "unknown"] += 1
+        category_counter[item.category or "Unknown"] += 1
+        time_slot_counter[item.time_slot or "Unknown"] += 1
+        timestamp = item.event_date or (item.created_at.date() if item.created_at else None)
+        if timestamp:
+            day_counter[timestamp.isoformat()] += 1
+            month_counter[timestamp.strftime("%Y-%m")] += 1
+
+    return {
+        "by_location": assistant_counter_rows(location_counter, limit=40, key_name="location"),
+        "by_floor": assistant_counter_rows(floor_counter, limit=40, key_name="floor"),
+        "by_tag": assistant_counter_rows(tag_counter, limit=40, key_name="tag"),
+        "by_status": assistant_counter_rows(status_counter, limit=20, key_name="status"),
+        "by_report_type": assistant_counter_rows(type_counter, limit=10, key_name="report_type"),
+        "by_category": assistant_counter_rows(category_counter, limit=20, key_name="category"),
+        "by_time_slot": assistant_counter_rows(time_slot_counter, limit=20, key_name="time_slot"),
+        "by_day": [
+            {"date": day, "count": int(count)}
+            for day, count in sorted(day_counter.items(), reverse=True)[:60]
+        ],
+        "by_month": [
+            {"month": month, "count": int(count)}
+            for month, count in sorted(month_counter.items(), reverse=True)[:36]
+        ],
+    }
+
+
+def assistant_heatmap_summary(db: Session) -> dict[str, Any]:
+    regions = db.query(MapRegion).order_by(MapRegion.zone.asc(), MapRegion.label.asc()).all()
+    stats = build_map_item_stats(db, regions)
+
+    def top_rows(source: dict[str, dict[str, Any]], key_name: str) -> list[dict[str, Any]]:
+        rows = []
+        for key, value in source.items():
+            rows.append({
+                key_name: key,
+                "item_count": int(value.get("item_count") or 0),
+                "lost_count": int(value.get("lost_count") or 0),
+                "recent_count": int(value.get("recent_count") or 0),
+                "recent_activity": bool(value.get("recent_activity")),
+            })
+        return sorted(rows, key=lambda row: (row["item_count"], row["recent_count"]), reverse=True)[:20]
+
+    return {
+        "top_zones": top_rows(stats.get("zones", {}), "zone"),
+        "top_regions": top_rows(stats.get("regions", {}), "region_id"),
+        "top_locations": top_rows(stats.get("locations", {}), "location_id"),
+        "raw_stats": stats,
+    }
+
+
+def assistant_global_context(db: Session, items: list[LostFoundItem]) -> dict[str, Any]:
+    active_items = [
+        item
+        for item in items
+        if item.deleted_at is None and not item.claimed and str(item.status or "").lower() != "archived"
+    ]
+    active_location_counter = Counter(assistant_location_path(item) for item in active_items)
+    statistics = assistant_report_statistics(items)
+    return {
+        "source": "database/report-storage/ai-analysis-storage",
+        "read_only": True,
+        "total_report_count": len(items),
+        "active_report_count": len(active_items),
+        "deleted_report_count": sum(1 for item in items if item.deleted_at is not None),
+        "image_report_count": sum(1 for item in items if assistant_item_has_image_or_llava(item)),
+        "llava_analysis_count": sum(1 for item in items if item.llava_analysis),
+        "top_locations_by_reports": statistics.get("by_location", [])[:15],
+        "most_recent_reports": [assistant_report_reference(item) for item in sorted(items, key=lambda item: item.created_at or datetime.min, reverse=True)[:12]],
+        "most_frequent_tags": statistics.get("by_tag", [])[:20],
+        "active_locations": assistant_counter_rows(active_location_counter, limit=30, key_name="location"),
+        "heatmap_summary": assistant_heatmap_summary(db),
+        "statistics": statistics,
+    }
+
+
+def assistant_location_breakdown(items: list[LostFoundItem]) -> dict[str, Any]:
+    location_counter = Counter(assistant_location_path(item) for item in items)
+    floor_counter = Counter(
+        floor_path
+        for item in items
+        for floor_path in (assistant_floor_paths_for_item(item) or [f"No floor > {assistant_location_path(item)}"])
+    )
+    recent_by_location: dict[str, list[dict[str, Any]]] = {}
+    for item in sorted(items, key=lambda value: value.created_at or datetime.min, reverse=True):
+        location_path = assistant_location_path(item)
+        recent_by_location.setdefault(location_path, [])
+        if len(recent_by_location[location_path]) < 3:
+            recent_by_location[location_path].append(assistant_report_reference(item))
+
+    ranked_locations = assistant_counter_rows(location_counter, limit=30, key_name="location")
+    for row in ranked_locations:
+        row["recent_examples"] = recent_by_location.get(row["location"], [])
+    return {
+        "ranked_locations": ranked_locations,
+        "ranked_floors": assistant_counter_rows(floor_counter, limit=30, key_name="floor"),
+    }
+
+
+def assistant_report_history_context(db: Session, report_ids: list[int], *, limit: Optional[int] = ASSISTANT_CONTEXT_LIMIT) -> list[dict[str, Any]]:
+    if not report_ids:
+        return []
+    query = (
+        db.query(AuditLog)
+        .filter(AuditLog.entity_type == "report", AuditLog.entity_id.in_(report_ids))
+        .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+    )
+    if limit:
+        query = query.limit(limit)
+    audits = query.all()
+    users = get_user_map(db, [audit.user_id or 0 for audit in audits])
+    return [serialize_audit_log(audit, users.get(audit.user_id or 0)) for audit in audits]
+
+
+def assistant_recent_audit_context(db: Session, *, include_all: bool = False) -> dict[str, Any]:
+    total_count = db.query(AuditLog).count()
+    query = (
+        db.query(AuditLog)
+        .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+    )
+    if not include_all:
+        query = query.limit(ASSISTANT_CONTEXT_LIMIT)
+    audits = query.all()
+    users = get_user_map(db, [audit.user_id or 0 for audit in audits])
+    return {
+        "total_count": total_count,
+        "returned_count": len(audits),
+        "truncated": len(audits) < total_count,
+        "recent": [serialize_audit_log(audit, users.get(audit.user_id or 0)) for audit in audits],
+        "admin_action_log_lines": assistant_log_tail(ADMIN_LOG_PATH, limit=40),
+    }
+
+
+def assistant_log_tail(path: Path, *, limit: int) -> list[str]:
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    return lines[-limit:]
+
+
+def assistant_query_logs_context(db: Session, *, include_all: bool = False) -> dict[str, Any]:
+    query_message_query = (
+        db.query(QueryMessage)
+        .order_by(QueryMessage.created_at.desc(), QueryMessage.id.desc())
+    )
+    legacy_item_query = (
+        db.query(ItemQuery)
+        .order_by(ItemQuery.created_at.desc(), ItemQuery.id.desc())
+    )
+    search_log_query = (
+        db.query(AIInspectionLog)
+        .filter(AIInspectionLog.route == "/items")
+        .order_by(AIInspectionLog.created_at.desc(), AIInspectionLog.id.desc())
+    )
+    if not include_all:
+        query_message_query = query_message_query.limit(ASSISTANT_CONTEXT_LIMIT)
+        legacy_item_query = legacy_item_query.limit(ASSISTANT_CONTEXT_LIMIT)
+        search_log_query = search_log_query.limit(ASSISTANT_CONTEXT_LIMIT)
+
+    query_messages = query_message_query.all()
+    legacy_item_queries = legacy_item_query.all()
+    search_logs = search_log_query.all()
+    query_message_count = db.query(QueryMessage).count()
+    legacy_item_query_count = db.query(ItemQuery).count()
+    logged_report_search_count = db.query(AIInspectionLog).filter(AIInspectionLog.route == "/items").count()
+    return {
+        "query_message_count": query_message_count,
+        "legacy_item_query_count": legacy_item_query_count,
+        "logged_report_search_count": logged_report_search_count,
+        "returned_query_message_count": len(query_messages),
+        "returned_legacy_item_query_count": len(legacy_item_queries),
+        "returned_logged_report_search_count": len(search_logs),
+        "truncated": (
+            len(query_messages) < query_message_count
+            or len(legacy_item_queries) < legacy_item_query_count
+            or len(search_logs) < logged_report_search_count
+        ),
+        "recent_query_messages": [
+            {
+                "id": message.id,
+                "item_id": message.item_id,
+                "user_id": message.user_id,
+                "role": message.role,
+                "message": message.message,
+                "language": normalize_language(message.language),
+                "attachment_path": message.attachment_path,
+                "created_at": iso_datetime(message.created_at),
+            }
+            for message in query_messages
+        ],
+        "recent_legacy_item_queries": [
+            {
+                "id": query.id,
+                "item_id": query.item_id,
+                "user_id": query.user_id,
+                "role": query.role,
+                "message": query.message,
+                "created_at": iso_datetime(query.created_at),
+            }
+            for query in legacy_item_queries
+        ],
+        "recent_logged_report_searches": [
+            {
+                "id": log.id,
+                "user_id": log.user_id,
+                "route": log.route,
+                "input_text": log.input_text,
+                "allowed": bool(log.allowed),
+                "reason": log.reason,
+                "tags": log.tags,
+                "created_at": iso_datetime(log.created_at),
+            }
+            for log in search_logs
+        ],
+    }
+
+
+def assistant_image_context(items: list[LostFoundItem]) -> list[dict[str, Any]]:
+    return [
+        {
+            "report": assistant_report_reference(item),
+            "image_path": item.image_path,
+            "evidence_images": item.evidence_images,
+            "llava_description": assistant_primary_llava_description(item.llava_analysis),
+            "detected_objects": assistant_detected_objects(item.llava_analysis),
+            "confidence_score": item.llava_analysis.get("confidence_score"),
+            "llava_analysis": item.llava_analysis,
+        }
+        for item in items
+        if assistant_item_has_image_or_llava(item)
+    ][:ASSISTANT_DETAIL_LIMIT]
+
+
+def assistant_no_records_reply(query_text: str, language: str) -> str:
+    query = str(query_text or "").strip()
+    suffix = f' for "{query}"' if query else ""
+    if normalize_language(language) == "zh-CN":
+        return f"No records found{suffix}. 数据库中没有匹配记录。"
+    if normalize_language(language) == "th":
+        return f"No records found{suffix}. ไม่พบระเบียนที่ตรงกันในฐานข้อมูล"
+    return f"No records found{suffix}."
+
+
+def assistant_query_requires_record_answer(query_text: str, intent: dict[str, Any]) -> bool:
+    normalized_query = str(intent.get("normalized_query") or normalize_search_text(query_text))
+    tokens = set(intent.get("tokens") or [])
+    return bool(
+        intent.get("report_ids")
+        or intent.get("location_filters")
+        or intent.get("wants_image")
+        or intent.get("wants_stats")
+        or ({"find", "show", "list", "search", "latest", "recent", "newest", "anyone"} & tokens)
+        or re.search(r"\b(has anyone|are there|do we have)\b", normalized_query)
+    )
+
+
+def assistant_data_access_context(
+    db: Session,
+    *,
+    items: list[LostFoundItem],
+    query_text: str,
+    suggested_query: str,
+    scoped_scored_items: list[tuple[LostFoundItem, int]],
+    locations: list[dict[str, Any]],
+    map_regions: list[dict[str, Any]],
+    floor_mappings: list[dict[str, Any]],
+    upload_metadata: list[dict[str, Any]],
+) -> dict[str, Any]:
+    intent = assistant_query_intent(query_text)
+    scoped_items = [item for item, _score in scoped_scored_items]
+    items_by_id = {item.id: item for item in items}
+    requested_ids = intent.get("report_ids") or []
+    query_tokens = set(intent.get("tokens") or [])
+    include_full_audit = bool(query_tokens & {
+        "action",
+        "actions",
+        "admin",
+        "audit",
+        "audits",
+        "change",
+        "changes",
+        "edit",
+        "edited",
+        "edits",
+        "history",
+        "status",
+    })
+    include_full_query_logs = bool(query_tokens & {"log", "logged", "logs", "queries", "query", "search", "searches"})
+    specific_reports = [
+        assistant_report_payload(items_by_id[report_id])
+        for report_id in requested_ids
+        if report_id in items_by_id
+    ]
+    if not specific_reports and (intent.get("wants_image") or requested_ids) and scoped_items:
+        specific_reports = [assistant_report_payload(item) for item in scoped_items[:ASSISTANT_DETAIL_LIMIT]]
+
+    missing_report_ids = [report_id for report_id in requested_ids if report_id not in items_by_id]
+    no_records_found = assistant_query_requires_record_answer(query_text, intent) and not scoped_items and not specific_reports
+
+    return {
+        "source_of_truth": {
+            "database": True,
+            "report_storage_layer": True,
+            "ai_analysis_storage": True,
+            "frontend_state_used": False,
+            "read_only": True,
+        },
+        "query_summary": {
+            "query_text": query_text,
+            "suggested_query": suggested_query,
+            "intent": intent,
+            "searched_report_count": len(items),
+            "matched_report_count": len(scoped_items),
+            "no_records_found": no_records_found,
+            "missing_report_ids": missing_report_ids,
+            "top_matches": [
+                {**assistant_report_reference(item), "score": int(score)}
+                for item, score in scoped_scored_items[:20]
+            ],
+            "location_breakdown": assistant_location_breakdown(scoped_items),
+            "image_reports": assistant_image_context(scoped_items),
+        },
+        "global_context": assistant_global_context(db, items),
+        "on_demand_context": {
+            "specific_reports": specific_reports,
+            "specific_report_history": assistant_report_history_context(db, requested_ids, limit=None),
+            "recent_report_history": assistant_report_history_context(db, [item.id for item in scoped_items[:10]]),
+            "admin_actions": assistant_recent_audit_context(db, include_all=include_full_audit),
+            "user_search_and_query_logs": assistant_query_logs_context(db, include_all=include_full_query_logs),
+            "uploads": upload_metadata,
+            "locations": locations,
+            "map_regions": map_regions,
+            "floor_mappings": floor_mappings,
+        },
+    }
+
+
+def assistant_location_payload(db: Session) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    regions = db.query(MapRegion).order_by(MapRegion.zone.asc(), MapRegion.label.asc()).all()
+    return (
+        [serialize_school_location(location) for location in SCHOOL_LOCATION_DATA],
+        [serialize_map_region(region) for region in regions],
+    )
+
+
+def assistant_floor_mapping_payload() -> list[dict[str, Any]]:
+    mappings: list[dict[str, Any]] = []
+    rules_by_location = {}
+    for rule in SCHOOL_LOCATION_CODE_RULES:
+        rules_by_location.setdefault(rule["location_id"], []).append(rule)
+
+    for location in SCHOOL_LOCATION_DATA:
+        location_id = str(location.get("id") or "")
+        location_name = str(location.get("name") or location.get("label") or "")
+        floors = location.get("floors") if isinstance(location.get("floors"), list) else []
+        location_rules = rules_by_location.get(location_id, [])
+        for floor in floors:
+            if not isinstance(floor, dict):
+                continue
+            floor_label = str(floor.get("label") or floor.get("id") or "").strip()
+            floor_number = floor_number_from_label(floor_label)
+            code_rules = [
+                rule
+                for rule in location_rules
+                if floor_number and int(rule["min_floor"]) <= floor_number <= int(rule["max_floor"])
+            ]
+            code_hint = ", ".join(
+                f"{rule['prefix']}{floor_number}xx"
+                for rule in code_rules
+            )
+            sub_locations = floor.get("sub_locations") if isinstance(floor.get("sub_locations"), list) else []
+            mappings.append({
+                "location_id": location_id,
+                "location": location_name,
+                "floor_id": str(floor.get("id") or floor_label),
+                "floor_label": floor_label,
+                "floor_number": floor_number,
+                "path": f"{location_name} > {floor_label}" if location_name and floor_label else location_name,
+                "code_hint": code_hint,
+                "sub_locations": [
+                    str(sub_location.get("label") or sub_location.get("id") or "").strip()
+                    for sub_location in sub_locations
+                    if isinstance(sub_location, dict) and str(sub_location.get("label") or sub_location.get("id") or "").strip()
+                ],
+            })
+
+    return mappings
+
+
+@app.post("/assistant/chat")
+def site_assistant_chat(
+    payload: AssistantChatPayload,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    enforce_rate_limit("chat", request=request, current_user=current_user)
+    reason = obvious_bad_query_reason(payload.message)
+    if reason:
+        raise HTTPException(status_code=400, detail=reason)
+
+    message = minimally_validate_field(payload.message, "Assistant message", min_meaningful_chars=1, max_chars=420)
+    normalized_language = normalize_language(payload.language or current_user.preferred_language)
+
+    items = db.query(LostFoundItem).order_by(LostFoundItem.created_at.desc()).all()
+    reports = [assistant_report_payload(item) for item in items]
+    locations, map_regions = assistant_location_payload(db)
+    floor_mappings = assistant_floor_mapping_payload()
+    uploads = assistant_upload_metadata(db)
+
+    likely_scored_items = assistant_scored_items(items, message)
+    likely_matches = [assistant_match_payload(item, score) for item, score in likely_scored_items[:6]]
+    suggested_query = clean_text(payload.query)[:160] if payload.query.strip() else assistant_generated_query(message, likely_matches)
+    search_scored_items = assistant_scored_items(items, suggested_query or message) if payload.execute_search else []
+    search_results = [assistant_match_payload(item, score) for item, score in search_scored_items[:10]]
+    scoped_scored_items = search_scored_items if payload.execute_search else likely_scored_items
+    data_context = assistant_data_access_context(
+        db,
+        items=items,
+        query_text=message,
+        suggested_query=suggested_query,
+        scoped_scored_items=scoped_scored_items,
+        locations=locations,
+        map_regions=map_regions,
+        floor_mappings=floor_mappings,
+        upload_metadata=uploads,
+    )
+
+    package = generate_site_helper_package(
+        user_message=message,
+        reports=reports,
+        likely_matches=likely_matches,
+        locations=locations,
+        map_regions=map_regions,
+        floor_mappings=floor_mappings,
+        upload_metadata=uploads,
+        suggested_query=suggested_query,
+        execute_search=bool(payload.execute_search),
+        search_results=search_results,
+        data_context=data_context,
+        language=normalized_language,
+    )
+    if data_context.get("query_summary", {}).get("no_records_found"):
+        package["reply"] = assistant_no_records_reply(suggested_query or message, normalized_language)
+
+    return {
+        "reply": package.get("reply", ""),
+        "suggested_query": package.get("suggested_query") or suggested_query,
+        "suggested_actions": package.get("suggested_actions", []),
+        "navigation_target": package.get("navigation_target", "none"),
+        "can_execute_search": bool(suggested_query) and not payload.execute_search,
+        "executed_search": bool(payload.execute_search),
+        "likely_matches": likely_matches[:4],
+        "results": search_results,
+        "report_count": len(reports),
+        "location_count": len(locations) + len(map_regions),
+        "floor_mapping_count": len(floor_mappings),
+        "upload_metadata_count": len(uploads),
+        "data_context_summary": {
+            "source_of_truth": data_context.get("source_of_truth", {}),
+            "matched_report_count": data_context.get("query_summary", {}).get("matched_report_count", 0),
+            "no_records_found": data_context.get("query_summary", {}).get("no_records_found", False),
+        },
+        "language": normalized_language,
     }
 
 
@@ -3330,22 +6077,51 @@ def admin_upload_room_items(
     for index, image_payload in enumerate(payload.images, start=1):
         image_path = decode_image_payload(image_payload)
         ai_result = None
+        llava_analysis: dict[str, Any] = {}
+        ai_analysis_status = AI_ANALYSIS_SUCCESS
+        unverified_ai_analysis = False
         try:
             if image_path:
+                report_logger.info("[LLaVA] Image detected")
                 image_file = resolve_upload_path(image_path)
                 if not image_file or not image_file.exists():
                     raise HTTPException(status_code=404, detail="The stored image for this room item is missing.")
+                report_logger.info("[LLaVA] Sending image to model")
                 inspection = inspect_image_upload(str(image_file), item_label=cleaned_label or f"room-item-{index}")
+                report_logger.info("[LLaVA] Model: %s", inspection.get("model") or "unknown")
+                llava_analysis = llava_analysis_payload(
+                    image_path=image_path,
+                    inspection=inspection,
+                    ai_analysis_status=AI_ANALYSIS_SUCCESS,
+                )
                 if inspection.get("moderation") != "SAFE":
+                    ai_analysis_status = AI_ANALYSIS_FAILED
+                    llava_analysis["ai_analysis_status"] = AI_ANALYSIS_FAILED
+                    llava_analysis["fallback_reason"] = "Image moderation returned unsafe."
+                    llava_analysis["request_metadata"]["ai_analysis_status"] = AI_ANALYSIS_FAILED
+                    llava_analysis["request_metadata"]["fallback_reason"] = "Image moderation returned unsafe."
+                    report_logger.warning("[LLaVA] Analysis failed status=%s reason=image-unsafe", ai_analysis_status)
                     delete_uploaded_path(image_path)
                     raise HTTPException(status_code=400, detail="Image rejected as unsafe for the school lost and found system.")
-                ai_result = {
-                    "summary": "Room upload image reviewed.",
-                    "category": "Other",
-                    "color": "",
-                    "tags": inspection.get("tags", []),
-                    "tag_source": "llava-image",
-                }
+                inspection_tags = inspection.get("tags", [])
+                has_primary_description = llava_has_primary_description(llava_analysis)
+                if not inspection_tags and not has_primary_description:
+                    reason = "LLaVA returned no usable tags or description."
+                    report_logger.error("[LLaVA] Image processing stopped for room item %s: %s", index, reason)
+                    delete_uploaded_path(image_path)
+                    raise HTTPException(status_code=503, detail=f"LLaVA image processing stopped: {reason}")
+                if inspection_tags or has_primary_description:
+                    weak_image_tags = inspection.get("validation_strength") == "low" or bool(inspection.get("tag_validation_warnings"))
+                    ai_result = {
+                        "summary": llava_report_summary(llava_analysis),
+                        "category": llava_category_or_default(inspection.get("possible_category"), "Other"),
+                        "color": ", ".join(clean_ai_list(inspection.get("colours"))[:2]),
+                        "tags": inspection_tags,
+                        "tag_source": "llava-image-weak" if weak_image_tags else "llava-image",
+                    }
+                    unverified_ai_analysis = bool(weak_image_tags)
+                    llava_analysis["unverified_ai_analysis"] = bool(weak_image_tags)
+                    report_logger.info("[LLaVA] Analysis complete status=%s", ai_analysis_status)
 
             if not ai_result:
                 ai_result = generate_text_tag_result(
@@ -3357,14 +6133,20 @@ def admin_upload_room_items(
                 )
         except HTTPException:
             raise
-        except Exception:
-            ai_result = fallback_tags(
-                cleaned_label or "Lost & Found Room item",
-                cleaned_label or "Physical item stored in the lost and found room.",
-                "Other",
-                "",
-                LOST_FOUND_ROOM_LABEL,
-            )
+        except Exception as exc:
+            fallback_reason = str(exc) or exc.__class__.__name__
+            if image_path:
+                llava_analysis = llava_analysis_payload(
+                    image_path=image_path,
+                    error=exc,
+                    fallback_source="",
+                    ai_analysis_status=AI_ANALYSIS_FAILED,
+                    fallback_reason=fallback_reason,
+                )
+                report_logger.error("[LLaVA] Image processing stopped for room item %s: %s", index, fallback_reason)
+                delete_uploaded_path(image_path)
+                raise HTTPException(status_code=503, detail=f"LLaVA image processing stopped: {fallback_reason}") from exc
+            raise
 
         title = cleaned_label or f"Room item {index}"
         description = cleaned_label or "Physical item currently stored in the lost and found room."
@@ -3389,6 +6171,9 @@ def admin_upload_room_items(
             tags=tags,
             ai_summary=ai_result.get("summary", ""),
             image_path=image_path,
+            llava_analysis_json=json.dumps(llava_analysis, ensure_ascii=False),
+            ai_analysis_status=ai_analysis_status,
+            unverified_ai_analysis=unverified_ai_analysis,
             search_text=build_search_text(
                 title=title,
                 description=description,
@@ -3411,6 +6196,8 @@ def admin_upload_room_items(
         db.add(item)
         db.commit()
         db.refresh(item)
+        if image_path:
+            report_logger.info("[LLaVA] Attached metadata to report #%s", item.id)
         create_audit_log(
             db,
             user_id=current_user.id,
@@ -3461,79 +6248,126 @@ async def report_item(
     reporter_name = payload.reporter_name.strip() or current_user.username
     location = payload.location.strip() or "Unknown"
     category = payload.category.strip() or "Other"
+    secondary_location = payload.secondary_location.strip()
+    location, secondary_location = canonical_report_location(location, secondary_location)
 
     reporter_name = moderate_field(reporter_name, "Reporter name", min_meaningful_chars=2, max_chars=80)
     title = moderate_field(payload.title, "Item title", min_meaningful_chars=3, max_chars=80)
     description = moderate_field(payload.description, "Item description", min_meaningful_chars=6, max_chars=450)
     evidence_details = payload.evidence_details.strip()
-    secondary_location = payload.secondary_location.strip()
     student_id = payload.student_id.strip()
     contact_info = payload.contact_info.strip()
     color = payload.color.strip()
     time_slot = payload.time_slot.strip() or "Unknown"
 
-    moderation = moderate_request(
-        db,
-        current_user=current_user,
-        route="/items/report",
-        input_text=build_input_text(title, description, location, category),
-    )
-    if not moderation.get("allowed", False):
-        return reject_blocked_request(
-            route="/items/report",
-            current_user=current_user,
-            reason=str(moderation.get("reason", "Request is not relevant to the lost-and-found system.")),
-            content=build_input_text(title, description, location, category),
-        )
-
     image_path = decode_image_payload(payload.image)
     ai_result = None
+    llava_analysis: dict[str, Any] = {}
+    ai_analysis_status = AI_ANALYSIS_SUCCESS
+    unverified_ai_analysis = False
 
     try:
         if image_path:
+            report_logger.info(
+                "[LLaVA] Image detected filename=%s path=%s",
+                Path(payload.image.filename or "").name if payload.image else "",
+                image_path,
+            )
             image_file = resolve_upload_path(image_path)
             image_file_for_inspection = image_file if image_file else (BASE_DIR / image_path.lstrip("/"))
             try:
+                report_logger.info("[LLaVA] Sending image to model")
                 inspection = inspect_image_upload(str(image_file_for_inspection), item_label=title or reporter_name or "upload")
-            except Exception as exc:
-                report_logger.warning("[LLaVA] hard failure for item %s: %s", title or "upload", exc)
-                if image_file and not image_file.exists():
-                    image_path = None
-                ai_result = generate_text_tag_result(
-                    title=title,
-                    description=description,
-                    location=location,
-                    category=category,
-                    color=color,
+                report_logger.info("[LLaVA] Model: %s", inspection.get("model") or "unknown")
+            except (OSError, requests.RequestException, ValueError, RuntimeError, json.JSONDecodeError) as exc:
+                failure_reason = str(exc) or exc.__class__.__name__
+                report_logger.error("[LLaVA] Image processing stopped for item %s: %s", title or "upload", failure_reason)
+                llava_analysis = llava_analysis_payload(
+                    image_path=image_path or "",
+                    error=exc,
+                    fallback_source="",
+                    ai_analysis_status=AI_ANALYSIS_FAILED,
+                    fallback_reason=failure_reason,
                 )
+                raise HTTPException(status_code=503, detail=f"LLaVA image processing stopped: {failure_reason}") from exc
             else:
+                llava_analysis = llava_analysis_payload(
+                    image_path=image_path,
+                    inspection=inspection,
+                    ai_analysis_status=AI_ANALYSIS_SUCCESS,
+                )
                 if inspection.get("moderation") != "SAFE":
+                    ai_analysis_status = AI_ANALYSIS_FAILED
+                    llava_analysis["ai_analysis_status"] = AI_ANALYSIS_FAILED
+                    llava_analysis["fallback_reason"] = "Image moderation returned unsafe."
+                    llava_analysis["request_metadata"]["ai_analysis_status"] = AI_ANALYSIS_FAILED
+                    llava_analysis["request_metadata"]["fallback_reason"] = "Image moderation returned unsafe."
+                    report_logger.warning("[LLaVA] Analysis failed status=%s reason=image-unsafe", ai_analysis_status)
+                    log_ai_package(
+                        db,
+                        current_user=current_user,
+                        route="/items/report/llava-image-analysis",
+                        input_text=build_input_text(title, description, evidence_details, location),
+                        package=llava_analysis,
+                        feature="llava-image-analysis",
+                    )
                     delete_uploaded_path(image_path)
+                    image_path = None
                     raise HTTPException(
                         status_code=400,
                         detail="Image rejected as unsafe for the school lost and found system.",
                     )
 
                 inspection_tags = inspection.get("tags", [])
-                if not inspection_tags:
-                    ai_result = generate_text_tag_result(
-                        title=title,
-                        description=description,
-                        location=location,
-                        category=category,
-                        color=color,
-                    )
-                    ai_result["tag_source"] = "text-fallback-after-llava-failure"
+                has_primary_description = llava_has_primary_description(llava_analysis)
+                if not inspection_tags and not has_primary_description:
+                    reason = "LLaVA returned no usable tags or description."
+                    llava_analysis["unverified_ai_analysis"] = True
+                    llava_analysis["ai_analysis_status"] = AI_ANALYSIS_FAILED
+                    llava_analysis["fallback_reason"] = reason
+                    llava_analysis["request_metadata"]["ai_analysis_status"] = AI_ANALYSIS_FAILED
+                    llava_analysis["request_metadata"]["fallback_reason"] = reason
+                    report_logger.error("[LLaVA] Image processing stopped for item %s: %s", title or "upload", reason)
+                    raise HTTPException(status_code=503, detail=f"LLaVA image processing stopped: {reason}")
                 else:
                     weak_image_tags = inspection.get("validation_strength") == "low" or bool(inspection.get("tag_validation_warnings"))
+                    possible_category = llava_category_or_default(inspection.get("possible_category"), category)
+                    analysis_colours = clean_ai_list(inspection.get("colours"))
                     ai_result = {
-                        "summary": "LLaVA image tags (low confidence)" if weak_image_tags else "[LLaVA] using raw output",
-                        "category": category,
-                        "color": color,
+                        "summary": llava_report_summary(llava_analysis),
+                        "category": possible_category if category == "Other" else category,
+                        "color": color or ", ".join(analysis_colours[:2]),
                         "tags": inspection_tags,
                         "tag_source": "llava-image-weak" if weak_image_tags else "llava-image",
                     }
-                    report_logger.info("[LLaVA] using raw output")
+                    unverified_ai_analysis = bool(weak_image_tags)
+                    llava_analysis["unverified_ai_analysis"] = bool(weak_image_tags)
+                    report_logger.info("[LLaVA] Analysis complete status=%s", ai_analysis_status)
+
+            log_ai_package(
+                db,
+                current_user=current_user,
+                route="/items/report/llava-image-analysis",
+                input_text=build_input_text(title, description, evidence_details, location),
+                package=llava_analysis,
+                feature="llava-image-analysis",
+            )
+
+        moderation = moderate_request(
+            db,
+            current_user=current_user,
+            route="/items/report",
+            input_text=build_input_text(title, description, location, category),
+        )
+        if not moderation.get("allowed", False):
+            if image_path:
+                delete_uploaded_path(image_path)
+            return reject_blocked_request(
+                route="/items/report",
+                current_user=current_user,
+                reason=str(moderation.get("reason", "Request is not relevant to the lost-and-found system.")),
+                content=build_input_text(title, description, location, category),
+            )
 
         if not ai_result:
             try:
@@ -3591,6 +6425,9 @@ async def report_item(
         tags=tags,
         ai_summary=ai_result.get("summary", ""),
         image_path=image_path,
+        llava_analysis_json=json.dumps(llava_analysis, ensure_ascii=False),
+        ai_analysis_status=ai_analysis_status,
+        unverified_ai_analysis=unverified_ai_analysis,
         evidence_details=evidence_details,
         evidence_summary=evidence_result.get("summary", ""),
         evidence_inconsistencies=evidence_result.get("inconsistencies", ""),
@@ -3614,6 +6451,8 @@ async def report_item(
     db.add(item)
     db.commit()
     db.refresh(item)
+    if image_path:
+        report_logger.info("[LLaVA] Attached metadata to report #%s", item.id)
     create_audit_log(
         db,
         user_id=current_user.id,
@@ -3803,6 +6642,7 @@ def claim_item(
     claim_reason = minimally_validate_field(payload.claim_reason, "Claim reason", min_meaningful_chars=3, max_chars=240)
     item_description = minimally_validate_field(payload.item_description, "Item description", min_meaningful_chars=2, max_chars=240)
     lost_location = minimally_validate_field(payload.lost_location, "Lost location", min_meaningful_chars=2, max_chars=120)
+    validate_school_location_codes(lost_location)
     identifying_info = minimally_validate_field(payload.identifying_info, "Identifying info", min_meaningful_chars=2, max_chars=240)
 
     claim_match = analyze_claim_match(
@@ -3884,15 +6724,188 @@ def claim_item(
     return {"message": "Claim submitted.", "claim": serialize_claim(claim, item, current_user, reporter)}
 
 
+@app.post("/claim-drafts")
+def create_claim_draft(
+    payload: ClaimDraftPayload,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    enforce_rate_limit("claim", request=request, current_user=current_user)
+    item = fetch_item_or_404(db, payload.item_id) if payload.item_id else None
+    if item and item.claimed:
+        raise HTTPException(status_code=400, detail="This item is already marked as claimed.")
+
+    title_source = payload.title.strip() or (item.title if item else "")
+    title = clean_text(title_source)[:100]
+    claim_reason = clean_text(payload.claim_reason)[:240]
+    item_description = minimally_validate_field(payload.item_description, "Draft item description", min_meaningful_chars=2, max_chars=240)
+    lost_location = clean_text(payload.lost_location)[:120]
+    identifying_info = clean_text(payload.identifying_info)[:240]
+    source = str(payload.source or "manual").strip().lower()[:40] or "manual"
+
+    draft_input_text = build_input_text(title, claim_reason, item_description, lost_location, identifying_info)
+    moderation_decision = moderate_claim_submission(
+        db,
+        current_user=current_user,
+        route="/claim-drafts",
+        input_text=draft_input_text,
+    )
+    if not moderation_decision.get("allowed", False):
+        log_blocked_attempt(
+            route="/claim-drafts",
+            current_user=current_user,
+            reason=str(moderation_decision.get("reason", "Message rejected due to content policy.")).strip() or "Message rejected due to content policy.",
+            content=draft_input_text,
+        )
+        raise HTTPException(status_code=400, detail="Message rejected due to content policy.")
+
+    draft = ClaimDraft(
+        item_id=item.id if item else None,
+        user_id=current_user.id,
+        title=title,
+        claim_reason=claim_reason,
+        item_description=item_description,
+        lost_location=lost_location,
+        identifying_info=identifying_info,
+        visual_selection_json=json.dumps(payload.visual_selection or {}),
+        visual_summary=str(payload.visual_summary or "").strip()[:240],
+        visual_tags_json=json.dumps([
+            str(tag).strip().lower()
+            for tag in payload.visual_tags[:5]
+            if str(tag).strip()
+        ]),
+        source=source,
+        status="draft",
+    )
+    db.add(draft)
+    db.commit()
+    db.refresh(draft)
+    create_audit_log(
+        db,
+        user_id=current_user.id,
+        action_type="claim_draft_created",
+        entity_type="claim_draft",
+        entity_id=draft.id,
+        before_state=None,
+        after_state=snapshot_claim_draft(draft),
+        metadata={"item_id": draft.item_id, "source": draft.source},
+    )
+    db.commit()
+    reporter = get_item_reporter(db, item) if item else None
+    return {
+        "message": "Claim draft saved.",
+        "draft": serialize_claim_draft(draft, item, current_user, reporter),
+    }
+
+
+@app.get("/claim-drafts")
+def list_claim_drafts(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    drafts = (
+        db.query(ClaimDraft)
+        .filter(ClaimDraft.user_id == current_user.id, ClaimDraft.status == "draft")
+        .order_by(ClaimDraft.updated_at.desc(), ClaimDraft.created_at.desc())
+        .all()
+    )
+    item_ids = [draft.item_id for draft in drafts if draft.item_id]
+    item_map = {
+        item.id: item
+        for item in db.query(LostFoundItem).filter(LostFoundItem.id.in_(item_ids)).all()
+    } if item_ids else {}
+    reporter_map = get_user_map(db, [item.submitted_by_user_id or 0 for item in item_map.values()])
+    return {
+        "drafts": [
+            serialize_claim_draft(
+                draft,
+                item_map.get(draft.item_id),
+                current_user,
+                reporter_map.get(item_map[draft.item_id].submitted_by_user_id or 0) if draft.item_id in item_map else None,
+            )
+            for draft in drafts
+        ]
+    }
+
+
+@app.post("/claim-drafts/{draft_id}/submit")
+def submit_claim_draft(
+    draft_id: int,
+    payload: ClaimDraftSubmitPayload,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    draft = fetch_claim_draft_or_404(db, draft_id, current_user=current_user)
+    if draft.status != "draft":
+        raise HTTPException(status_code=409, detail="This draft has already been submitted.")
+    item_id = payload.item_id or draft.item_id
+    if not item_id:
+        raise HTTPException(status_code=400, detail="Attach this draft to an existing report before submitting.")
+
+    result = claim_item(
+        item_id,
+        ClaimPayload(
+            claim_reason=draft.claim_reason or "I believe this item is mine.",
+            item_description=draft.item_description,
+            lost_location=draft.lost_location,
+            identifying_info=draft.identifying_info,
+            visual_selection=parse_json_object(draft.visual_selection_json, default={}),
+            visual_summary=draft.visual_summary or "",
+            visual_tags=parse_json_list(draft.visual_tags_json),
+        ),
+        request=request,
+        current_user=current_user,
+        db=db,
+    )
+    if isinstance(result, JSONResponse):
+        return result
+
+    draft.item_id = item_id
+    draft.status = "submitted"
+    draft.submitted_claim_id = result.get("claim", {}).get("id")
+    draft.updated_at = datetime.utcnow()
+    create_audit_log(
+        db,
+        user_id=current_user.id,
+        action_type="claim_draft_submitted",
+        entity_type="claim_draft",
+        entity_id=draft.id,
+        before_state=None,
+        after_state=snapshot_claim_draft(draft),
+        metadata={"item_id": item_id, "claim_id": draft.submitted_claim_id},
+    )
+    db.commit()
+    return {
+        "message": "Claim draft submitted for review.",
+        "claim": result.get("claim"),
+        "draft": snapshot_claim_draft(draft),
+    }
+
+
 @app.get("/claims/history")
 def claim_history(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
     claims = db.query(Claim).filter(Claim.user_id == current_user.id).order_by(Claim.created_at.desc()).all()
+    drafts = (
+        db.query(ClaimDraft)
+        .filter(ClaimDraft.user_id == current_user.id, ClaimDraft.status == "draft")
+        .order_by(ClaimDraft.updated_at.desc(), ClaimDraft.created_at.desc())
+        .all()
+    )
+    all_item_ids = [claim.item_id for claim in claims] + [draft.item_id for draft in drafts if draft.item_id]
     item_map = {
         item.id: item
-        for item in db.query(LostFoundItem).filter(LostFoundItem.id.in_([claim.item_id for claim in claims])).all()
-    } if claims else {}
+        for item in db.query(LostFoundItem).filter(LostFoundItem.id.in_(all_item_ids)).all()
+    } if all_item_ids else {}
     reporter_map = get_user_map(db, [item.submitted_by_user_id or 0 for item in item_map.values()])
     return {
+        "drafts": [
+            serialize_claim_draft(
+                draft,
+                item_map.get(draft.item_id),
+                current_user,
+                reporter_map.get(item_map[draft.item_id].submitted_by_user_id or 0) if draft.item_id in item_map else None,
+            )
+            for draft in drafts
+        ],
         "claims": [
             serialize_claim(
                 claim,
@@ -3902,7 +6915,15 @@ def claim_history(current_user: User = Depends(get_current_user), db: Session = 
             )
             for claim in claims
             if claim.item_id in item_map
-        ]
+        ] + [
+            serialize_claim_draft(
+                draft,
+                item_map.get(draft.item_id),
+                current_user,
+                reporter_map.get(item_map[draft.item_id].submitted_by_user_id or 0) if draft.item_id in item_map else None,
+            )
+            for draft in drafts
+        ],
     }
 
 
@@ -4193,6 +7214,12 @@ def admin_delete_user(
     db.query(AIInspectionLog).filter(AIInspectionLog.user_id == user.id).delete()
     db.query(ItemQuery).filter(ItemQuery.user_id == user.id).delete()
     db.query(QueryMessage).filter(QueryMessage.user_id == user.id).delete()
+    user_question_ids = [row.id for row in db.query(QuestionPost.id).filter(QuestionPost.user_id == user.id).all()]
+    if user_question_ids:
+        db.query(QuestionReply).filter(QuestionReply.question_id.in_(user_question_ids)).delete(synchronize_session=False)
+    db.query(QuestionReply).filter(QuestionReply.user_id == user.id).delete()
+    db.query(QuestionPost).filter(QuestionPost.user_id == user.id).delete()
+    db.query(ClaimDraft).filter(ClaimDraft.user_id == user.id).delete()
     db.query(Claim).filter(Claim.user_id == user.id).delete()
     db.delete(user)
     db.commit()
@@ -4567,6 +7594,155 @@ def admin_move_item_to_room(
     return {"message": "Report moved to the lost and found room.", "item": serialize_item(item, reporter)}
 
 
+def create_public_question_from_payload(
+    db: Session,
+    *,
+    current_user: User,
+    payload: QueryPayload,
+    attachment: Optional[dict],
+    item_id: Optional[int] = None,
+) -> tuple[QuestionPost, QueryMessage]:
+    question_text = minimally_validate_field(payload.message, "Question", min_meaningful_chars=3, max_chars=220)
+    enforce_structured_question_intent(question_text, item_scoped=bool(item_id))
+    question_type = normalize_question_type(payload.question_type)
+    location_hint = clean_text(payload.location_hint)[:120]
+    normalized_language = resolve_query_preferences(current_user, language=payload.language)
+    question = QuestionPost(
+        item_id=item_id,
+        user_id=current_user.id,
+        question_text=question_text,
+        question_type=question_type,
+        location_hint=location_hint,
+        language=normalized_language,
+        attachment_name=attachment["original_name"] if attachment else "",
+        attachment_path=attachment["path"] if attachment else "",
+        attachment_size=attachment["size"] if attachment else None,
+        attachment_mime_type=attachment["mime_type"] if attachment else "",
+    )
+    user_query = QueryMessage(
+        item_id=item_id,
+        user_id=current_user.id,
+        role="user",
+        message=question_text,
+        chat_mode="question",
+        language=normalized_language,
+        attachment_name=attachment["original_name"] if attachment else "",
+        attachment_path=attachment["path"] if attachment else "",
+        attachment_size=attachment["size"] if attachment else None,
+        attachment_mime_type=attachment["mime_type"] if attachment else "",
+    )
+    db.add(question)
+    db.add(user_query)
+    db.commit()
+    db.refresh(question)
+    db.refresh(user_query)
+    return question, user_query
+
+
+@app.get("/questions")
+def list_questions(_: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    questions = db.query(QuestionPost).order_by(QuestionPost.created_at.desc(), QuestionPost.id.desc()).limit(80).all()
+    authors = get_user_map(db, [question.user_id for question in questions])
+    return {
+        "questions": [
+            serialize_question_post(db, question, authors.get(question.user_id), include_replies=False)
+            for question in questions
+        ]
+    }
+
+
+@app.get("/questions/{question_id}")
+def get_question_thread(
+    question_id: int,
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    question = fetch_question_or_404(db, question_id)
+    author = db.query(User).filter(User.id == question.user_id).first()
+    return {"question": serialize_question_post(db, question, author, include_replies=True)}
+
+
+@app.post("/questions/{question_id}/replies")
+async def create_question_reply(
+    question_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    enforce_rate_limit("chat", request=request, current_user=current_user)
+    question = fetch_question_or_404(db, question_id)
+    payload, attachment = await parse_question_reply_submission(request)
+    route = f"/questions/{question_id}/replies"
+    try:
+        enforce_lenient_query_moderation(
+            db,
+            current_user=current_user,
+            route=route,
+            input_text=payload.message,
+        )
+        message = minimally_validate_field(payload.message, "Reply", min_meaningful_chars=1, max_chars=320)
+        reply_type = normalize_question_reply_type(payload.reply_type)
+        suggested_item_id = payload.suggested_item_id
+        if suggested_item_id:
+            fetch_item_or_404(db, suggested_item_id)
+        reply = QuestionReply(
+            question_id=question.id,
+            user_id=current_user.id,
+            message=message,
+            reply_type=reply_type,
+            suggested_item_id=suggested_item_id,
+            attachment_name=attachment["original_name"] if attachment else "",
+            attachment_path=attachment["path"] if attachment else "",
+            attachment_size=attachment["size"] if attachment else None,
+            attachment_mime_type=attachment["mime_type"] if attachment else "",
+        )
+        db.add(reply)
+        if not question.direct_chat_thread_id:
+            question.direct_chat_thread_id = f"question-{question.id}"
+            question.direct_chat_started_at = datetime.utcnow()
+        question.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(reply)
+        db.refresh(question)
+        notify_question_reply(db, question=question, reply=reply, actor=current_user)
+        db.commit()
+    except Exception:
+        cleanup_query_attachment(attachment)
+        raise
+
+    author = db.query(User).filter(User.id == question.user_id).first()
+    return {
+        "message": "Reply posted.",
+        "question": serialize_question_post(db, question, author, include_replies=True),
+        "reply": serialize_question_reply(reply, current_user),
+        "direct_chat": {
+            "thread_id": question.direct_chat_thread_id,
+            "started_at": question.direct_chat_started_at.isoformat() if question.direct_chat_started_at else None,
+        },
+    }
+
+
+@app.post("/questions/{question_id}/convert-chat")
+def convert_question_to_direct_chat(
+    question_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    question = fetch_question_or_404(db, question_id)
+    if current_user.id != question.user_id and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Only the question owner can convert this thread.")
+    if not question.direct_chat_thread_id:
+        question.direct_chat_thread_id = f"question-{question.id}"
+        question.direct_chat_started_at = datetime.utcnow()
+        db.commit()
+        db.refresh(question)
+    author = db.query(User).filter(User.id == question.user_id).first()
+    return {
+        "message": "Question thread converted to direct chat.",
+        "question": serialize_question_post(db, question, author, include_replies=True),
+    }
+
+
 @app.get("/query")
 def list_general_queries(
     language: Optional[str] = None,
@@ -4576,8 +7752,14 @@ def list_general_queries(
     normalized_language = resolve_query_preferences(current_user, language=language)
     db.commit()
     queries = get_query_messages_for_scope(db, user_id=current_user.id, item_id=None)
+    questions = db.query(QuestionPost).order_by(QuestionPost.created_at.desc(), QuestionPost.id.desc()).limit(80).all()
+    authors = get_user_map(db, [question.user_id for question in questions])
     return {
         "queries": serialize_query_list(db, queries),
+        "questions": [
+            serialize_question_post(db, question, authors.get(question.user_id), include_replies=False)
+            for question in questions
+        ],
         "response": {"message": ""},
         "suggestions": [],
         "language": normalized_language,
@@ -4601,30 +7783,31 @@ async def create_general_query(
             route=route,
             input_text=payload.message,
         )
-        message = minimally_validate_field(payload.message, "Query message", min_meaningful_chars=1, max_chars=220)
-        user_query = QueryMessage(
+        question, user_query = create_public_question_from_payload(
+            db,
+            current_user=current_user,
+            payload=payload,
+            attachment=attachment,
             item_id=None,
-            user_id=current_user.id,
-            role="user",
-            message=message,
-            chat_mode="message",
-            language=normalized_language,
-            attachment_name=attachment["original_name"] if attachment else "",
-            attachment_path=attachment["path"] if attachment else "",
-            attachment_size=attachment["size"] if attachment else None,
-            attachment_mime_type=attachment["mime_type"] if attachment else "",
         )
-        db.add(user_query)
-        db.commit()
-        db.refresh(user_query)
     except Exception:
         cleanup_query_attachment(attachment)
         raise
 
     queries = get_query_messages_for_scope(db, user_id=current_user.id, item_id=None)
+    questions = db.query(QuestionPost).order_by(QuestionPost.created_at.desc(), QuestionPost.id.desc()).limit(80).all()
+    authors = get_user_map(db, [public_question.user_id for public_question in questions])
+    matches = structured_query_matches(db, user_query.message)
     return {
         "queries": serialize_query_list(db, queries),
-        "response": {"message": query_saved_message(normalized_language)},
+        "question": serialize_question_post(db, question, current_user, include_replies=True),
+        "questions": [
+            serialize_question_post(db, public_question, authors.get(public_question.user_id), include_replies=False)
+            for public_question in questions
+        ],
+        "matches": matches,
+        "matching_questions": matching_public_questions(db, user_query.message, exclude_question_id=question.id),
+        "response": {"message": ""},
         "suggestions": [],
         "language": normalized_language,
     }
@@ -4646,8 +7829,19 @@ def list_queries(
         item_id=item_id,
         include_all_users=current_user.is_admin,
     )
+    questions = (
+        db.query(QuestionPost)
+        .order_by(QuestionPost.created_at.desc(), QuestionPost.id.desc())
+        .limit(80)
+        .all()
+    )
+    authors = get_user_map(db, [question.user_id for question in questions])
     return {
         "queries": serialize_query_list(db, queries),
+        "questions": [
+            serialize_question_post(db, question, authors.get(question.user_id), include_replies=False)
+            for question in questions
+        ],
         "response": {"message": ""},
         "suggestions": [],
         "language": normalized_language,
@@ -4673,22 +7867,13 @@ async def create_query(
             input_text=payload.message,
         )
         item = fetch_item_or_404(db, item_id)
-        message = minimally_validate_field(payload.message, "Query message", min_meaningful_chars=1, max_chars=220)
-        user_query = QueryMessage(
+        question, user_query = create_public_question_from_payload(
+            db,
+            current_user=current_user,
+            payload=payload,
+            attachment=attachment,
             item_id=item_id,
-            user_id=current_user.id,
-            role="user",
-            message=message,
-            chat_mode="message",
-            language=normalized_language,
-            attachment_name=attachment["original_name"] if attachment else "",
-            attachment_path=attachment["path"] if attachment else "",
-            attachment_size=attachment["size"] if attachment else None,
-            attachment_mime_type=attachment["mime_type"] if attachment else "",
         )
-        db.add(user_query)
-        db.commit()
-        db.refresh(user_query)
         notify_query_interaction(db, item=item, actor=current_user)
         db.commit()
     except Exception:
@@ -4701,9 +7886,22 @@ async def create_query(
         item_id=item_id,
         include_all_users=current_user.is_admin,
     )
+    questions = db.query(QuestionPost).order_by(QuestionPost.created_at.desc(), QuestionPost.id.desc()).limit(80).all()
+    authors = get_user_map(db, [public_question.user_id for public_question in questions])
+    matches = structured_query_matches(
+        db,
+        build_input_text(user_query.message, item.title, item.category, item.location, item.secondary_location),
+    )
     return {
         "queries": serialize_query_list(db, queries),
-        "response": {"message": build_query_response(item)},
+        "question": serialize_question_post(db, question, current_user, include_replies=True),
+        "questions": [
+            serialize_question_post(db, public_question, authors.get(public_question.user_id), include_replies=False)
+            for public_question in questions
+        ],
+        "matches": matches,
+        "matching_questions": matching_public_questions(db, user_query.message, exclude_question_id=question.id),
+        "response": {"message": ""},
         "suggestions": [],
         "language": normalized_language,
     }

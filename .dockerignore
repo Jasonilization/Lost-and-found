@@ -6,7 +6,17 @@ __pycache__
 *.log
 .DS_Store
 .env
+
 data
 logs
+
+frontend/dist
+frontend/build
+frontend/.vite
+frontend/node_modules
+**/node_modules
+
 uploads/*
 !uploads/.gitkeep
+!uploads/background.png
+!uploads/map.png

@@ -8,7 +8,7 @@
     <link rel="apple-touch-icon" href="favicon.svg">
     <link rel="stylesheet" href="style.css">
   </head>
-  <body>
+  <body class="auth-route">
     <div class="page-glow page-glow-left" aria-hidden="true"></div>
     <div class="page-glow page-glow-right" aria-hidden="true"></div>
 
@@ -16,7 +16,7 @@
       <div class="auth-card surface-card">
         <p class="eyebrow" data-i18n="auth.eyebrow">School account</p>
         <h1 data-i18n="brand.title">SHR Lost &amp; Found System</h1>
-        <p class="hero-copy" data-i18n="auth.hero">Sign in to report lost items, track claims, and move item questions into a dedicated chat page.</p>
+        <p class="hero-copy" data-i18n="auth.hero">Sign in to report lost items, track claims, and ask structured item lookup questions.</p>
         <p class="brand-footer" data-i18n="brand.footer">For Shrewsbury international school riverside</p>
 
         <div class="tab-switch" role="tablist" aria-label="Authentication tabs" data-i18n-aria-label="auth.tabs">
@@ -74,6 +74,10 @@
       </div>
     </section>
 
+    <section class="login-loading-screen is-hidden" id="loginLoadingScreen" aria-live="polite" aria-label="Opening school map">
+      <video id="loginLoadingVideo" class="login-loading-video" preload="auto" playsinline muted></video>
+    </section>
+
     <div class="app-shell is-hidden" id="appShell">
       <header class="app-topbar dashboard-topbar surface-card">
         <div class="app-topbar-start">
@@ -94,6 +98,7 @@
             <button class="ghost-button new-window-button" id="newWindowButton" type="button" aria-haspopup="menu" aria-expanded="false" title="New window" data-i18n="nav.newWindow">New window</button>
             <div class="new-window-menu surface-card glass is-hidden" id="newWindowMenu" role="menu" aria-label="Open panel">
               <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="dashboard">Dashboard</button>
+              <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="map">School Map</button>
               <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="reports" data-i18n="nav.reports">Reports</button>
               <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="room" data-i18n="nav.room">Lost &amp; Found Room</button>
               <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="returned" data-i18n="nav.returned">Recently Returned</button>
@@ -151,7 +156,7 @@
             <div class="topbar-brand">
               <p class="eyebrow" data-i18n="topbar.eyebrow">Local campus desk</p>
               <h2 data-i18n="brand.title">SHR Lost &amp; Found System</h2>
-              <p class="hero-copy" data-i18n="topbar.hero">Reports stay local, admin actions stay guarded, and item questions live in their own chat page.</p>
+              <p class="hero-copy" data-i18n="topbar.hero">Reports stay local, admin actions stay guarded, and item questions return structured matches.</p>
             </div>
             <div class="sidebar-utility-stack">
               <div class="account-chip surface-card">
@@ -176,17 +181,18 @@
               </label>
             </div>
             <div class="topbar-actions sidebar-nav-group">
-              <button class="ghost-button" id="showDashboardButton" type="button" data-nav-icon="D">Dashboard</button>
-              <button class="ghost-button" id="showReportsButton" type="button" data-nav-icon="R" data-i18n="nav.reports">Reports</button>
-              <button class="ghost-button" id="showReportItemButton" type="button" data-nav-icon="+">Report item</button>
-              <button class="ghost-button" id="showRoomButton" type="button" data-nav-icon="L">Lost &amp; Found Room</button>
-              <button class="ghost-button" id="showReturnedButton" type="button" data-nav-icon="V">Recently Returned</button>
-              <button class="ghost-button" id="showQueryButton" type="button" data-nav-icon="Q" data-i18n="nav.query">Query</button>
-              <button class="ghost-button" id="showClaimsButton" type="button" data-nav-icon="C" data-i18n="nav.claims">My Claims</button>
-              <button class="ghost-button" id="showNotificationsButton" type="button" data-nav-icon="N" data-i18n="notifications.title">Notifications</button>
-              <button class="ghost-button" id="showAccountButton" type="button" data-nav-icon="A" data-i18n="nav.account">Account</button>
-              <button class="ghost-button is-hidden" id="showAdminButton" type="button" data-nav-icon="!" data-i18n="nav.admin">Admin Panel</button>
-              <button class="ghost-button danger-button" id="logoutButton" type="button" data-nav-icon="×" data-i18n="nav.logout">Logout</button>
+              <button class="ghost-button" id="showDashboardButton" type="button" data-nav-icon="layout-dashboard">Dashboard</button>
+              <button class="ghost-button" id="showMapButton" type="button" data-nav-icon="map">School Map</button>
+              <button class="ghost-button" id="showReportsButton" type="button" data-nav-icon="clipboard-list" data-i18n="nav.reports">Reports</button>
+              <button class="ghost-button" id="showReportItemButton" type="button" data-nav-icon="circle-plus">Report item</button>
+              <button class="ghost-button" id="showRoomButton" type="button" data-nav-icon="archive">Lost &amp; Found Room</button>
+              <button class="ghost-button" id="showReturnedButton" type="button" data-nav-icon="rotate-ccw">Recently Returned</button>
+              <button class="ghost-button" id="showQueryButton" type="button" data-nav-icon="message-circle" data-i18n="nav.query">Query</button>
+              <button class="ghost-button" id="showClaimsButton" type="button" data-nav-icon="badge-check" data-i18n="nav.claims">My Claims</button>
+              <button class="ghost-button" id="showNotificationsButton" type="button" data-nav-icon="bell" data-i18n="notifications.title">Notifications</button>
+              <button class="ghost-button" id="showAccountButton" type="button" data-nav-icon="user" data-i18n="nav.account">Account</button>
+              <button class="ghost-button is-hidden" id="showAdminButton" type="button" data-nav-icon="shield" data-i18n="nav.admin">Admin Panel</button>
+              <button class="ghost-button danger-button" id="logoutButton" type="button" data-nav-icon="log-out" data-i18n="nav.logout">Logout</button>
             </div>
           </div>
         </header>
@@ -229,7 +235,7 @@
                 <article class="dashboard-metric-card">
                   <p class="eyebrow">Active queries</p>
                   <strong id="dashboardActiveQueries">0</strong>
-                  <span>Open conversations</span>
+                  <span>Structured lookups</span>
                 </article>
                 <article class="dashboard-metric-card is-accent-gold">
                   <p class="eyebrow">Notifications</p>
@@ -267,9 +273,14 @@
                   </div>
                   <div class="dashboard-action-grid">
                     <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="reports">Reports</button>
+                    <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="map">School Map</button>
                     <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="room">Lost &amp; Found Room</button>
                     <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="claims">Claims</button>
                     <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="notifications">Notifications</button>
+                    <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="returned">Recently Returned</button>
+                    <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="query">Item Lookup</button>
+                    <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="account">Account</button>
+                    <button class="ghost-button dashboard-link-button dashboard-admin-action is-hidden" type="button" data-dashboard-target="admin" data-dashboard-advanced="true">Admin Tools</button>
                   </div>
                 </article>
               </section>
@@ -293,6 +304,14 @@
                   </div>
                 </div>
                 <div class="window-body">
+
+                <div class="location-filter-banner is-hidden" id="locationFilterBanner" role="status">
+                  <span id="locationFilterBannerText">Showing all campus locations</span>
+                  <div class="location-filter-actions">
+                    <button class="ghost-button small-button" id="locationBackButton" type="button">Back</button>
+                    <button class="ghost-button small-button" id="clearLocationFilterButton" type="button">Clear filter</button>
+                  </div>
+                </div>
 
                 <div class="filters" role="search">
                   <label class="search-field">
@@ -327,6 +346,32 @@
         </section>
           <div class="layout-divider is-horizontal is-hidden" id="contentSplitter" data-layout-resize="content" role="separator" aria-orientation="horizontal" aria-label="Resize content panels"></div>
           <div class="secondary-stack is-hidden" id="secondaryStack">
+
+        <section class="panel page-panel surface-card window-panel is-hidden" id="mapSection" data-panel="map" aria-labelledby="schoolMapTitle">
+          <div class="section-heading window-header">
+            <div>
+              <p class="eyebrow">Campus shortcut</p>
+              <h3 id="schoolMapTitle">School Map</h3>
+            </div>
+            <div class="window-header-actions">
+              <button class="ghost-button" id="mapResetButton" type="button">Campus</button>
+              <button class="ghost-button" id="mapBackButton" type="button">Back</button>
+              <div class="window-controls">
+                <button class="icon-button window-control" data-panel-minimize="map" type="button" aria-label="Minimize school map panel">−</button>
+                <button class="icon-button window-control" data-panel-close="map" type="button" aria-label="Close school map panel">×</button>
+              </div>
+            </div>
+          </div>
+          <div class="window-body school-map-body">
+            <div class="map-breadcrumb" id="mapSelectionBreadcrumb">Campus</div>
+            <div class="school-map-shell" id="schoolMapShell">
+              <img id="schoolMapImage" src="/uploads/map.png" alt="School campus map">
+              <div class="school-map-text-layer school-map-box-layer" id="schoolMapTextLayer" aria-label="Clickable map region boxes"></div>
+              <div class="school-map-tooltip is-hidden" id="schoolMapTooltip" role="tooltip"></div>
+            </div>
+            <div class="map-selection-panel is-hidden" id="mapSelectionPanel" aria-live="polite"></div>
+          </div>
+        </section>
 
         <section class="panel page-panel surface-card window-panel is-hidden" id="roomSection" data-panel="room" aria-labelledby="roomTitle">
           <div class="section-heading window-header">
@@ -621,8 +666,8 @@
         <section class="panel page-panel surface-card window-panel is-hidden" id="querySection" data-panel="query" aria-labelledby="queryPageTitle">
           <div class="section-heading window-header">
             <div>
-              <p class="eyebrow" data-i18n="query.eyebrow">Item chat</p>
-              <h3 id="queryPageTitle" data-i18n="query.title">Query page</h3>
+              <p class="eyebrow" data-i18n="query.eyebrow">Item lookup</p>
+              <h3 id="queryPageTitle" data-i18n="query.title">Question box</h3>
             </div>
             <div class="window-header-actions">
               <button class="ghost-button" id="queryBackButton" type="button" data-i18n="query.back">Back to reports</button>
@@ -637,13 +682,13 @@
           <article class="query-context-card surface-card" id="queryContextCard">
             <div class="form-grid query-selector-grid">
               <label>
-                <span data-i18n="query.selectItem">Select item</span>
+                <span data-i18n="query.selectItem">Optional report context</span>
                 <select id="queryItemSelect">
                   <option value="" data-i18n="query.generalInquiry">General inquiry</option>
                 </select>
               </label>
               <div class="query-selector-actions">
-                <span class="field-note" id="queryModeNote" data-i18n="query.messagingNote">Messages stay in this conversation and never trigger automated replies.</span>
+                <span class="field-note" id="queryModeNote" data-i18n="query.messagingNote">Questions are saved with any image context and return structured item matches.</span>
                 <button class="ghost-button" id="refreshQueryItemsButton" type="button" data-i18n="query.refreshItems">Refresh item list</button>
               </div>
             </div>
@@ -659,7 +704,7 @@
               <span class="status-badge is-lost" id="queryItemStatus">Open</span>
             </div>
             <div class="card-actions is-hidden" id="queryAdminActions">
-              <button class="ghost-button danger-button card-button" id="queryClearThreadButton" type="button">Clear item chat</button>
+              <button class="ghost-button danger-button card-button" id="queryClearThreadButton" type="button">Clear item questions</button>
             </div>
             <p class="item-description" id="queryItemDescription"></p>
             <div class="tag-row" id="queryItemTags"></div>
@@ -667,24 +712,50 @@
 
           <div class="query-page-shell">
             <div class="query-list-meta">
-              <span id="queryItemContextLabel">Conversation</span>
-              <span class="loading-line" id="queryLoading">Loading conversation...</span>
+              <span id="queryItemContextLabel">Structured results</span>
+              <span class="loading-line" id="queryLoading">Loading lookup...</span>
             </div>
             <div class="warning-card is-hidden" id="queryWarningCard"></div>
-            <div class="query-page-messages" id="queryMessages"></div>
-            <p class="status-message is-hidden" id="queryEmptyState" data-i18n="query.noMessages">No messages yet.</p>
+            <div class="query-page-results" id="queryMessages" aria-live="polite"></div>
+            <p class="status-message is-hidden" id="queryEmptyState" data-i18n="query.noMessages">No lookup results yet.</p>
             <form class="query-page-form" id="queryForm" method="post">
               <div class="tag-row is-hidden" id="querySuggestions" aria-label="Suggested questions"></div>
-              <input id="queryFileInput" type="file" accept=".png,.jpg,.jpeg,.pdf,.txt,image/png,image/jpeg,application/pdf,text/plain" class="is-hidden">
+              <div class="form-grid">
+                <label>
+                  <span>Question type</span>
+                  <select id="queryTypeSelect">
+                    <option value="seen_item">Did anyone see my item?</option>
+                    <option value="has_this_been_found">Has this been found?</option>
+                    <option value="lost_not_listed">I lost something not listed</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Location hint</span>
+                  <input id="queryLocationInput" type="text" maxlength="120" placeholder="A504, Sports Hall, Library">
+                </label>
+              </div>
+              <input id="queryFileInput" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" class="is-hidden">
+              <input id="queryCameraInput" type="file" accept="image/*" capture="environment" class="is-hidden">
               <div class="query-upload-row">
-                <label class="ghost-button" for="queryFileInput" id="queryUploadButton">Attach file</label>
+                <label class="ghost-button query-media-button" for="queryFileInput" id="queryUploadButton">Upload Image</label>
+                <button class="ghost-button query-media-button" id="queryCameraButton" type="button">Take Photo</button>
                 <div class="query-file-pill is-hidden" id="queryFileInfo">
                   <span id="queryFileName"></span>
                   <span id="queryFileSize"></span>
                   <button class="icon-button" id="queryFileRemoveButton" type="button" aria-label="Remove selected file">×</button>
                 </div>
               </div>
-              <textarea id="queryInput" rows="3" maxlength="220" placeholder="Ask about this item" data-i18n-placeholder="query.askAboutItem"></textarea>
+              <div class="query-camera-panel is-hidden" id="queryCameraPanel" aria-live="polite">
+                <video id="queryCameraPreview" autoplay playsinline muted></video>
+                <div class="query-camera-actions">
+                  <button class="primary-button" id="queryCameraCaptureButton" type="button">Use Photo</button>
+                  <button class="ghost-button" id="queryCameraCancelButton" type="button">Cancel</button>
+                </div>
+              </div>
+              <label class="query-question-field">
+                <span>Question</span>
+                <textarea id="queryInput" rows="3" maxlength="220" placeholder="Did anyone see my blue bottle?" data-i18n-placeholder="query.askAboutItem"></textarea>
+              </label>
               <div class="form-actions">
                 <button class="primary-button" id="querySubmitButton" type="submit">
                   <span class="button-text" data-i18n="query.send">Ask Question</span>
@@ -699,12 +770,63 @@
                 </div>
               </div>
             </form>
+            <div class="question-board-layout">
+              <section class="question-board-panel">
+                <div class="section-heading compact">
+                  <div>
+                    <p class="eyebrow">Public questions</p>
+                    <h4>Question Board</h4>
+                  </div>
+                  <button class="ghost-button small-button" id="refreshQuestionBoardButton" type="button">Refresh</button>
+                </div>
+                <div class="question-board-list" id="questionBoardList" aria-live="polite"></div>
+              </section>
+              <section class="question-thread-panel is-hidden" id="questionThreadPanel" aria-live="polite">
+                <div class="section-heading compact">
+                  <div>
+                    <p class="eyebrow" id="questionThreadMeta">Thread</p>
+                    <h4 id="questionThreadTitle">Question thread</h4>
+                  </div>
+                  <button class="ghost-button small-button" id="closeQuestionThreadButton" type="button">Close</button>
+                </div>
+                <div class="question-thread-body" id="questionThreadBody"></div>
+                <form class="query-page-form" id="questionReplyForm" method="post">
+                  <div class="form-grid">
+                    <label>
+                      <span>Response type</span>
+                      <select id="questionReplyTypeSelect">
+                        <option value="reply">Reply</option>
+                        <option value="suggestion">Suggest found item</option>
+                        <option value="confirmation">Confirmation</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Image</span>
+                      <input id="questionReplyFileInput" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg">
+                    </label>
+                  </div>
+                  <div class="query-file-pill is-hidden" id="questionReplyFileInfo">
+                    <span id="questionReplyFileName"></span>
+                    <button class="icon-button" id="questionReplyFileRemoveButton" type="button" aria-label="Remove reply image">×</button>
+                  </div>
+                  <label class="query-question-field">
+                    <span>Reply</span>
+                    <textarea id="questionReplyInput" rows="3" maxlength="320" placeholder="I saw a similar item near the library."></textarea>
+                  </label>
+                  <div class="form-actions">
+                    <button class="primary-button" id="questionReplySubmitButton" type="submit">Reply</button>
+                    <p class="status-message" id="questionReplyMessage"></p>
+                  </div>
+                </form>
+              </section>
+            </div>
           </div>
           </div>
         </section>
           </div>
         </main>
       </div>
+      <div class="sidebar-drawer-backdrop is-hidden" id="sidebarDrawerBackdrop" aria-hidden="true"></div>
       <div class="claim-success-banner surface-card glass is-hidden" id="claimSuccessBanner" role="status" aria-live="assertive">
         <div class="claim-success-icon" aria-hidden="true">OK</div>
         <div class="claim-success-copy">
@@ -734,6 +856,48 @@
       <button class="primary-button floating-report-button" id="openReportModalButton" type="button" aria-label="Open report form" title="Create a report">
         <span aria-hidden="true">+</span>
       </button>
+      <button class="ghost-button floating-assistant-button" id="openAssistantButton" type="button" aria-label="Open AI helper" aria-expanded="false" aria-controls="assistantPanel" title="AI helper" data-assistant-launcher="chatbot">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path>
+        </svg>
+      </button>
+      <aside class="assistant-panel surface-card glass is-hidden" id="assistantPanel" aria-labelledby="assistantTitle" tabindex="-1">
+        <div class="assistant-header">
+          <div>
+            <p class="eyebrow">Site intelligence</p>
+            <h3 id="assistantTitle">AI helper</h3>
+          </div>
+          <button class="icon-button" id="assistantCloseButton" type="button" aria-label="Close AI helper">×</button>
+        </div>
+        <div class="assistant-mode-tabs" role="tablist" aria-label="Assistant modes">
+          <button class="tab-button is-active" id="assistantChatModeButton" type="button" role="tab" aria-selected="true" aria-controls="assistantChatModePanel" data-assistant-mode="chat">Chat</button>
+          <button class="tab-button" id="assistantQueryModeButton" type="button" role="tab" aria-selected="false" aria-controls="assistantQueryModePanel" data-assistant-mode="query">Query</button>
+        </div>
+        <section class="assistant-mode-panel assistant-chat-mode" id="assistantChatModePanel" role="tabpanel" aria-labelledby="assistantChatModeButton">
+          <div class="assistant-messages" id="assistantMessages" aria-live="polite"></div>
+          <form class="assistant-form" id="assistantForm" method="post">
+            <textarea id="assistantInput" rows="3" maxlength="420" placeholder="Ask about reports, locations, or a lost item"></textarea>
+            <div class="assistant-form-actions">
+              <button class="ghost-button small-button" id="assistantClaimDraftButton" type="button">Draft claim</button>
+              <button class="primary-button small-button" id="assistantSubmitButton" type="submit">Send</button>
+              <p class="status-message" id="assistantStatus"></p>
+            </div>
+          </form>
+        </section>
+        <section class="assistant-mode-panel assistant-query-mode is-hidden" id="assistantQueryModePanel" role="tabpanel" aria-labelledby="assistantQueryModeButton">
+          <form class="assistant-query-form" id="assistantQueryForm" method="post">
+            <label>
+              <span>Search reports</span>
+              <textarea id="assistantQueryInput" rows="2" maxlength="160" placeholder="lost blue bottle"></textarea>
+            </label>
+            <div class="assistant-form-actions">
+              <button class="primary-button small-button" id="assistantQuerySubmitButton" type="submit">Search</button>
+              <p class="status-message" id="assistantQueryStatus"></p>
+            </div>
+          </form>
+          <div class="assistant-query-results" id="assistantQueryResults" aria-live="polite"></div>
+        </section>
+      </aside>
       <footer class="app-footer">
         <p class="brand-footer" data-i18n="brand.footer">For Shrewsbury international school riverside</p>
       </footer>
@@ -757,6 +921,18 @@
             <strong id="dropTitle" data-i18n="report.dropTitle">Drop image here</strong>
             <small id="dropHint" data-i18n="report.dropHint">or choose a JPG, PNG, WEBP, HEIC, or HEIF file</small>
           </label>
+          <input id="reportCameraInput" type="file" accept="image/*" capture="environment" class="is-hidden">
+          <div class="query-upload-row">
+            <label class="ghost-button query-media-button" for="imageInput" id="reportUploadButton">Upload Image</label>
+            <button class="ghost-button query-media-button" id="reportCameraButton" type="button">Take Photo</button>
+          </div>
+          <div class="query-camera-panel is-hidden" id="reportCameraPanel" aria-live="polite">
+            <video id="reportCameraPreview" autoplay playsinline muted></video>
+            <div class="query-camera-actions">
+              <button class="primary-button" id="reportCameraCaptureButton" type="button">Use Photo</button>
+              <button class="ghost-button" id="reportCameraCancelButton" type="button">Cancel</button>
+            </div>
+          </div>
 
           <div class="form-grid report-simplified-grid">
             <label>
@@ -781,8 +957,8 @@
 
           <label>
             <span data-i18n="common.location">Location</span>
-            <input id="optionalLocationInput" type="text" maxlength="120" placeholder="Optional: library, sports hall, classroom..." autocomplete="off">
-            <small class="field-note">Optional. Leave blank if you are not sure.</small>
+            <input id="optionalLocationInput" type="text" maxlength="120" placeholder="A504, S312, P308, P201, or map location" autocomplete="off" aria-describedby="locationHelperText">
+            <small class="field-note" id="locationHelperText">Use room codes like A504, S312, P308, or P201.</small>
           </label>
 
           <label>
@@ -864,12 +1040,22 @@
       <form class="claim-form" id="claimForm" method="post">
         <div class="section-heading compact">
           <div>
-            <p class="eyebrow" data-i18n="claim.eyebrow">Ownership check</p>
-            <h3 id="claimTitle" data-i18n="claim.title">Claim item</h3>
+            <p class="eyebrow" data-i18n="claim.eyebrow">Private draft</p>
+            <h3 id="claimTitle" data-i18n="claim.title">Claim Draft Builder</h3>
           </div>
           <button class="icon-button" id="closeClaimDialog" type="button" aria-label="Close claim form" data-i18n-aria-label="claim.close">×</button>
         </div>
         <p class="dialog-subtitle" id="claimItemLabel"></p>
+        <label>
+          <span>Attach to existing report</span>
+          <select id="claimItemSelect">
+            <option value="">Create new claim draft context</option>
+          </select>
+        </label>
+        <label>
+          <span>Draft title</span>
+          <input id="claimDraftTitleInput" type="text" maxlength="100" placeholder="Blue water bottle claim">
+        </label>
         <label>
           <span data-i18n="claim.reason">Why are you claiming this item?</span>
           <textarea id="claimReasonInput" rows="3" maxlength="240" required></textarea>
@@ -888,7 +1074,7 @@
         </label>
         <div class="form-actions">
           <button class="primary-button" id="claimSubmitButton" type="submit">
-            <span class="button-text" data-i18n="claim.submit">Claim Item</span>
+            <span class="button-text" data-i18n="claim.submit">Save Draft</span>
             <span class="spinner" aria-hidden="true"></span>
           </button>
           <button class="ghost-button" id="cancelClaimButton" type="button" data-i18n="common.cancel">Cancel</button>
@@ -994,7 +1180,7 @@
           <dl class="info-list"></dl>
           <div class="card-actions">
             <button class="primary-button card-button" type="button" data-claim-button>Claim Item</button>
-            <button class="ghost-button card-button" type="button" data-open-query-button>Open chat</button>
+            <button class="ghost-button card-button" type="button" data-open-query-button>Open lookup</button>
             <button class="ghost-button card-button" type="button" data-mark-claimed-button>Mark as Claimed</button>
           </div>
         </div>
@@ -1015,6 +1201,7 @@
       </article>
     </template>
 
+    <script src="config.js"></script>
     <script src="script.js"></script>
   </body>
 </html>

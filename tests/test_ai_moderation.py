@@ -8,12 +8,13 @@ from unittest.mock import patch
 import requests
 
 from backend import ai_moderation
-from backend.ollama_tagger import _call_ollama_generate, fallback_tags, generate_image_tags, get_available_image_model, inspect_image_upload, merge_tag_lists
+from backend.ollama_tagger import _call_ollama_generate, fallback_tags, generate_image_tags, get_available_image_model, inspect_image_upload, is_vision_capable_model, merge_tag_lists
 
 
 class FakeResponse:
     def __init__(self, response_text: str) -> None:
         self._response_text = response_text
+        self.text = response_text
         self.status_code = 200
 
     def raise_for_status(self) -> None:
@@ -21,6 +22,19 @@ class FakeResponse:
 
     def json(self) -> dict:
         return {"response": self._response_text}
+
+
+class FakeJSONResponse:
+    def __init__(self, payload: dict, response_text: str = "", status_code: int = 200) -> None:
+        self._payload = payload
+        self.text = response_text or json.dumps(payload)
+        self.status_code = status_code
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict:
+        return self._payload
 
 
 class AIModerationTests(unittest.TestCase):
@@ -139,15 +153,15 @@ class AIModerationTests(unittest.TestCase):
 
         self.assertEqual(tags, ["water bottle", "blue", "metal"])
 
-    def test_generate_image_tags_returns_empty_list_when_no_image_model_exists(self) -> None:
+    def test_generate_image_tags_stops_when_no_image_model_exists(self) -> None:
         with tempfile.NamedTemporaryFile(suffix=".jpg") as image_file, \
              patch("backend.ollama_tagger._ollama_root_available", return_value=True), \
              patch("backend.ollama_tagger.get_available_image_model", return_value=""):
             image_file.write(b"fake-image")
             image_file.flush()
-            tags = generate_image_tags(image_file.name)
 
-        self.assertEqual(tags, [])
+            with self.assertRaises(RuntimeError):
+                generate_image_tags(image_file.name)
 
     def test_get_available_image_model_accepts_latest_alias(self) -> None:
         with patch("backend.ollama_tagger._ollama_root_available", return_value=True), \
@@ -156,12 +170,70 @@ class AIModerationTests(unittest.TestCase):
 
         self.assertEqual(model, "llava:latest")
 
+    def test_get_available_image_model_rejects_text_only_model(self) -> None:
+        with patch("backend.ollama_tagger.OLLAMA_IMAGE_MODEL", "llama3:8b"), \
+             patch("backend.ollama_tagger._ollama_root_available", return_value=True), \
+             patch("backend.ollama_tagger._list_ollama_models", return_value=["llama3:8b"]):
+            model = get_available_image_model()
+
+        self.assertEqual(model, "")
+
+    def test_vision_model_detection_is_conservative(self) -> None:
+        self.assertTrue(is_vision_capable_model("llava"))
+        self.assertTrue(is_vision_capable_model("llama3.2-vision:latest"))
+        self.assertTrue(is_vision_capable_model("qwen2-vl:7b"))
+        self.assertFalse(is_vision_capable_model("llama3:8b"))
+        self.assertFalse(is_vision_capable_model("mistral"))
+        self.assertFalse(is_vision_capable_model("qwen2.5:7b"))
+
     def test_call_ollama_generate_uses_images_field(self) -> None:
         with patch("backend.ollama_tagger.requests.post", return_value=FakeResponse("ok")) as mock_post:
             _call_ollama_generate("llava", "prompt", images=["base64-image"])
 
         payload = mock_post.call_args.kwargs["json"]
         self.assertEqual(payload["images"], ["base64-image"])
+        self.assertNotIn("image", payload)
+
+    def test_inspect_image_upload_logs_required_llava_trace(self) -> None:
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as image_file, \
+             patch("backend.ollama_tagger.OLLAMA_URL", "http://ollama:11434"), \
+             patch("backend.ollama_tagger.requests.get") as mock_get, \
+             patch("backend.ollama_tagger.requests.post") as mock_post:
+            image_file.write(b"fake-image")
+            image_file.flush()
+            mock_get.side_effect = [
+                FakeJSONResponse({}, "Ollama is running"),
+                FakeJSONResponse({"models": [{"name": "llava"}]}),
+            ]
+            mock_post.return_value = FakeResponse(
+                '{"moderation":"SAFE","item_description":"blue bottle","tags":["blue bottle","plastic","cap"]}'
+            )
+
+            with self.assertLogs("ollama_tagger", level="INFO") as captured:
+                inspect_image_upload(image_file.name)
+
+        log_text = "\n".join(captured.output)
+        for expected in [
+            "[LLAVA TRACE] 1. image received (yes/no): yes",
+            "[LLAVA TRACE] 2. base64 encoding success (yes/no): yes",
+            "[LLAVA TRACE] Ollama reachable: true",
+            "[LLAVA TRACE] /api/tags responds: true",
+            "[LLAVA TRACE] Model available: true",
+            "[LLAVA TRACE] 3. payload built (show payload structure): yes",
+            "[LLAVA TRACE] 4. endpoint used",
+            "[LLAVA TRACE] 5. model used",
+            "[LLAVA TRACE] 6. request sent (yes/no): yes",
+            "[LLAVA TRACE] 7. response status code",
+            "[LLAVA TRACE] 8. response body",
+        ]:
+            self.assertIn(expected, log_text)
+
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload["model"], "llava")
+        self.assertIn("Analyze this image of a lost item.", payload["prompt"])
+        self.assertIn("images", payload)
+        self.assertEqual(len(payload["images"]), 1)
+        self.assertTrue(payload["images"][0])
         self.assertNotIn("image", payload)
 
     def test_inspect_image_upload_rejects_missing_image_response(self) -> None:
@@ -222,6 +294,60 @@ class AIModerationTests(unittest.TestCase):
         self.assertEqual(inspection["moderation"], "SAFE")
         self.assertIn("silver laptop", inspection["tags"])
         self.assertIn("stickers", inspection["tags"])
+
+    def test_inspect_image_upload_cleans_loose_multiline_llava_fields(self) -> None:
+        loose_response = '''"moderation":"SAFE
+"item_description":"image of a young girl with blonde hair and green eyes
+holding up a hand against an industrial backdrop with futuristic elements
+featuring a robotic arm with a metal claw
+and in the background there's text that reads 'pragmata deluxe edition'
+"object_type":"promotional artwork
+"colours":["green","gray","black"]
+"notable_markings":["robotic arm","metal claw","pragmata deluxe edition"]
+"possible_category":"Other
+"confidence_score":72'''
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as image_file, \
+             patch("backend.ollama_tagger._ollama_root_available", return_value=True), \
+             patch("backend.ollama_tagger.get_available_image_model", return_value="llava"), \
+             patch("backend.ollama_tagger._call_ollama_generate", return_value=loose_response):
+            image_file.write(b"fake-image")
+            image_file.flush()
+            inspection = inspect_image_upload(image_file.name)
+
+        self.assertEqual(inspection["moderation"], "SAFE")
+        self.assertEqual(inspection["object_type"], "promotional artwork")
+        self.assertEqual(inspection["confidence_score"], 72)
+        self.assertIn("promotional artwork", inspection["tags"])
+        self.assertIn("robotic arm", inspection["tags"])
+        self.assertNotIn("item_description", " ".join(inspection["tags"]))
+        self.assertTrue(all(len(tag) <= 48 for tag in inspection["tags"]))
+
+    def test_inspect_image_upload_enriches_sparse_tags_from_clean_fields(self) -> None:
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as image_file, \
+             patch("backend.ollama_tagger._ollama_root_available", return_value=True), \
+             patch("backend.ollama_tagger.get_available_image_model", return_value="llava"), \
+             patch(
+                 "backend.ollama_tagger._call_ollama_generate",
+                 return_value=json.dumps({
+                     "moderation": "SAFE",
+                     "item_description": "green metal water bottle with a black cap and dent",
+                     "object_type": "water bottle",
+                     "colours": ["green", "black"],
+                     "notable_markings": ["black cap", "small dent", "hydro logo"],
+                     "possible_category": "Bottle",
+                     "confidence_score": 91,
+                     "tags": ["bottle", "green"],
+                 }),
+             ):
+            image_file.write(b"fake-image")
+            image_file.flush()
+            inspection = inspect_image_upload(image_file.name)
+
+        self.assertIn("green water bottle", inspection["tags"])
+        self.assertIn("black water bottle", inspection["tags"])
+        self.assertIn("black cap", inspection["tags"])
+        self.assertIn("hydro logo", inspection["tags"])
+        self.assertLessEqual(len(inspection["tags"]), 8)
 
     def test_merge_tag_lists_deduplicates_and_limits_output(self) -> None:
         merged = merge_tag_lists(

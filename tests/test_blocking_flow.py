@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import stat
 import unittest
+from datetime import datetime
 from unittest.mock import patch
 
 from fastapi import BackgroundTasks, HTTPException
@@ -10,7 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from backend import backend as backend_app
-from backend.database import AIInspectionLog, Base, Claim, LostFoundItem, Notification, QueryMessage, User
+from backend.database import AIInspectionLog, AuditLog, Base, Claim, LostFoundItem, Notification, QueryMessage, User
 
 
 class DummyClient:
@@ -121,6 +123,45 @@ class BlockingFlowTests(unittest.TestCase):
         self.assertEqual(saved["extension"], ".jpg")
         self.assertEqual(saved["mime_type"], "image/jpeg")
         self.created_upload_paths.append(saved["path"])
+
+    def test_expected_campus_location_structure_is_independent(self) -> None:
+        locations = {location["id"]: location for location in backend_app.SCHOOL_LOCATION_DATA}
+
+        self.assertIn("sports-fields-running-track", locations)
+        self.assertIn("morris-forum", locations)
+        self.assertEqual(
+            [sub_location["label"] for sub_location in locations["sports-building"]["sub_locations"]],
+            ["New Sports Hall", "Sports Hall"],
+        )
+        self.assertEqual(
+            [sub_location["label"] for sub_location in locations["sports-complex"]["sub_locations"]],
+            ["Changing Rooms", "Strength & Conditioning Room"],
+        )
+        self.assertEqual([floor["label"] for floor in locations["innovation-building"]["floors"]], ["Floor 1", "Floor 2", "Floor 3", "Floor 4", "Floor 5"])
+        self.assertEqual([floor["label"] for floor in locations["senior-school"]["floors"]], ["Floor 1", "Floor 2", "Floor 3", "Floor 4"])
+        self.assertEqual([floor["label"] for floor in locations["prep-school"]["floors"]], ["Floor 1", "Floor 2", "Floor 3", "Floor 4"])
+        self.assertEqual([floor["label"] for floor in locations["pre-prep-school"]["floors"]], ["Floor 1", "Floor 2", "Floor 3", "Floor 4"])
+        self.assertEqual(locations["sports-building"]["floors"], [])
+        self.assertEqual(locations["sports-complex"]["floors"], [])
+        self.assertEqual(locations["sports-fields-running-track"]["floors"], [])
+        self.assertEqual(locations["morris-forum"]["floors"], [])
+        self.assertTrue(all(floor["sub_locations"] == [] for floor in locations["innovation-building"]["floors"]))
+        self.assertTrue(all(floor["sub_locations"] == [] for floor in locations["senior-school"]["floors"]))
+        self.assertTrue(all(floor["sub_locations"] == [] for floor in locations["prep-school"]["floors"]))
+        self.assertTrue(all(floor["sub_locations"] == [] for floor in locations["pre-prep-school"]["floors"]))
+        self.assertNotEqual(
+            locations["sports-building"]["interaction_regions"][0]["id"],
+            locations["sports-complex"]["interaction_regions"][0]["id"],
+        )
+        self.assertNotEqual(
+            locations["pre-prep-school"]["interaction_regions"][0]["id"],
+            locations["sports-complex"]["interaction_regions"][0]["id"],
+        )
+        self.assertIn("Sports Fields & Running Track", backend_app.school_location_filter_values())
+        self.assertIn("Morris Forum", backend_app.school_location_filter_values())
+        self.assertIn("Sports Complex > Changing Rooms", backend_app.school_location_filter_values())
+        self.assertIn("Sports Complex > Strength & Conditioning Room", backend_app.school_location_filter_values())
+        self.assertNotIn("Sports Building > Changing Rooms", backend_app.school_location_filter_values())
 
     def test_query_blocking_stops_before_save(self) -> None:
         request = DummyJSONRequest(
@@ -410,6 +451,168 @@ class BlockingFlowTests(unittest.TestCase):
         self.assertGreater(score_exact, 0)
         self.assertGreater(score_typo, 0)
 
+    def test_assistant_search_uses_tags_llava_and_location_breakdowns(self) -> None:
+        self.item.tags = ["bottle", "blue"]
+        llava_item = LostFoundItem(
+            report_type="lost",
+            reporter_name="Student Two",
+            title="Green Flask",
+            description="Found near Senior classrooms.",
+            location="Floor 2",
+            secondary_location="Senior School",
+            category="Bottle",
+            status="Open",
+            image_path="/uploads/flask.jpg",
+            llava_analysis_json=json.dumps({
+                "item_description": "green water bottle with a white logo",
+                "object_type": "water bottle",
+                "confidence_score": 91,
+            }),
+            submitted_by_user_id=self.user.id,
+            claimed=False,
+        )
+        unrelated = LostFoundItem(
+            report_type="lost",
+            reporter_name="Student Three",
+            title="Black Laptop",
+            description="Laptop in a sleeve.",
+            location="Innovation Building",
+            category="Electronics",
+            status="Open",
+            submitted_by_user_id=self.user.id,
+            claimed=False,
+        )
+        self.db.add_all([llava_item, unrelated])
+        self.db.commit()
+
+        items = self.db.query(LostFoundItem).order_by(LostFoundItem.created_at.desc()).all()
+        scored = backend_app.assistant_scored_items(items, "Where are most lost bottles?")
+        matched_ids = {item.id for item, _score in scored}
+
+        self.assertIn(self.item.id, matched_ids)
+        self.assertIn(llava_item.id, matched_ids)
+        self.assertNotIn(unrelated.id, matched_ids)
+
+        locations, map_regions = backend_app.assistant_location_payload(self.db)
+        context = backend_app.assistant_data_access_context(
+            self.db,
+            items=items,
+            query_text="Where are most lost bottles?",
+            suggested_query="bottle",
+            scoped_scored_items=scored,
+            locations=locations,
+            map_regions=map_regions,
+            floor_mappings=backend_app.assistant_floor_mapping_payload(),
+            upload_metadata=[],
+        )
+        ranked = context["query_summary"]["location_breakdown"]["ranked_locations"]
+        counts_by_location = {row["location"]: row["count"] for row in ranked}
+
+        self.assertEqual(context["query_summary"]["matched_report_count"], 2)
+        self.assertEqual(counts_by_location["Sports Hall"], 1)
+        self.assertEqual(counts_by_location["Senior School > Floor 2"], 1)
+        self.assertEqual(context["global_context"]["total_report_count"], 3)
+
+    def test_assistant_context_reads_history_queries_admin_logs_and_images(self) -> None:
+        self.item.image_path = "/uploads/bottle.jpg"
+        self.item.llava_analysis_json = json.dumps({
+            "item_description": "blue bottle with dented cap",
+            "object_type": "water bottle",
+            "confidence_score": 88,
+        })
+        deleted_item = LostFoundItem(
+            report_type="found",
+            reporter_name="Admin One",
+            title="Archived Umbrella",
+            description="Old archived report.",
+            location="Morris Forum",
+            category="Other",
+            status="Archived",
+            deleted_at=datetime.utcnow(),
+            submitted_by_user_id=self.admin_user.id,
+            claimed=False,
+        )
+        audit = AuditLog(
+            user_id=self.admin_user.id,
+            action_type="report_edited",
+            entity_type="report",
+            entity_id=self.item.id,
+        )
+        audit.before_state = {"status": "Open"}
+        audit.after_state = {"status": "Matched"}
+        query_message = QueryMessage(
+            item_id=None,
+            user_id=self.user.id,
+            role="user",
+            message="blue bottle",
+            language="en",
+        )
+        search_log = AIInspectionLog(
+            user_id=self.user.id,
+            route="/items",
+            input_text="blue bottle",
+            allowed=True,
+            reason="Allowed",
+            confidence=1.0,
+        )
+        self.db.add_all([deleted_item, audit, query_message, search_log])
+        self.db.commit()
+
+        items = self.db.query(LostFoundItem).order_by(LostFoundItem.created_at.desc()).all()
+        query = f"show report #{self.item.id} image"
+        context = backend_app.assistant_data_access_context(
+            self.db,
+            items=items,
+            query_text=query,
+            suggested_query=query,
+            scoped_scored_items=backend_app.assistant_scored_items(items, query),
+            locations=[],
+            map_regions=[],
+            floor_mappings=[],
+            upload_metadata=[],
+        )
+
+        self.assertTrue(context["source_of_truth"]["read_only"])
+        self.assertFalse(context["source_of_truth"]["frontend_state_used"])
+        self.assertEqual(context["global_context"]["total_report_count"], 2)
+        self.assertEqual(context["global_context"]["deleted_report_count"], 1)
+        self.assertEqual(context["on_demand_context"]["specific_reports"][0]["image"]["confidence_score"], 88)
+        self.assertEqual(context["on_demand_context"]["specific_report_history"][0]["action_type"], "report_edited")
+        self.assertEqual(
+            context["on_demand_context"]["user_search_and_query_logs"]["recent_query_messages"][0]["message"],
+            "blue bottle",
+        )
+        self.assertEqual(
+            context["on_demand_context"]["user_search_and_query_logs"]["recent_logged_report_searches"][0]["input_text"],
+            "blue bottle",
+        )
+
+    def test_site_assistant_chat_forces_no_records_without_guessing(self) -> None:
+        captured: dict[str, dict] = {}
+
+        def fake_site_package(**kwargs) -> dict:
+            captured["data_context"] = kwargs["data_context"]
+            return {
+                "reply": "A model guess that should be replaced.",
+                "suggested_query": kwargs.get("suggested_query", ""),
+                "suggested_actions": [],
+                "navigation_target": "reports",
+            }
+
+        payload = backend_app.AssistantChatPayload(message="find purple dinosaur", language="en")
+        with patch("backend.backend.generate_site_helper_package", side_effect=fake_site_package):
+            result = backend_app.site_assistant_chat(
+                payload,
+                request=DummyRequest("/assistant/chat"),
+                current_user=self.user,
+                db=self.db,
+            )
+
+        self.assertIn("No records found", result["reply"])
+        self.assertTrue(result["data_context_summary"]["no_records_found"])
+        self.assertEqual(result["report_count"], self.db.query(LostFoundItem).count())
+        self.assertFalse(captured["data_context"]["source_of_truth"]["frontend_state_used"])
+
     def test_report_submits_without_image_when_text_tagging_fails(self) -> None:
         payload = backend_app.ReportPayload(
             reporter_name="Student One",
@@ -458,6 +661,26 @@ class BlockingFlowTests(unittest.TestCase):
         self.assertIsNone(created.image_path)
 
     def test_report_with_image_uses_llava_tags_immediately(self) -> None:
+        events: list[str] = []
+
+        def fake_classify_user_input(_text: str) -> dict:
+            events.append("text-moderation")
+            return {"allowed": True, "reason": "Allowed", "confidence": 0.95}
+
+        def fake_inspect_image_upload(*_args, **_kwargs) -> dict:
+            events.append("llava")
+            return {
+                "moderation": "SAFE",
+                "item_description": "blue plastic water bottle with loop cap",
+                "object_type": "water bottle",
+                "colours": ["blue"],
+                "notable_markings": ["loop cap", "scuffed"],
+                "possible_category": "Bottle",
+                "confidence_score": 92,
+                "tags": ["water bottle", "blue", "plastic", "loop cap", "scuffed"],
+                "llava_called": True,
+            }
+
         payload = backend_app.ReportPayload(
             reporter_name="Student One",
             title="Blue Bottle",
@@ -474,13 +697,9 @@ class BlockingFlowTests(unittest.TestCase):
         background_tasks = BackgroundTasks()
 
         with patch("backend.backend.ensure_submission_allowed"), \
-             patch("backend.backend.classify_user_input", return_value={"allowed": True, "reason": "Allowed", "confidence": 0.95}), \
+             patch("backend.backend.classify_user_input", side_effect=fake_classify_user_input), \
              patch("backend.backend.decode_image_payload", return_value="/uploads/mock-bottle.jpg"), \
-             patch("backend.backend.inspect_image_upload", return_value={
-                 "moderation": "SAFE",
-                 "tags": ["water bottle", "blue", "plastic", "loop cap", "scuffed"],
-                 "llava_called": True,
-             }), \
+             patch("backend.backend.inspect_image_upload", side_effect=fake_inspect_image_upload), \
              patch("backend.backend.analyze_evidence", return_value={
                  "summary": "Looks plausible",
                  "inconsistencies": "",
@@ -505,6 +724,10 @@ class BlockingFlowTests(unittest.TestCase):
         self.assertEqual(created.image_path, "/uploads/mock-bottle.jpg")
         self.assertEqual(created.tag_source, "llava-image")
         self.assertEqual(created.tags[:3], ["water bottle", "blue", "plastic"])
+        self.assertEqual(created.ai_analysis_status, "success")
+        self.assertEqual(created.llava_analysis["item_description"], "blue plastic water bottle with loop cap")
+        self.assertEqual(created.llava_analysis["confidence_score"], 92)
+        self.assertLess(events.index("llava"), events.index("text-moderation"))
 
     def test_report_with_unsafe_image_is_rejected_fail_closed(self) -> None:
         payload = backend_app.ReportPayload(
@@ -547,7 +770,7 @@ class BlockingFlowTests(unittest.TestCase):
         self.assertEqual(self.db.query(LostFoundItem).count(), 1)
         delete_uploaded_path.assert_called()
 
-    def test_report_with_safe_image_falls_back_to_text_tags_when_llava_returns_no_tags(self) -> None:
+    def test_report_with_safe_image_stops_when_llava_returns_no_tags_or_description(self) -> None:
         payload = backend_app.ReportPayload(
             reporter_name="Student One",
             title="Red Hoodie",
@@ -571,13 +794,55 @@ class BlockingFlowTests(unittest.TestCase):
                  "tags": [],
                  "llava_called": True,
              }), \
-             patch("backend.backend.generate_text_tag_result", return_value={
-                 "summary": "AI-generated text tags",
-                 "category": "Uniform",
-                 "color": "",
-                 "tags": ["hoodie", "red", "sports hall"],
-                 "tag_source": "fallback-text",
+             patch("backend.backend.fallback_tags") as fallback_tags, \
+             patch("backend.backend.delete_uploaded_path") as delete_uploaded_path:
+            with self.assertRaises(HTTPException) as exc:
+                asyncio.run(
+                    backend_app.report_item(
+                        payload,
+                        request,
+                        background_tasks=background_tasks,
+                        current_user=self.user,
+                        db=self.db,
+                    )
+                )
+
+        self.assertEqual(exc.exception.status_code, 503)
+        self.assertIn("LLaVA returned no usable tags or description", exc.exception.detail)
+        fallback_tags.assert_not_called()
+        delete_uploaded_path.assert_called_once_with("/uploads/mock-hoodie.jpg")
+        self.assertEqual(self.db.query(LostFoundItem).count(), 1)
+
+    def test_report_with_image_uses_llava_description_even_without_tags(self) -> None:
+        payload = backend_app.ReportPayload(
+            reporter_name="Student One",
+            title="Blue Bottle",
+            description="Blue bottle left near the long court benches after lunch.",
+            location="Long Court",
+            category="Bottle",
+            image=backend_app.ReportImagePayload(
+                filename="bottle.jpg",
+                content_type="image/jpeg",
+                data="ZmFrZQ==",
+            ),
+        )
+        request = DummyRequest("/items/report")
+        background_tasks = BackgroundTasks()
+
+        with patch("backend.backend.ensure_submission_allowed"), \
+             patch("backend.backend.classify_user_input", return_value={"allowed": True, "reason": "Allowed", "confidence": 0.95}), \
+             patch("backend.backend.decode_image_payload", return_value="/uploads/mock-bottle.jpg"), \
+             patch("backend.backend.inspect_image_upload", return_value={
+                 "moderation": "SAFE",
+                 "item_description": "Blue Nike water bottle with black cap",
+                 "object_type": "water bottle",
+                 "possible_category": "Bottle",
+                 "confidence_score": 88,
+                 "tags": [],
+                 "llava_called": True,
+                 "model": "llava",
              }), \
+             patch("backend.backend.fallback_tags") as fallback_tags, \
              patch("backend.backend.analyze_evidence", return_value={
                  "summary": "Looks plausible",
                  "inconsistencies": "",
@@ -597,9 +862,12 @@ class BlockingFlowTests(unittest.TestCase):
             )
 
         self.assertEqual(result["message"], "Report submitted successfully")
+        fallback_tags.assert_not_called()
         created = self.db.query(LostFoundItem).order_by(LostFoundItem.id.desc()).first()
-        self.assertEqual(created.tag_source, "text-fallback-after-llava-failure")
-        self.assertEqual(created.tags[:3], ["hoodie", "red", "sports hall"])
+        self.assertEqual(created.tag_source, "llava-image")
+        self.assertEqual(created.ai_summary, "Blue Nike water bottle with black cap")
+        self.assertEqual(created.tags, [])
+        self.assertEqual(created.ai_analysis_status, "success")
 
     def test_report_with_weak_llava_tags_keeps_image_output(self) -> None:
         payload = backend_app.ReportPayload(
@@ -622,6 +890,8 @@ class BlockingFlowTests(unittest.TestCase):
              patch("backend.backend.decode_image_payload", return_value="/uploads/mock-laptop.jpg"), \
              patch("backend.backend.inspect_image_upload", return_value={
                  "moderation": "SAFE",
+                 "item_description": "silver laptop with stickers",
+                 "confidence_score": 81,
                  "tags": ["silver laptop", "stickers"],
                  "tag_validation_warnings": ["Image tags were shorter than preferred and were kept with low confidence."],
                  "validation_strength": "low",
@@ -647,7 +917,8 @@ class BlockingFlowTests(unittest.TestCase):
         self.assertEqual(result["message"], "Report submitted successfully")
         created = self.db.query(LostFoundItem).order_by(LostFoundItem.id.desc()).first()
         self.assertEqual(created.tag_source, "llava-image-weak")
-        self.assertEqual(created.ai_summary, "LLaVA image tags (low confidence)")
+        self.assertEqual(created.ai_summary, "silver laptop with stickers")
+        self.assertEqual(created.ai_analysis_status, "success")
         self.assertEqual(created.tags[:2], ["silver laptop", "stickers"])
 
     def test_debug_llava_test_returns_trace_for_latest_upload(self) -> None:

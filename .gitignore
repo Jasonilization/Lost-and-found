@@ -4,6 +4,7 @@ __pycache__/
 
 data/*.db
 logs/
+.deploy/
 uploads/*
 !uploads/.gitkeep
 .env

@@ -188,6 +188,120 @@ def _format_catalog_context(items: list[dict[str, Any]]) -> str:
     return f"{summary}\n" + "\n".join(lines)
 
 
+def _format_site_report_context(reports: list[dict[str, Any]]) -> str:
+    if not reports:
+        return "No reports are currently available."
+
+    lines = []
+    for report in reports[:120]:
+        llava = report.get("llava_analysis") if isinstance(report.get("llava_analysis"), dict) else {}
+        visual = (
+            llava.get("item_description")
+            or llava.get("object_description")
+            or llava.get("object_type")
+            or report.get("ai_summary")
+            or ""
+        )
+        lines.append(
+            f"- #{report.get('id')}: {report.get('title') or 'Untitled'} | "
+            f"type={report.get('report_type') or 'unknown'} | "
+            f"category={report.get('category') or 'Unknown'} | "
+            f"color={report.get('color') or 'Unknown'} | "
+            f"location={report.get('location') or 'Unknown'} | "
+            f"status={report.get('status') or 'Open'} | "
+            f"tags={', '.join(report.get('tags') or []) or 'none'} | "
+            f"visual={visual or 'none'}"
+        )
+    suffix = "" if len(reports) <= 120 else f"\n...{len(reports) - 120} more reports are available to the backend search tool."
+    return "\n".join(lines) + suffix
+
+
+def _format_site_match_context(matches: list[dict[str, Any]]) -> str:
+    if not matches:
+        return "No likely matches were preselected."
+    lines = []
+    for match in matches[:8]:
+        item = match.get("item") if isinstance(match.get("item"), dict) else match
+        lines.append(
+            f"- #{item.get('id')}: {item.get('title') or 'Untitled'} | "
+            f"{item.get('category') or 'Unknown'} | {item.get('location') or 'Unknown'} | "
+            f"score={match.get('score', 0)} | status={item.get('status') or 'Open'}"
+        )
+    return "\n".join(lines)
+
+
+def _format_site_locations_context(locations: list[dict[str, Any]], regions: list[dict[str, Any]]) -> str:
+    location_lines = []
+    for location in locations:
+        floors = location.get("floors") if isinstance(location.get("floors"), list) else []
+        sub_locations = location.get("sub_locations") if isinstance(location.get("sub_locations"), list) else []
+        children = [floor.get("label") for floor in floors if isinstance(floor, dict) and floor.get("label")]
+        children.extend(
+            sub_location.get("label")
+            for sub_location in sub_locations
+            if isinstance(sub_location, dict) and sub_location.get("label")
+        )
+        location_lines.append(
+            f"- {location.get('name') or location.get('label') or 'Unknown'}"
+            + (f" ({', '.join(children)})" if children else "")
+        )
+
+    region_lines = [
+        f"- {region.get('zone') or 'Unknown'} > {region.get('label') or 'Unknown'}"
+        for region in regions[:80]
+    ]
+    return (
+        "Campus locations:\n"
+        + ("\n".join(location_lines) if location_lines else "No configured locations.")
+        + "\nMap regions:\n"
+        + ("\n".join(region_lines) if region_lines else "No custom map regions.")
+    )
+
+
+def _format_site_floor_mapping_context(floor_mappings: list[dict[str, Any]]) -> str:
+    if not floor_mappings:
+        return "No floor mappings are configured."
+
+    lines = []
+    for mapping in floor_mappings[:80]:
+        code_hint = mapping.get("code_hint") or ""
+        sub_locations = mapping.get("sub_locations") if isinstance(mapping.get("sub_locations"), list) else []
+        lines.append(
+            f"- {mapping.get('path') or mapping.get('location') or 'Unknown'}"
+            + (f" | code={code_hint}" if code_hint else "")
+            + (f" | rooms={', '.join(sub_locations[:8])}" if sub_locations else "")
+        )
+    suffix = "" if len(floor_mappings) <= 80 else f"\n...{len(floor_mappings) - 80} more floor mappings are available."
+    return "\n".join(lines) + suffix
+
+
+def _format_site_upload_context(uploads: list[dict[str, Any]]) -> str:
+    if not uploads:
+        return "No upload metadata is available."
+    lines = []
+    for upload in uploads[:80]:
+        lines.append(
+            f"- {upload.get('path') or upload.get('name') or 'upload'} | "
+            f"type={upload.get('content_type') or 'unknown'} | "
+            f"size={upload.get('size') or 0}"
+        )
+    suffix = "" if len(uploads) <= 80 else f"\n...{len(uploads) - 80} more uploads are available."
+    return "\n".join(lines) + suffix
+
+
+def _format_data_access_context(data_context: dict[str, Any]) -> str:
+    if not data_context:
+        return "No backend data access context was provided."
+    try:
+        serialized = json.dumps(data_context, ensure_ascii=False, indent=2, default=str)
+    except (TypeError, ValueError):
+        serialized = str(data_context)
+    max_chars = 36000
+    if len(serialized) > max_chars:
+        return serialized[:max_chars] + "\n...context truncated for prompt size; backend counts and query summaries remain authoritative."
+    return serialized
+
+
 def normalize_language(language: Optional[str]) -> str:
     value = str(language or "").strip()
     return value if value in SUPPORTED_LANGUAGES else "en"
@@ -313,6 +427,151 @@ Latest user message:
     ]
     result["reply"] = str(parsed.get("reply", "")).strip() or fallback_reply
     result["suggestions"] = list(dict.fromkeys(suggestions))[:5]
+    result["reasoning_focus"] = str(parsed.get("reasoning_focus", "")).strip()
+    return result
+
+
+def generate_site_helper_package(
+    *,
+    user_message: str,
+    reports: list[dict[str, Any]],
+    likely_matches: list[dict[str, Any]],
+    locations: list[dict[str, Any]],
+    map_regions: list[dict[str, Any]],
+    floor_mappings: list[dict[str, Any]],
+    upload_metadata: list[dict[str, Any]],
+    suggested_query: str,
+    execute_search: bool,
+    search_results: list[dict[str, Any]],
+    data_context: Optional[dict[str, Any]] = None,
+    language: str = "en",
+) -> dict[str, Any]:
+    normalized_language = normalize_language(language)
+    prompt = f"""
+Return ONLY valid JSON with this shape:
+{{
+  "reply": "assistant reply",
+  "suggested_query": "short search query",
+  "suggested_actions": ["action 1", "action 2", "action 3"],
+  "navigation_target": "reports|map|room|new_report|claims|query|none",
+  "reasoning_focus": "short internal summary"
+}}
+
+You are the read-only site intelligence assistant for a school lost-and-found system.
+
+Capabilities:
+- Treat the Backend data access context as the source of truth. It was loaded read-only from the database, report storage, upload storage, and AI/LLaVA analysis storage, not from frontend state.
+- Answer using all report, metadata, location, upload, heatmap, audit/history, user query/search log, and LLaVA metadata available in this request.
+- Use campus floor mappings, room-code hints, and map regions when answering navigation questions.
+- Suggest concise search queries for lost items, but never invent a report, tag, location, count, image, or LLaVA result.
+- If search results were executed, summarize the strongest matches with report IDs, titles, locations/floors, counts, and why they match.
+- If the backend context says no_records_found is true or matched_report_count is 0 for a record lookup, say "no records found".
+- For image-based reports, include the image path, LLaVA description, detected objects, and confidence score when relevant and available.
+- For history/admin questions, use audit/history context as read-only visibility only.
+- Help users navigate: reports search, school map, lost and found room, new report form, claims, and item chat.
+- Never say that you changed, deleted, claimed, approved, or submitted data.
+- If details are absent from the backend context, say they are not recorded; do not guess.
+- Structure data-heavy answers with counts and recent examples where possible.
+- {_language_instruction(normalized_language)}
+
+Preferred language: {normalized_language}
+Search executed by backend: {"yes" if execute_search else "no"}
+Backend suggested query: {suggested_query or "none"}
+
+Latest user message:
+{user_message}
+
+Likely matches preselected from all reports:
+{_format_site_match_context(likely_matches)}
+
+Search results:
+{_format_site_match_context(search_results)}
+
+All report context:
+{_format_site_report_context(reports)}
+
+Location and map context:
+{_format_site_locations_context(locations, map_regions)}
+
+Floor mappings:
+{_format_site_floor_mapping_context(floor_mappings)}
+
+Upload metadata:
+{_format_site_upload_context(upload_metadata)}
+
+Backend data access context:
+{_format_data_access_context(data_context or {})}
+""".strip()
+
+    first_match = (search_results or likely_matches or [{}])[0]
+    first_item = first_match.get("item") if isinstance(first_match.get("item"), dict) else first_match
+    query_summary = (data_context or {}).get("query_summary", {}) if isinstance(data_context, dict) else {}
+    location_breakdown = query_summary.get("location_breakdown", {}) if isinstance(query_summary, dict) else {}
+    ranked_locations = location_breakdown.get("ranked_locations", []) if isinstance(location_breakdown, dict) else []
+    fallback_reply = (
+        f"I suggest searching for \"{suggested_query}\"."
+        if suggested_query else
+        "I can help search reports, explain campus locations, or guide you to the report form."
+    )
+    if query_summary.get("no_records_found"):
+        fallback_reply = f'No records found for "{suggested_query or user_message}".'
+    elif ranked_locations:
+        top_locations = ", ".join(
+            f"{row.get('location')} ({row.get('count')})"
+            for row in ranked_locations[:3]
+            if row.get("location")
+        )
+        if top_locations:
+            fallback_reply = (
+                f"I found {query_summary.get('matched_report_count', len(search_results or likely_matches))} matching report(s). "
+                f"Top locations: {top_locations}."
+            )
+    if execute_search and first_item:
+        fallback_reply = (
+            f'The strongest match is report #{first_item.get("id")}: "{first_item.get("title")}" '
+            f'at {first_item.get("location") or "the recorded location"}.'
+        )
+
+    result = call_ai_json(
+        prompt=prompt,
+        fallback_payload={
+            "reply": fallback_reply,
+            "suggested_query": suggested_query,
+            "suggested_actions": [
+                "Run this search",
+                "Open reports",
+                "Open the school map",
+            ],
+            "navigation_target": "reports" if suggested_query else "none",
+            "reasoning_focus": "Fallback site helper response.",
+        },
+        metadata={
+            "feature": "site-helper",
+            "language": normalized_language,
+            "report_count": len(reports),
+            "likely_match_count": len(likely_matches),
+            "search_executed": execute_search,
+            "search_result_count": len(search_results),
+            "upload_metadata_count": len(upload_metadata),
+            "floor_mapping_count": len(floor_mappings),
+            "data_context_available": bool(data_context),
+            "matched_report_count": query_summary.get("matched_report_count", 0) if isinstance(query_summary, dict) else 0,
+        },
+    )
+    parsed = result["parsed"]
+    suggested_actions = [
+        str(value).strip()
+        for value in parsed.get("suggested_actions", [])
+        if str(value).strip()
+    ]
+    navigation_target = str(parsed.get("navigation_target", "none")).strip().lower()
+    if navigation_target not in {"reports", "map", "room", "new_report", "claims", "query", "none"}:
+        navigation_target = "none"
+
+    result["reply"] = str(parsed.get("reply", "")).strip() or fallback_reply
+    result["suggested_query"] = str(parsed.get("suggested_query", "")).strip() or suggested_query
+    result["suggested_actions"] = list(dict.fromkeys(suggested_actions))[:5]
+    result["navigation_target"] = navigation_target
     result["reasoning_focus"] = str(parsed.get("reasoning_focus", "")).strip()
     return result
 
