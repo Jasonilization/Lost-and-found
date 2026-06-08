@@ -20,3 +20,4 @@ uploads/*
 !uploads/.gitkeep
 !uploads/background.png
 !uploads/map.png
+!uploads/login.mp4
