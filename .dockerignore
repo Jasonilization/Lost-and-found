@@ -21,3 +21,4 @@ uploads/*
 !uploads/background.png
 !uploads/map.png
 !uploads/login.mp4
+!uploads/loading.mp4

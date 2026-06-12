@@ -57,6 +57,7 @@ class LostFoundItem(Base):
     tag_source = Column(String, default="fallback-text")
     submitted_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     claimed = Column(Boolean, default=False, nullable=False)
+    claim_required = Column(Boolean, default=True, nullable=False)
     is_room_item = Column(Boolean, default=False, nullable=False, index=True)
     room_label = Column(String, default="")
     room_recorded_at = Column(DateTime, nullable=True, index=True)
@@ -133,11 +134,19 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
+    email = Column(String, unique=True, index=True, nullable=True)
+    auth_provider = Column(String, default="password", nullable=False)
+    role = Column(String, default="teacher", nullable=False, index=True)
+    auto_detected_role = Column(String, default="teacher", nullable=False, index=True)
+    assigned_role = Column(String, default="", nullable=False, index=True)
     initials = Column(String, default="")
     class_of = Column(Integer, nullable=True)
     is_admin = Column(Boolean, default=False, nullable=False)
     avatar_path = Column(String, nullable=True)
     preferred_language = Column(String, default="en", nullable=False)
+    email_verified = Column(Boolean, default=False, nullable=False)
+    email_verified_at = Column(DateTime, nullable=True)
+    last_login_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -148,6 +157,22 @@ class UserSession(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     token = Column(String, unique=True, index=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class EmailVerificationCode(Base):
+    __tablename__ = "email_verification_codes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, nullable=False, index=True)
+    purpose = Column(String, default="register", nullable=False, index=True)
+    code_hash = Column(String, nullable=False)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    consumed_at = Column(DateTime, nullable=True, index=True)
+    attempts = Column(Integer, default=0, nullable=False)
+    request_ip = Column(String, default="")
+    user_agent = Column(String, default="")
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    last_sent_at = Column(DateTime, default=datetime.utcnow)
 
 
 class Claim(Base):
@@ -407,12 +432,21 @@ class MapRegion(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class SystemMigration(Base):
+    __tablename__ = "system_migrations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True, nullable=False)
+    completed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 def _dialect_column_sql(column_sql: str) -> str:
     if engine.dialect.name != "postgresql":
         return column_sql
     return (
         column_sql
         .replace("BOOLEAN NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE")
+        .replace("BOOLEAN NOT NULL DEFAULT 1", "BOOLEAN NOT NULL DEFAULT TRUE")
         .replace("DATETIME", "TIMESTAMP")
     )
 
@@ -450,6 +484,7 @@ def _init_db_unlocked() -> None:
     _drop_table_if_exists("ai_routing_audits")
     Base.metadata.create_all(bind=engine)
     _add_column_if_missing("lost_found_items", "claimed", "BOOLEAN NOT NULL DEFAULT 0")
+    _add_column_if_missing("lost_found_items", "claim_required", "BOOLEAN NOT NULL DEFAULT 1")
     _add_column_if_missing("lost_found_items", "submitted_by_user_id", "INTEGER")
     _add_column_if_missing("lost_found_items", "is_room_item", "BOOLEAN NOT NULL DEFAULT 0")
     _add_column_if_missing("lost_found_items", "room_label", "VARCHAR DEFAULT ''")
@@ -479,8 +514,26 @@ def _init_db_unlocked() -> None:
     _add_column_if_missing("lost_found_items", "updated_at", "DATETIME")
     _add_column_if_missing("users", "initials", "VARCHAR DEFAULT ''")
     _add_column_if_missing("users", "class_of", "INTEGER")
+    _add_column_if_missing("users", "email", "VARCHAR")
+    _add_column_if_missing("users", "auth_provider", "VARCHAR NOT NULL DEFAULT 'password'")
+    _add_column_if_missing("users", "role", "VARCHAR NOT NULL DEFAULT 'teacher'")
+    _add_column_if_missing("users", "auto_detected_role", "VARCHAR NOT NULL DEFAULT 'teacher'")
+    _add_column_if_missing("users", "assigned_role", "VARCHAR NOT NULL DEFAULT ''")
     _add_column_if_missing("users", "avatar_path", "VARCHAR")
     _add_column_if_missing("users", "preferred_language", "VARCHAR NOT NULL DEFAULT 'en'")
+    _add_column_if_missing("users", "email_verified", "BOOLEAN NOT NULL DEFAULT 0")
+    _add_column_if_missing("users", "email_verified_at", "DATETIME")
+    _add_column_if_missing("users", "last_login_at", "DATETIME")
+    _add_column_if_missing("email_verification_codes", "email", "VARCHAR")
+    _add_column_if_missing("email_verification_codes", "purpose", "VARCHAR NOT NULL DEFAULT 'register'")
+    _add_column_if_missing("email_verification_codes", "code_hash", "VARCHAR")
+    _add_column_if_missing("email_verification_codes", "expires_at", "DATETIME")
+    _add_column_if_missing("email_verification_codes", "consumed_at", "DATETIME")
+    _add_column_if_missing("email_verification_codes", "attempts", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_missing("email_verification_codes", "request_ip", "VARCHAR DEFAULT ''")
+    _add_column_if_missing("email_verification_codes", "user_agent", "VARCHAR DEFAULT ''")
+    _add_column_if_missing("email_verification_codes", "created_at", "DATETIME")
+    _add_column_if_missing("email_verification_codes", "last_sent_at", "DATETIME")
     _add_column_if_missing("claims", "match_score", "INTEGER NOT NULL DEFAULT 0")
     _add_column_if_missing("claims", "match_reasoning", "TEXT DEFAULT ''")
     _add_column_if_missing("claims", "visual_selection_json", "TEXT DEFAULT '{}'")
@@ -514,6 +567,17 @@ def _init_db_unlocked() -> None:
     _create_index_if_missing("ix_lost_found_items_abuse_override_status", "lost_found_items", "abuse_override_status")
     _create_index_if_missing("ix_lost_found_items_deleted_at", "lost_found_items", "deleted_at")
     _create_index_if_missing("ix_lost_found_items_deleted_by_user_id", "lost_found_items", "deleted_by_user_id")
+    _create_index_if_missing("ix_users_role", "users", "role")
+    _create_index_if_missing("ix_users_auto_detected_role", "users", "auto_detected_role")
+    _create_index_if_missing("ix_users_assigned_role", "users", "assigned_role")
+    _create_index_if_missing("ix_users_email", "users", "email")
+    _create_index_if_missing("ix_users_email_verified", "users", "email_verified")
+    _create_index_if_missing("ix_users_email_verified_at", "users", "email_verified_at")
+    _create_index_if_missing("ix_email_verification_codes_email", "email_verification_codes", "email")
+    _create_index_if_missing("ix_email_verification_codes_purpose", "email_verification_codes", "purpose")
+    _create_index_if_missing("ix_email_verification_codes_expires_at", "email_verification_codes", "expires_at")
+    _create_index_if_missing("ix_email_verification_codes_consumed_at", "email_verification_codes", "consumed_at")
+    _create_index_if_missing("ix_email_verification_codes_created_at", "email_verification_codes", "created_at")
     _create_index_if_missing("ix_ai_inspection_logs_user_id", "ai_inspection_logs", "user_id")
     _create_index_if_missing("ix_ai_inspection_logs_feature", "ai_inspection_logs", "feature")
     _create_index_if_missing("ix_claim_drafts_item_id", "claim_drafts", "item_id")
@@ -525,6 +589,9 @@ def _init_db_unlocked() -> None:
     _create_index_if_missing("ix_map_regions_label", "map_regions", "label")
     _create_index_if_missing("ix_map_regions_zone", "map_regions", "zone")
     _create_index_if_missing("ix_map_regions_created_at", "map_regions", "created_at")
+    with engine.begin() as connection:
+        verified_value = "TRUE" if engine.dialect.name == "postgresql" else "1"
+        connection.execute(text(f"UPDATE users SET email_verified = {verified_value} WHERE email_verified_at IS NOT NULL"))
 
 
 def init_db() -> None:

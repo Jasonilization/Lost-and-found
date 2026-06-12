@@ -48,6 +48,7 @@ COPY backend ./backend
 COPY frontend ./frontend
 RUN rm -rf ./frontend/dist ./frontend/build
 COPY uploads/background.png /tmp/lostfound/uploads/background.png
+COPY uploads/loading.mp4 /tmp/lostfound/uploads/loading.mp4
 COPY uploads/map.png /tmp/lostfound/uploads/map.png
 COPY .env.example ./.env.example
 COPY docker-entrypoint.sh /usr/local/bin/lostfound-entrypoint

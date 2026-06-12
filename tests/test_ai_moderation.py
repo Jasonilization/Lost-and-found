@@ -205,12 +205,17 @@ class AIModerationTests(unittest.TestCase):
                 FakeJSONResponse({}, "Ollama is running"),
                 FakeJSONResponse({"models": [{"name": "llava"}]}),
             ]
-            mock_post.return_value = FakeResponse(
-                '{"moderation":"SAFE","item_description":"blue bottle","tags":["blue bottle","plastic","cap"]}'
-            )
+            mock_post.return_value = FakeResponse(json.dumps({
+                "moderation": "SAFE",
+                "item_description": "blue bottle",
+                "materials": ["plastic"],
+                "brand": "Hydro",
+                "visible_text": ["HYDRO"],
+                "tags": ["blue bottle", "plastic", "cap"],
+            }))
 
             with self.assertLogs("ollama_tagger", level="INFO") as captured:
-                inspect_image_upload(image_file.name)
+                inspection = inspect_image_upload(image_file.name)
 
         log_text = "\n".join(captured.output)
         for expected in [
@@ -235,6 +240,10 @@ class AIModerationTests(unittest.TestCase):
         self.assertEqual(len(payload["images"]), 1)
         self.assertTrue(payload["images"][0])
         self.assertNotIn("image", payload)
+        self.assertEqual(inspection["materials"], ["plastic"])
+        self.assertEqual(inspection["brand"], "Hydro")
+        self.assertEqual(inspection["visible_text"], ["HYDRO"])
+        self.assertEqual(inspection["full_json_response"]["brand"], "Hydro")
 
     def test_inspect_image_upload_rejects_missing_image_response(self) -> None:
         with tempfile.NamedTemporaryFile(suffix=".jpg") as image_file, \

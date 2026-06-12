@@ -249,6 +249,15 @@ export APP_IMAGE='yourname/lostfound:20260529102030-a1b2c3d4e5f6'
 export POSTGRES_PASSWORD='change-this-to-a-long-random-database-password'
 export ADMIN_USERNAME='admin'
 export ADMIN_PASSWORD='change-this-admin-password'
+export SESSION_SECRET='change-this-session-secret'
+export SMTP_HOST='smtp.example.edu'
+export SMTP_PORT='587'
+export SMTP_USERNAME='lostfound@example.edu'
+export SMTP_PASSWORD='change-this-smtp-password'
+export SMTP_USE_TLS='1'
+export SMTP_USE_SSL='0'
+export SMTP_FROM_ADDRESS='lostfound@example.edu'
+export SMTP_FROM_NAME='SHR Lost and Found'
 export WEB_REPLICAS=2
 export PUBLISHED_PORT=8000
 ```
@@ -259,6 +268,8 @@ What each variable means:
 - `POSTGRES_PASSWORD`: the PostgreSQL password. The `db` service uses it, and the `web` service uses it in `DATABASE_URL` to connect to `db`.
 - `ADMIN_USERNAME`: the first admin username. The app uses this only to bootstrap an admin when no admin exists yet.
 - `ADMIN_PASSWORD`: the first admin password. Use a real password, not the example value.
+- `SESSION_SECRET`: shared secret used for signed email verification tokens. Keep it stable across replicas.
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_USE_TLS`, `SMTP_USE_SSL`, `SMTP_FROM_ADDRESS`, `SMTP_FROM_NAME`: mail settings for sending registration and email-change verification codes. Login never asks for a verification code. If `SMTP_HOST` is empty, email delivery is not configured; codes are written to the development security log.
 - `WEB_REPLICAS`: how many web containers Swarm should run.
 - `PUBLISHED_PORT`: the port users open in their browser on any Swarm node.
 
@@ -266,8 +277,67 @@ Important:
 
 - Set `POSTGRES_PASSWORD` before the first deploy.
 - Do not casually change `POSTGRES_PASSWORD` after PostgreSQL has already created its database volume.
+- For port `587`, normally keep `SMTP_USE_TLS=1` and `SMTP_USE_SSL=0`. For port `465`, normally use `SMTP_USE_SSL=1` and `SMTP_USE_TLS=0`.
+- `SMTP_FROM_ADDRESS` should usually match `SMTP_USERNAME` or another sender address the mail provider allows. Many providers reject mail from unapproved senders.
+- After deployment, sign in as an admin and `POST /debug/smtp-test` with `{"email":"your-test-inbox@example.edu"}`. The response reports SMTP connection status, whether the server accepted the test email, the active host/port/TLS/SSL/sender settings, and the error message on failure. The same result is logged as `smtp_test_success` or `smtp_test_failed`.
 - Use the exact `APP_IMAGE` tag emitted by `build.sh`; do not deploy `latest`.
 - This stack has `max_replicas_per_node: 1` for the web service, so `WEB_REPLICAS=2` needs at least two available nodes. `WEB_REPLICAS=5` needs at least five available nodes unless you edit that placement rule.
+
+### SMTP Setup Guide
+
+For local development, put these values in `.env`:
+
+```bash
+SMTP_HOST=smtp.example.edu
+SMTP_PORT=587
+SMTP_USERNAME=lostfound@example.edu
+SMTP_PASSWORD=your-smtp-password-or-app-password
+SMTP_USE_TLS=1
+SMTP_USE_SSL=0
+SMTP_FROM_ADDRESS=lostfound@example.edu
+SMTP_FROM_NAME=SHR Lost and Found
+```
+
+For Docker/Swarm deployment, export the same variables before running `docker stack deploy` or `./deploy.sh`. The `docker-compose.yml` web service passes them through in its `environment:` block:
+
+```yaml
+SMTP_HOST: "${SMTP_HOST:-}"
+SMTP_PORT: "${SMTP_PORT:-587}"
+SMTP_USERNAME: "${SMTP_USERNAME:-}"
+SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
+SMTP_USE_TLS: "${SMTP_USE_TLS:-1}"
+SMTP_USE_SSL: "${SMTP_USE_SSL:-0}"
+SMTP_FROM_ADDRESS: "${SMTP_FROM_ADDRESS:-}"
+SMTP_FROM_NAME: "${SMTP_FROM_NAME:-}"
+```
+
+Gmail SMTP with an app password:
+
+```bash
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=youraccount@gmail.com
+SMTP_PASSWORD=your-16-character-app-password
+SMTP_USE_TLS=1
+SMTP_USE_SSL=0
+SMTP_FROM_ADDRESS=youraccount@gmail.com
+SMTP_FROM_NAME=SHR Lost and Found
+```
+
+Microsoft 365 / Outlook SMTP:
+
+```bash
+SMTP_HOST=smtp.office365.com
+SMTP_PORT=587
+SMTP_USERNAME=youraccount@yourdomain.edu
+SMTP_PASSWORD=your-mailbox-password-or-app-password
+SMTP_USE_TLS=1
+SMTP_USE_SSL=0
+SMTP_FROM_ADDRESS=youraccount@yourdomain.edu
+SMTP_FROM_NAME=SHR Lost and Found
+```
+
+The admin System Monitor has an SMTP diagnostics panel and a `Send Test Email` button. Passwords are never returned to the browser or written to logs.
 
 ## Step 8: Deploy The Stack
 

@@ -13,6 +13,7 @@
     <div class="page-glow page-glow-right" aria-hidden="true"></div>
 
     <section class="auth-screen" id="authScreen">
+      <div class="login-bubble-system" id="loginBubbleSystem" aria-hidden="true"></div>
       <div class="auth-card surface-card">
         <p class="eyebrow" data-i18n="auth.eyebrow">School account</p>
         <h1 data-i18n="brand.title">SHR Lost &amp; Found System</h1>
@@ -26,8 +27,26 @@
 
         <form id="authForm" class="stack-form auth-form" method="post">
           <label>
+            <span data-i18n="auth.email">Email</span>
+            <input id="authEmail" type="email" autocomplete="email" required>
+          </label>
+          <div class="email-verification-panel is-hidden" id="authVerificationPanel">
+            <div class="email-verification-head">
+              <span id="authVerificationStatus" data-i18n="auth.emailUnverified">Email not verified</span>
+              <button class="ghost-button small-button" id="authSendCodeButton" type="button" data-i18n="auth.sendCode">Send code</button>
+            </div>
+            <div class="email-verification-code-row">
+              <label>
+                <span data-i18n="auth.code">Verification code</span>
+                <input id="authVerificationCode" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="123456">
+              </label>
+              <button class="primary-button small-button" id="authVerifyCodeButton" type="button" data-i18n="auth.verifyCode">Verify</button>
+            </div>
+            <p class="field-note" id="authVerificationMeta"></p>
+          </div>
+          <label class="is-hidden" id="authUsernameField">
             <span data-i18n="auth.username">Username</span>
-            <input id="authUsername" type="text" minlength="3" autocomplete="username" required>
+            <input id="authUsername" type="text" minlength="3" autocomplete="username">
           </label>
           <label>
             <span data-i18n="auth.password">Password</span>
@@ -92,13 +111,14 @@
           </div>
         </div>
         <div class="app-topbar-end">
-          <button class="primary-button small-button topbar-action-button" id="topbarReportButton" type="button">Report item</button>
-          <button class="ghost-button small-button topbar-action-button" id="topbarRefreshButton" type="button">Refresh</button>
+          <button class="primary-button small-button topbar-action-button" id="topbarReportButton" type="button" data-i18n="nav.report">Report item</button>
+          <button class="ghost-button small-button topbar-action-button" id="topbarRefreshButton" type="button" data-i18n="common.refresh">Refresh</button>
+          <button class="ghost-button small-button topbar-action-button" id="helpButton" type="button" data-i18n="common.help">Help</button>
           <div class="new-window-wrap">
             <button class="ghost-button new-window-button" id="newWindowButton" type="button" aria-haspopup="menu" aria-expanded="false" title="New window" data-i18n="nav.newWindow">New window</button>
             <div class="new-window-menu surface-card glass is-hidden" id="newWindowMenu" role="menu" aria-label="Open panel">
-              <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="dashboard">Dashboard</button>
-              <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="map">School Map</button>
+              <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="dashboard" data-i18n="nav.dashboard">Dashboard</button>
+              <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="map" data-i18n="nav.map">School Map</button>
               <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="reports" data-i18n="nav.reports">Reports</button>
               <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="room" data-i18n="nav.room">Lost &amp; Found Room</button>
               <button class="ghost-button small-button" type="button" role="menuitem" data-new-window-target="returned" data-i18n="nav.returned">Recently Returned</button>
@@ -110,12 +130,12 @@
             </div>
           </div>
           <label class="nav-mode-select-wrap">
-            <span>Nav</span>
+            <span data-i18n="nav.mode">Nav</span>
             <select id="sidebarModeSelect" aria-label="Navigation layout">
-              <option value="left">Left</option>
-              <option value="top">Top</option>
-              <option value="bottom">Bottom</option>
-              <option value="minimal">Minimal</option>
+              <option value="left" data-i18n="nav.left">Left</option>
+              <option value="top" data-i18n="nav.top">Top</option>
+              <option value="bottom" data-i18n="nav.bottom">Bottom</option>
+              <option value="minimal" data-i18n="nav.minimal">Minimal</option>
             </select>
           </label>
           <div class="notification-wrap">
@@ -144,8 +164,8 @@
         <header class="topbar navbar glass window-panel sidebar-window" id="sidebarPanel" data-panel="sidebar">
           <div class="window-header">
             <div class="window-title-group">
-              <p class="eyebrow">Navigation</p>
-              <h3>Workspace</h3>
+              <p class="eyebrow" data-i18n="nav.navigation">Navigation</p>
+              <h3 data-i18n="nav.workspace">Workspace</h3>
             </div>
             <div class="window-controls">
               <button class="icon-button window-control" id="sidebarCollapseButton" type="button" aria-label="Collapse navigation">◧</button>
@@ -167,7 +187,7 @@
                 </span>
               </div>
               <div class="sidebar-location-card surface-card" aria-label="Current workspace location">
-                <span class="sidebar-location-label">Current location</span>
+                <span class="sidebar-location-label" data-i18n="nav.currentLocation">Current location</span>
                 <strong id="sidebarCurrentSection">Dashboard</strong>
                 <span id="sidebarBreadcrumbs">Dashboard</span>
               </div>
@@ -206,8 +226,8 @@
                 <h3 id="dashboardTitle">Dashboard</h3>
               </div>
               <div class="window-header-actions">
-                <button class="primary-button" id="dashboardReportButton" type="button">New report</button>
-                <button class="ghost-button" id="dashboardRefreshButton" type="button">Refresh dashboard</button>
+                <button class="primary-button" id="dashboardReportButton" type="button" data-i18n="report.eyebrow">New report</button>
+                <button class="ghost-button" id="dashboardRefreshButton" type="button" data-i18n="dashboard.refresh">Refresh dashboard</button>
               </div>
             </div>
             <div class="window-body dashboard-body">
@@ -258,8 +278,26 @@
                 <article class="dashboard-panel-card">
                   <div class="section-heading compact">
                     <div>
-                      <p class="eyebrow">Priority queue</p>
-                      <h4>Campus activity</h4>
+                      <p class="eyebrow">Recent reports</p>
+                      <h4>Latest item reports</h4>
+                    </div>
+                  </div>
+                  <div class="dashboard-activity-list dashboard-compact-list" id="dashboardRecentReportsList"></div>
+                </article>
+                <article class="dashboard-panel-card">
+                  <div class="section-heading compact">
+                    <div>
+                      <p class="eyebrow">Recent returns</p>
+                      <h4>Returned items</h4>
+                    </div>
+                  </div>
+                  <div class="dashboard-activity-list dashboard-compact-list" id="dashboardRecentReturnsList"></div>
+                </article>
+                <article class="dashboard-panel-card">
+                  <div class="section-heading compact">
+                    <div>
+                      <p class="eyebrow">Personal activity</p>
+                      <h4>Your updates</h4>
                     </div>
                   </div>
                   <div class="dashboard-activity-list" id="dashboardActivityList"></div>
@@ -272,15 +310,15 @@
                     </div>
                   </div>
                   <div class="dashboard-action-grid">
-                    <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="reports">Reports</button>
-                    <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="map">School Map</button>
-                    <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="room">Lost &amp; Found Room</button>
-                    <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="claims">Claims</button>
-                    <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="notifications">Notifications</button>
-                    <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="returned">Recently Returned</button>
-                    <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="query">Item Lookup</button>
-                    <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="account">Account</button>
-                    <button class="ghost-button dashboard-link-button dashboard-admin-action is-hidden" type="button" data-dashboard-target="admin" data-dashboard-advanced="true">Admin Tools</button>
+                    <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="map" data-i18n="nav.map">School Map</button>
+                    <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="query" data-i18n="nav.query">Item Lookup</button>
+                    <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="reports" data-i18n="nav.reports">Reports</button>
+                    <button class="ghost-button dashboard-link-button" type="button" data-dashboard-target="account" data-i18n="nav.account">Account</button>
+                    <button class="ghost-button dashboard-link-button dashboard-teacher-action" type="button" data-dashboard-target="room" data-i18n="nav.room">Lost &amp; Found Room</button>
+                    <button class="ghost-button dashboard-link-button dashboard-teacher-action" type="button" data-dashboard-target="claims" data-i18n="nav.claims">Claims</button>
+                    <button class="ghost-button dashboard-link-button dashboard-teacher-action" type="button" data-dashboard-target="notifications" data-i18n="notifications.title">Notifications</button>
+                    <button class="ghost-button dashboard-link-button dashboard-low-priority" type="button" data-dashboard-target="returned" data-i18n="nav.returned">Recently Returned</button>
+                    <button class="ghost-button dashboard-link-button dashboard-admin-action is-hidden" type="button" data-dashboard-target="admin" data-dashboard-advanced="true" data-i18n="dashboard.adminTools">Admin Tools</button>
                   </div>
                 </article>
               </section>
@@ -347,6 +385,114 @@
           <div class="layout-divider is-horizontal is-hidden" id="contentSplitter" data-layout-resize="content" role="separator" aria-orientation="horizontal" aria-label="Resize content panels"></div>
           <div class="secondary-stack is-hidden" id="secondaryStack">
 
+        <section class="panel page-panel surface-card window-panel report-page-panel is-hidden" id="reportDialog" data-panel="report" aria-labelledby="uploadTitle">
+          <div class="section-heading window-header">
+            <div>
+              <p class="eyebrow" data-i18n="report.eyebrow">New report</p>
+              <h3 id="uploadTitle" data-i18n="report.title">Upload a lost item</h3>
+            </div>
+            <div class="window-header-actions">
+              <span class="static-pill" data-i18n="report.lostOnly">Lost only</span>
+              <button class="ghost-button" id="closeReportDialog" type="button" data-i18n="common.back">Back</button>
+              <div class="window-controls">
+                <button class="icon-button window-control" data-panel-minimize="report" type="button" aria-label="Minimize report panel">−</button>
+                <button class="icon-button window-control" data-panel-close="report" type="button" aria-label="Close report panel">×</button>
+              </div>
+            </div>
+          </div>
+          <div class="window-body report-page-body">
+            <form id="itemForm" class="item-form report-page-form" method="post">
+              <label class="drop-zone" id="dropZone">
+                <input id="imageInput" type="file" accept=".png,.jpg,.jpeg,.webp,.heic,.heif,image/png,image/jpeg,image/webp,image/heic,image/heif">
+                <span class="drop-icon">+</span>
+                <strong id="dropTitle" data-i18n="report.dropTitle">Drop image here</strong>
+                <small id="dropHint" data-i18n="report.dropHint">or choose a JPG, PNG, WEBP, HEIC, or HEIF file</small>
+              </label>
+              <input id="reportCameraInput" type="file" accept="image/*" capture="environment" class="is-hidden">
+              <div class="query-upload-row">
+                <label class="ghost-button query-media-button" for="imageInput" id="reportUploadButton" data-i18n="report.uploadImage">Upload Image</label>
+                <button class="ghost-button query-media-button" id="reportCameraButton" type="button" data-i18n="report.takePhoto">Take Photo</button>
+              </div>
+              <div class="query-camera-panel is-hidden" id="reportCameraPanel" aria-live="polite">
+                <video id="reportCameraPreview" autoplay playsinline muted></video>
+                <div class="query-camera-actions">
+                  <button class="primary-button" id="reportCameraCaptureButton" type="button" data-i18n="report.usePhoto">Use Photo</button>
+                  <button class="ghost-button" id="reportCameraCancelButton" type="button" data-i18n="common.cancel">Cancel</button>
+                </div>
+              </div>
+
+              <div class="form-grid report-simplified-grid">
+                <label>
+                  <span data-i18n="report.itemTitle">Item title</span>
+                  <input id="titleInput" name="title" type="text" maxlength="80" placeholder="Blue water bottle" data-i18n-placeholder="report.itemTitlePlaceholder" required>
+                </label>
+              </div>
+              <div class="report-hidden-fields is-hidden" aria-hidden="true">
+                <label>
+                  <span data-i18n="common.category">Category</span>
+                  <select id="categoryInput" name="category" required></select>
+                </label>
+                <label>
+                  <span data-i18n="common.date">Date</span>
+                  <input id="dateInput" name="event_date" type="date" required>
+                </label>
+                <label>
+                  <span data-i18n="report.displayName">Display name</span>
+                  <input id="reporterInput" name="reporter_name" type="text" maxlength="80" placeholder="How this report should display" data-i18n-placeholder="report.displayNamePlaceholder" required>
+                </label>
+              </div>
+
+              <label>
+                <span data-i18n="common.location">Location</span>
+                <input id="optionalLocationInput" type="text" maxlength="120" placeholder="A504, S312, P308, P201, or map location" autocomplete="off" aria-describedby="locationHelperText">
+                <small class="field-note" id="locationHelperText" data-i18n="report.locationHelper">Use room codes like A504, S312, P308, or P201.</small>
+              </label>
+
+              <label>
+                <span data-i18n="common.description">Description</span>
+                <textarea id="descriptionInput" name="description" rows="4" maxlength="450" placeholder="Add color, brand, markings, or details that would help someone confirm it." data-i18n-placeholder="report.descriptionPlaceholder" required></textarea>
+                <small class="field-note" id="descriptionHelperText" data-i18n="report.descriptionHelper">Include color, brand, or unique marks</small>
+              </label>
+
+              <fieldset class="claim-requirement-field">
+                <legend data-i18n="report.claimRequirement">Claim requirement</legend>
+                <label class="claim-option">
+                  <input id="claimRequiredInput" name="claim_required" type="radio" value="true" checked>
+                  <span data-i18n="report.claimRequired">Claim Required</span>
+                </label>
+                <label class="claim-option">
+                  <input id="noClaimRequiredInput" name="claim_required" type="radio" value="false">
+                  <span data-i18n="report.noClaimRequired">No Claim Required</span>
+                </label>
+                <p class="field-note" id="reportClaimStatus">
+                  <span data-i18n="report.claimStatus">Claim Status</span>: <strong data-report-claim-status-label>Claim Required</strong>
+                </p>
+              </fieldset>
+
+              <label class="is-hidden" aria-hidden="true">
+                <span data-i18n="report.supportingEvidence">Supporting evidence</span>
+                <textarea id="evidenceDetailsInput" name="evidence_details" rows="3" maxlength="320" placeholder="Optional: ownership clues, identifying marks, timeline, or extra evidence." data-i18n-placeholder="report.evidencePlaceholder"></textarea>
+                <small class="field-note" id="evidenceHelperText" data-i18n="report.evidenceHelper">Optional but improves claim accuracy</small>
+              </label>
+
+              <div class="form-actions">
+                <button class="primary-button glass" id="submitButton" type="submit">
+                  <span class="button-text" data-i18n="report.save">Submit Report</span>
+                </button>
+                <p class="status-message" id="uploadMessage"></p>
+              </div>
+              <div class="progress-widget is-hidden" id="reportProgress" aria-live="polite">
+                <div class="progress-track"><span class="progress-fill" id="reportProgressFill"></span></div>
+                <div class="progress-meta">
+                  <span id="reportProgressLabel">Preparing upload...</span>
+                  <span id="reportProgressValue">0%</span>
+                </div>
+              </div>
+              <div class="warning-card is-hidden" id="reportWarningCard"></div>
+            </form>
+          </div>
+        </section>
+
         <section class="panel page-panel surface-card window-panel is-hidden" id="mapSection" data-panel="map" aria-labelledby="schoolMapTitle">
           <div class="section-heading window-header">
             <div>
@@ -393,7 +539,7 @@
           <section class="panel surface-card room-admin-panel is-hidden" id="roomAdminPanel" aria-labelledby="roomAdminTitle">
             <div class="section-heading compact">
               <div>
-                <p class="eyebrow">Admin upload</p>
+                <p class="eyebrow">Teacher upload</p>
                 <h4 id="roomAdminTitle">Add to the room</h4>
               </div>
             </div>
@@ -497,8 +643,8 @@
         <section class="panel page-panel surface-card window-panel is-hidden" id="accountSection" data-panel="account" aria-labelledby="accountTitle">
           <div class="section-heading window-header">
             <div>
-              <p class="eyebrow">Profile</p>
-              <h3 id="accountTitle">Account</h3>
+              <p class="eyebrow" data-i18n="account.profile">Profile</p>
+              <h3 id="accountTitle" data-i18n="nav.account">Account</h3>
             </div>
             <div class="window-controls">
               <button class="icon-button window-control" data-panel-minimize="account" type="button" aria-label="Minimize account panel">−</button>
@@ -517,9 +663,9 @@
                   <span id="accountPageIdentity"></span>
                 </p>
                 <div class="form-actions">
-                  <label class="ghost-button" for="profileImageInput">Choose profile image</label>
+                  <label class="ghost-button" for="profileImageInput" data-i18n="account.chooseProfileImage">Choose profile image</label>
                   <input id="profileImageInput" type="file" accept=".png,.jpg,.jpeg,.webp,.heic,.heif,image/png,image/jpeg,image/webp,image/heic,image/heif" class="is-hidden">
-                  <button class="primary-button" id="profileImageButton" type="button">Upload photo</button>
+                  <button class="primary-button" id="profileImageButton" type="button" data-i18n="account.uploadPhoto">Upload photo</button>
                 </div>
                 <div class="progress-widget is-hidden" id="profileProgress" aria-live="polite">
                   <div class="progress-track"><span class="progress-fill" id="profileProgressFill"></span></div>
@@ -533,12 +679,29 @@
             </article>
 
             <article class="detail-card surface-card">
-              <p class="eyebrow">Details</p>
+              <p class="eyebrow" data-i18n="account.details">Details</p>
               <dl class="info-list account-info-list" id="accountInfoList"></dl>
+              <form class="stack-form account-email-form" id="accountEmailForm" method="post">
+                <div class="email-verification-head">
+                  <label>
+                    <span data-i18n="account.changeEmail">Change email</span>
+                    <input id="accountEmailInput" type="email" autocomplete="email">
+                  </label>
+                  <button class="ghost-button small-button" id="accountEmailSendCodeButton" type="button" data-i18n="auth.sendCode">Send code</button>
+                </div>
+                <div>
+                  <label>
+                    <span data-i18n="auth.code">Verification code</span>
+                    <input id="accountEmailCodeInput" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="123456">
+                  </label>
+                </div>
+                <button class="primary-button" id="accountEmailConfirmButton" type="submit" data-i18n="account.verifyNewEmail">Verify new email</button>
+                <p class="status-message" id="accountEmailMessage"></p>
+              </form>
             </article>
 
             <article class="detail-card surface-card mode-settings-card">
-              <p class="eyebrow">Experience</p>
+              <p class="eyebrow" data-i18n="account.experience">Experience</p>
               <div class="mode-toggle-row">
                 <div>
                   <h4 id="advancedModeTitle">Simple Mode</h4>
@@ -657,6 +820,53 @@
                 <p class="admin-monitor-value" id="adminMonitorUptime">--</p>
               </article>
             </div>
+            <article class="admin-monitor-card surface-card admin-smtp-card">
+              <div class="section-heading compact">
+                <div>
+                  <p class="eyebrow">SMTP diagnostics</p>
+                  <h4>Email delivery</h4>
+                </div>
+              </div>
+              <dl class="info-list account-info-list admin-smtp-list">
+                <div>
+                  <dt>SMTP Status</dt>
+                  <dd id="adminSmtpStatus">--</dd>
+                </div>
+                <div>
+                  <dt>Delivery Mode</dt>
+                  <dd id="adminSmtpDeliveryMode">--</dd>
+                </div>
+                <div>
+                  <dt>Host configured?</dt>
+                  <dd id="adminSmtpHostConfigured">--</dd>
+                </div>
+                <div>
+                  <dt>Username configured?</dt>
+                  <dd id="adminSmtpUsernameConfigured">--</dd>
+                </div>
+                <div>
+                  <dt>Password configured?</dt>
+                  <dd id="adminSmtpPasswordConfigured">--</dd>
+                </div>
+                <div>
+                  <dt>Sender identity</dt>
+                  <dd id="adminSmtpSender">--</dd>
+                </div>
+                <div>
+                  <dt>Last SMTP Error</dt>
+                  <dd id="adminSmtpLastError">--</dd>
+                </div>
+              </dl>
+              <div class="warning-card is-hidden" id="adminSmtpWarning"></div>
+              <form class="stack-form admin-smtp-test-form" id="adminSmtpTestForm" method="post">
+                <label>
+                  <span>Test recipient</span>
+                  <input id="adminSmtpTestEmail" type="email" autocomplete="email" placeholder="your-test-inbox@example.edu">
+                </label>
+                <button class="primary-button" id="adminSmtpTestButton" type="submit">Send Test Email</button>
+                <p class="status-message" id="adminSmtpTestMessage"></p>
+              </form>
+            </article>
             <p class="status-message" id="adminMonitorUpdated" data-i18n="admin.monitorWaiting">Waiting for live data...</p>
             <div class="warning-card is-hidden" id="adminMonitorWarning"></div>
           </div>
@@ -902,94 +1112,6 @@
         <p class="brand-footer" data-i18n="brand.footer">For Shrewsbury international school riverside</p>
       </footer>
     </div>
-
-    <dialog class="claim-dialog glass" id="reportDialog">
-      <div class="claim-form report-modal-form">
-        <div class="section-heading compact">
-          <div>
-            <p class="eyebrow" data-i18n="report.eyebrow">New report</p>
-            <h3 id="uploadTitle" data-i18n="report.title">Upload a lost item</h3>
-          </div>
-          <button class="icon-button glass" id="closeReportDialog" type="button" aria-label="Close report form">×</button>
-        </div>
-        <span class="static-pill" data-i18n="report.lostOnly">Lost only</span>
-
-        <form id="itemForm" class="item-form" method="post">
-          <label class="drop-zone" id="dropZone">
-            <input id="imageInput" type="file" accept=".png,.jpg,.jpeg,.webp,.heic,.heif,image/png,image/jpeg,image/webp,image/heic,image/heif">
-            <span class="drop-icon">+</span>
-            <strong id="dropTitle" data-i18n="report.dropTitle">Drop image here</strong>
-            <small id="dropHint" data-i18n="report.dropHint">or choose a JPG, PNG, WEBP, HEIC, or HEIF file</small>
-          </label>
-          <input id="reportCameraInput" type="file" accept="image/*" capture="environment" class="is-hidden">
-          <div class="query-upload-row">
-            <label class="ghost-button query-media-button" for="imageInput" id="reportUploadButton">Upload Image</label>
-            <button class="ghost-button query-media-button" id="reportCameraButton" type="button">Take Photo</button>
-          </div>
-          <div class="query-camera-panel is-hidden" id="reportCameraPanel" aria-live="polite">
-            <video id="reportCameraPreview" autoplay playsinline muted></video>
-            <div class="query-camera-actions">
-              <button class="primary-button" id="reportCameraCaptureButton" type="button">Use Photo</button>
-              <button class="ghost-button" id="reportCameraCancelButton" type="button">Cancel</button>
-            </div>
-          </div>
-
-          <div class="form-grid report-simplified-grid">
-            <label>
-              <span data-i18n="report.itemTitle">Item title</span>
-              <input id="titleInput" name="title" type="text" maxlength="80" placeholder="Blue water bottle" data-i18n-placeholder="report.itemTitlePlaceholder" required>
-            </label>
-          </div>
-          <div class="report-hidden-fields is-hidden" aria-hidden="true">
-            <label>
-              <span data-i18n="common.category">Category</span>
-              <select id="categoryInput" name="category" required></select>
-            </label>
-            <label>
-              <span data-i18n="common.date">Date</span>
-              <input id="dateInput" name="event_date" type="date" required>
-            </label>
-            <label>
-              <span data-i18n="report.displayName">Display name</span>
-              <input id="reporterInput" name="reporter_name" type="text" maxlength="80" placeholder="How this report should display" data-i18n-placeholder="report.displayNamePlaceholder" required>
-            </label>
-          </div>
-
-          <label>
-            <span data-i18n="common.location">Location</span>
-            <input id="optionalLocationInput" type="text" maxlength="120" placeholder="A504, S312, P308, P201, or map location" autocomplete="off" aria-describedby="locationHelperText">
-            <small class="field-note" id="locationHelperText">Use room codes like A504, S312, P308, or P201.</small>
-          </label>
-
-          <label>
-            <span data-i18n="common.description">Description</span>
-            <textarea id="descriptionInput" name="description" rows="4" maxlength="450" placeholder="Add color, brand, markings, or details that would help someone confirm it." data-i18n-placeholder="report.descriptionPlaceholder" required></textarea>
-            <small class="field-note" id="descriptionHelperText" data-i18n="report.descriptionHelper">Include color, brand, or unique marks</small>
-          </label>
-
-          <label class="is-hidden" aria-hidden="true">
-            <span data-i18n="report.supportingEvidence">Supporting evidence</span>
-            <textarea id="evidenceDetailsInput" name="evidence_details" rows="3" maxlength="320" placeholder="Optional: ownership clues, identifying marks, timeline, or extra evidence." data-i18n-placeholder="report.evidencePlaceholder"></textarea>
-            <small class="field-note" id="evidenceHelperText" data-i18n="report.evidenceHelper">Optional but improves claim accuracy</small>
-          </label>
-
-          <div class="form-actions">
-            <button class="primary-button glass" id="submitButton" type="submit">
-              <span class="button-text" data-i18n="report.save">Submit Report</span>
-            </button>
-            <p class="status-message" id="uploadMessage"></p>
-          </div>
-          <div class="progress-widget is-hidden" id="reportProgress" aria-live="polite">
-            <div class="progress-track"><span class="progress-fill" id="reportProgressFill"></span></div>
-            <div class="progress-meta">
-              <span id="reportProgressLabel">Preparing upload...</span>
-              <span id="reportProgressValue">0%</span>
-            </div>
-          </div>
-          <div class="warning-card is-hidden" id="reportWarningCard"></div>
-        </form>
-      </div>
-    </dialog>
 
     <dialog class="claim-dialog room-preview-dialog" id="roomClaimPreviewDialog">
       <div class="claim-form room-preview-form">

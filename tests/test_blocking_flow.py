@@ -674,11 +674,21 @@ class BlockingFlowTests(unittest.TestCase):
                 "item_description": "blue plastic water bottle with loop cap",
                 "object_type": "water bottle",
                 "colours": ["blue"],
+                "materials": ["plastic"],
+                "brand": "Nike",
+                "visible_text": ["NIKE"],
                 "notable_markings": ["loop cap", "scuffed"],
                 "possible_category": "Bottle",
                 "confidence_score": 92,
                 "tags": ["water bottle", "blue", "plastic", "loop cap", "scuffed"],
                 "llava_called": True,
+                "full_json_response": {
+                    "moderation": "SAFE",
+                    "item_description": "blue plastic water bottle with loop cap",
+                    "materials": ["plastic"],
+                    "brand": "Nike",
+                    "visible_text": ["NIKE"],
+                },
             }
 
         payload = backend_app.ReportPayload(
@@ -727,6 +737,10 @@ class BlockingFlowTests(unittest.TestCase):
         self.assertEqual(created.ai_analysis_status, "success")
         self.assertEqual(created.llava_analysis["item_description"], "blue plastic water bottle with loop cap")
         self.assertEqual(created.llava_analysis["confidence_score"], 92)
+        self.assertEqual(created.llava_analysis["materials"], ["plastic"])
+        self.assertEqual(created.llava_analysis["brand"], "Nike")
+        self.assertEqual(created.llava_analysis["visible_text"], ["NIKE"])
+        self.assertEqual(created.llava_analysis["full_json_response"]["brand"], "Nike")
         self.assertLess(events.index("llava"), events.index("text-moderation"))
 
     def test_report_with_unsafe_image_is_rejected_fail_closed(self) -> None:

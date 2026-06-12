@@ -45,12 +45,13 @@ IMAGE_INSPECTION_PROMPT = (
     "Perform both checks below on the same image in one pass.\n"
     f"Safety prompt:\n{IMAGE_MODERATION_PROMPT}\n"
     f"Tagging prompt:\n{IMAGE_TAGGING_PROMPT}\n"
-    "Return strict JSON with keys: moderation, item_description, object_type, colours, notable_markings, possible_category, confidence_score, tags.\n"
+    "Return strict JSON with as much useful visual detail as possible.\n"
+    "Use these keys: moderation, item_description, object_type, item_subtype, colours, materials, brand, visible_text, notable_markings, distinguishing_features, condition, shape, size_estimate, scene_context, possible_category, confidence_score, uncertainty_notes, tags.\n"
     "Return valid JSON only. Do not use markdown, prose outside JSON, or multi-line string values.\n"
     "Keep tags as a JSON array of 5-8 specific lowercase noun phrases, maximum 5 words each.\n"
     "Prefer detailed tags like \"blue metal bottle\", \"black cap\", \"nike logo\", \"scratched case\" over generic single words.\n"
     "Use confidence_score as an integer from 0 to 100.\n"
-    'Example: {"moderation":"SAFE","item_description":"blue Nike water bottle with black cap","object_type":"water bottle","colours":["blue","black"],"notable_markings":["Nike logo"],"possible_category":"Bottle","confidence_score":92,"tags":["blue bottle","nike","black cap"]}.\n'
+    'Example: {"moderation":"SAFE","item_description":"blue Nike water bottle with black cap and loop handle","object_type":"water bottle","item_subtype":"sports bottle","colours":["blue","black"],"materials":["plastic"],"brand":"Nike","visible_text":["Nike"],"notable_markings":["white Nike logo","black loop cap"],"distinguishing_features":["loop handle","matte finish"],"condition":"minor scuffs","shape":"cylindrical","size_estimate":"medium","scene_context":"photographed on a table","possible_category":"Bottle","confidence_score":92,"uncertainty_notes":"","tags":["blue plastic bottle","nike logo","black loop cap"]}.\n'
     "If the image is inappropriate, reply with UNSAFE."
 )
 
@@ -119,16 +120,27 @@ INSPECTION_FIELD_KEYS = (
     "object_description",
     "object_type",
     "item_classification",
+    "item_subtype",
     "colours",
     "colors",
+    "materials",
+    "material",
+    "brand",
+    "visible_text",
     "notable_markings",
     "markings",
     "distinctive_features",
+    "distinguishing_features",
+    "condition",
+    "shape",
+    "size_estimate",
     "possible_category",
     "category",
     "confidence_score",
     "confidence",
     "scene_context",
+    "uncertainty_notes",
+    "safety_notes",
     "tags",
 )
 INSPECTION_FIELD_PATTERN = re.compile(
@@ -748,6 +760,16 @@ def _inspection_tags_from_fields(
     return _normalize_tags(candidates)
 
 
+def _json_safe_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _json_safe_value(nested_value) for key, nested_value in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe_value(nested_value) for nested_value in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
 def _build_ollama_payload(model: str, prompt: str, *, images: Optional[list[str]] = None) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -898,7 +920,16 @@ def _parse_inspection_response(content: str) -> dict[str, Any]:
         or _inspection_text_field(parsed, "item_classification")
     )
     colours = _inspection_list_field(parsed, "colours", "colors")
+    materials = _inspection_list_field(parsed, "materials", "material")
+    brand = _inspection_text_field(parsed, "brand")
+    visible_text = _inspection_list_field(parsed, "visible_text")
     notable_markings = _inspection_list_field(parsed, "notable_markings", "markings", "distinctive_features")
+    distinguishing_features = _inspection_list_field(parsed, "distinguishing_features", "distinctive_features")
+    condition = _inspection_text_field(parsed, "condition")
+    shape = _inspection_text_field(parsed, "shape")
+    size_estimate = _inspection_text_field(parsed, "size_estimate")
+    uncertainty_notes = _inspection_text_field(parsed, "uncertainty_notes")
+    safety_notes = _inspection_text_field(parsed, "safety_notes")
     possible_category = _inspection_text_field(parsed, "possible_category") or _inspection_text_field(parsed, "category")
     field_tags = _inspection_tags_from_fields(
         object_type=object_type,
@@ -906,23 +937,44 @@ def _parse_inspection_response(content: str) -> dict[str, Any]:
         notable_markings=notable_markings,
         possible_category=possible_category,
     )
-    raw_tags = merge_tag_lists(_parse_tag_response(stripped), field_tags, limit=MAX_TAGS)
+    extra_field_tags = _normalize_tags([
+        brand,
+        condition,
+        shape,
+        size_estimate,
+        *materials,
+        *visible_text,
+        *distinguishing_features,
+    ])
+    raw_tags = merge_tag_lists(_parse_tag_response(stripped), field_tags, extra_field_tags, limit=MAX_TAGS)
     tags, validation_error, validation_warnings, validation_strength = _validate_image_tags(raw_tags)
     return {
         "moderation": moderation,
         "item_description": item_description,
         "object_type": object_type,
+        "item_subtype": _inspection_text_field(parsed, "item_subtype"),
         "colours": colours,
+        "materials": materials,
+        "brand": brand,
+        "visible_text": visible_text,
         "notable_markings": notable_markings,
+        "distinguishing_features": distinguishing_features,
+        "condition": condition,
+        "shape": shape,
+        "size_estimate": size_estimate,
         "possible_category": possible_category,
         "confidence_score": _inspection_confidence_score(parsed),
         "object_description": item_description,
         "item_classification": object_type,
         "scene_context": _inspection_text_field(parsed, "scene_context"),
+        "uncertainty_notes": uncertainty_notes,
+        "safety_notes": safety_notes,
         "tags": tags[:MAX_TAGS],
         "tag_validation_error": validation_error,
         "tag_validation_warnings": validation_warnings,
         "validation_strength": validation_strength,
+        "full_json_response": _json_safe_value(parsed),
+        "parsed_json": _json_safe_value(parsed),
         "raw": stripped,
     }
 

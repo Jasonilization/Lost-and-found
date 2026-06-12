@@ -51,6 +51,8 @@ const QUERY_SUGGESTION_LIMIT = 6;
 const LOGIN_BACKGROUND_URL = "/uploads/background.png";
 const LOGIN_LOADING_VIDEO_URL = "/uploads/loading.mp4";
 const LOGIN_LOADING_FALLBACK_MS = 20000;
+const EMAIL_VERIFICATION_CODE_LENGTH = 6;
+const LOGIN_BUBBLE_COUNT = 8;
 const TUTORIAL_CARD_MARGIN = 16;
 const TUTORIAL_VIEWPORT_PADDING = 12;
 const UI_DEBUG_PREFIX = "[LostFound UI]";
@@ -300,6 +302,21 @@ const LUCIDE_ICON_PATHS = {
   user: '<path d="M19 21a7 7 0 0 0-14 0"></path><circle cx="12" cy="7" r="4"></circle>',
 };
 
+const NAV_ICON_BY_BUTTON_ID = {
+  showDashboardButton: "layout-dashboard",
+  showMapButton: "map",
+  showReportsButton: "clipboard-list",
+  showReportItemButton: "circle-plus",
+  showRoomButton: "archive",
+  showReturnedButton: "rotate-ccw",
+  showQueryButton: "message-circle",
+  showClaimsButton: "badge-check",
+  showNotificationsButton: "bell",
+  showAccountButton: "user",
+  showAdminButton: "shield",
+  logoutButton: "log-out",
+};
+
 function safeParseStoredJson(key, fallback) {
   try {
     const rawValue = localStorage.getItem(key);
@@ -364,6 +381,13 @@ const translations = {
     "auth.tabs": "Authentication tabs",
     "auth.login": "Login",
     "auth.register": "Register",
+    "auth.email": "Email",
+    "auth.emailVerified": "Email verified",
+    "auth.emailUnverified": "Email not verified",
+    "auth.sendCode": "Send code",
+    "auth.resendCode": "Resend code",
+    "auth.code": "Verification code",
+    "auth.verifyCode": "Verify",
     "auth.username": "Username",
     "auth.password": "Password",
     "auth.showPassword": "Show password",
@@ -496,6 +520,13 @@ const translations = {
     "auth.tabs": "身份验证标签",
     "auth.login": "登录",
     "auth.register": "注册",
+    "auth.email": "邮箱",
+    "auth.emailVerified": "邮箱已验证",
+    "auth.emailUnverified": "邮箱未验证",
+    "auth.sendCode": "发送验证码",
+    "auth.resendCode": "重新发送",
+    "auth.code": "验证码",
+    "auth.verifyCode": "验证",
     "auth.username": "用户名",
     "auth.password": "密码",
     "auth.showPassword": "显示密码",
@@ -626,6 +657,27 @@ const translationEnhancements = {
     "notifications.title": "Notifications",
     "notifications.empty": "No notifications yet.",
     "notifications.markRead": "Mark as read",
+    "nav.map": "School Map",
+    "nav.mapShort": "Map",
+    "nav.report": "Report",
+    "nav.mode": "Nav",
+    "nav.left": "Left",
+    "nav.top": "Top",
+    "nav.bottom": "Bottom",
+    "nav.minimal": "Minimal",
+    "nav.navigation": "Navigation",
+    "nav.workspace": "Workspace",
+    "nav.currentLocation": "Current location",
+    "common.help": "Help",
+    "dashboard.refresh": "Refresh dashboard",
+    "dashboard.adminTools": "Admin Tools",
+    "account.profile": "Profile",
+    "account.chooseProfileImage": "Choose profile image",
+    "account.uploadPhoto": "Upload photo",
+    "account.details": "Details",
+    "account.changeEmail": "Change email",
+    "account.verifyNewEmail": "Verify new email",
+    "account.experience": "Experience",
     "admin.audit": "Audit log",
     "admin.auditTitle": "Sensitive activity",
     "claim.eyebrow": "Private draft",
@@ -641,9 +693,18 @@ const translationEnhancements = {
     "confirm.close": "Close confirmation",
     "confirm.notes": "Notes",
     "common.cancel": "Cancel",
+    "common.back": "Back",
     "common.confirm": "Confirm",
     "common.undo": "Undo",
     "common.close": "Close",
+    "report.claimRequirement": "Claim requirement",
+    "report.claimRequired": "Claim Required",
+    "report.noClaimRequired": "No Claim Required",
+    "report.claimStatus": "Claim Status",
+    "report.uploadImage": "Upload Image",
+    "report.takePhoto": "Take Photo",
+    "report.usePhoto": "Use Photo",
+    "report.locationHelper": "Use room codes like A504, S312, P308, or P201.",
     "tutorial.searchTitle": "How Search Works",
     "tutorial.searchBody": "Use the search bar to find reports with typo-tolerant matching across titles, tags, categories, and locations.",
     "tutorial.claimFlowTitle": "How Claims Work",
@@ -656,6 +717,27 @@ const translationEnhancements = {
     "notifications.title": "通知中心",
     "notifications.empty": "暂时没有通知。",
     "notifications.markRead": "标记为已读",
+    "nav.map": "校园地图",
+    "nav.mapShort": "地图",
+    "nav.report": "报告",
+    "nav.mode": "导航",
+    "nav.left": "左侧",
+    "nav.top": "顶部",
+    "nav.bottom": "底部",
+    "nav.minimal": "精简",
+    "nav.navigation": "导航",
+    "nav.workspace": "工作区",
+    "nav.currentLocation": "当前位置",
+    "common.help": "帮助",
+    "dashboard.refresh": "刷新仪表盘",
+    "dashboard.adminTools": "管理工具",
+    "account.profile": "个人资料",
+    "account.chooseProfileImage": "选择头像",
+    "account.uploadPhoto": "上传照片",
+    "account.details": "详情",
+    "account.changeEmail": "更改邮箱",
+    "account.verifyNewEmail": "验证新邮箱",
+    "account.experience": "体验",
     "admin.audit": "审计日志",
     "admin.auditTitle": "敏感操作记录",
     "claim.eyebrow": "私人草稿",
@@ -671,9 +753,18 @@ const translationEnhancements = {
     "confirm.close": "关闭确认窗口",
     "confirm.notes": "备注",
     "common.cancel": "取消",
+    "common.back": "返回",
     "common.confirm": "确认",
     "common.undo": "撤销",
     "common.close": "关闭",
+    "report.claimRequirement": "认领要求",
+    "report.claimRequired": "需要认领",
+    "report.noClaimRequired": "不需要认领",
+    "report.claimStatus": "认领状态",
+    "report.uploadImage": "上传图片",
+    "report.takePhoto": "拍照",
+    "report.usePhoto": "使用照片",
+    "report.locationHelper": "可使用 A504、S312、P308 或 P201 等房间代码。",
     "tutorial.searchTitle": "搜索方式",
     "tutorial.searchBody": "使用搜索栏时，系统会按标题、标签、分类和地点进行容错匹配，支持轻微拼写错误。",
     "tutorial.claimFlowTitle": "认领流程",
@@ -701,6 +792,13 @@ const translationEnhancements = {
     "auth.tabs": "แท็บยืนยันตัวตน",
     "auth.login": "เข้าสู่ระบบ",
     "auth.register": "สมัครสมาชิก",
+    "auth.email": "อีเมล",
+    "auth.emailVerified": "ยืนยันอีเมลแล้ว",
+    "auth.emailUnverified": "ยังไม่ได้ยืนยันอีเมล",
+    "auth.sendCode": "ส่งรหัส",
+    "auth.resendCode": "ส่งอีกครั้ง",
+    "auth.code": "รหัสยืนยัน",
+    "auth.verifyCode": "ยืนยัน",
     "auth.username": "ชื่อผู้ใช้",
     "auth.password": "รหัสผ่าน",
     "auth.showPassword": "แสดงรหัสผ่าน",
@@ -716,6 +814,17 @@ const translationEnhancements = {
     "theme.aurora": "ออโรรา",
     "theme.transparent": "โปร่งใส",
     "nav.reports": "รายงาน",
+    "nav.map": "แผนที่โรงเรียน",
+    "nav.mapShort": "แผนที่",
+    "nav.report": "รายงาน",
+    "nav.mode": "นำทาง",
+    "nav.left": "ซ้าย",
+    "nav.top": "บน",
+    "nav.bottom": "ล่าง",
+    "nav.minimal": "ย่อ",
+    "nav.navigation": "การนำทาง",
+    "nav.workspace": "พื้นที่ทำงาน",
+    "nav.currentLocation": "ตำแหน่งปัจจุบัน",
     "nav.dashboard": "แดชบอร์ด",
     "nav.room": "ห้องของหายและของพบ",
     "nav.returned": "เพิ่งถูกรับคืน",
@@ -831,9 +940,28 @@ const translationEnhancements = {
     "common.yes": "ใช่",
     "common.no": "ไม่ใช่",
     "common.cancel": "ยกเลิก",
+    "common.back": "ย้อนกลับ",
+    "common.help": "ช่วยเหลือ",
     "common.confirm": "ยืนยัน",
     "common.undo": "เลิกทำ",
     "common.close": "ปิด",
+    "dashboard.refresh": "รีเฟรชแดชบอร์ด",
+    "dashboard.adminTools": "เครื่องมือผู้ดูแล",
+    "account.profile": "โปรไฟล์",
+    "account.chooseProfileImage": "เลือกรูปโปรไฟล์",
+    "account.uploadPhoto": "อัปโหลดรูป",
+    "account.details": "รายละเอียด",
+    "account.changeEmail": "เปลี่ยนอีเมล",
+    "account.verifyNewEmail": "ยืนยันอีเมลใหม่",
+    "account.experience": "ประสบการณ์ใช้งาน",
+    "report.claimRequirement": "เงื่อนไขการรับคืน",
+    "report.claimRequired": "ต้องยื่นคำขอ",
+    "report.noClaimRequired": "ไม่ต้องยื่นคำขอ",
+    "report.claimStatus": "สถานะคำขอ",
+    "report.uploadImage": "อัปโหลดรูปภาพ",
+    "report.takePhoto": "ถ่ายรูป",
+    "report.usePhoto": "ใช้รูปภาพ",
+    "report.locationHelper": "ใช้รหัสห้อง เช่น A504, S312, P308 หรือ P201",
   },
 };
 
@@ -963,6 +1091,13 @@ const fallbackFilters = {
 
 const state = {
   authView: "login",
+  emailVerificationToken: "",
+  emailVerificationEmail: "",
+  emailVerificationPurpose: "",
+  emailVerificationSentAt: 0,
+  emailVerificationExpiresAt: 0,
+  accountEmailChangeEmail: "",
+  accountEmailChangeSentAt: 0,
   user: null,
   token: localStorage.getItem(SESSION_STORAGE_KEY) || "",
   items: [],
@@ -1047,6 +1182,7 @@ const state = {
   tutorialCleanup: null,
   adminMonitorTimer: null,
   adminMonitor: null,
+  smtpStatus: null,
   adminMonitorRequestInFlight: false,
   confirmState: null,
   undoState: null,
@@ -1095,11 +1231,24 @@ const state = {
     room: null,
     analysis: null,
   },
+  loginBubbleItems: [],
+  loginBubbleIndex: 0,
+  loginBubbleTimer: null,
+  mascotUnlocked: false,
 };
 
 const authScreen = document.querySelector("#authScreen");
+const loginBubbleSystem = document.querySelector("#loginBubbleSystem");
 const appShell = document.querySelector("#appShell");
 const authForm = document.querySelector("#authForm");
+const authEmail = document.querySelector("#authEmail");
+const authVerificationPanel = document.querySelector("#authVerificationPanel");
+const authVerificationStatus = document.querySelector("#authVerificationStatus");
+const authSendCodeButton = document.querySelector("#authSendCodeButton");
+const authVerificationCode = document.querySelector("#authVerificationCode");
+const authVerifyCodeButton = document.querySelector("#authVerifyCodeButton");
+const authVerificationMeta = document.querySelector("#authVerificationMeta");
+const authUsernameField = document.querySelector("#authUsernameField");
 const authUsername = document.querySelector("#authUsername");
 const authPassword = document.querySelector("#authPassword");
 const authPasswordToggle = document.querySelector("#authPasswordToggle");
@@ -1136,6 +1285,7 @@ const sidebarCurrentSection = document.querySelector("#sidebarCurrentSection");
 const sidebarBreadcrumbs = document.querySelector("#sidebarBreadcrumbs");
 const topbarReportButton = document.querySelector("#topbarReportButton");
 const topbarRefreshButton = document.querySelector("#topbarRefreshButton");
+const helpButton = document.querySelector("#helpButton");
 const topbarAccountButton = document.querySelector("#topbarAccountButton");
 const topbarAccountAvatar = document.querySelector("#topbarAccountAvatar");
 const topbarAccountName = document.querySelector("#topbarAccountName");
@@ -1233,6 +1383,9 @@ const locationHelperText = document.querySelector("#locationHelperText");
 const dateInput = document.querySelector("#dateInput");
 const descriptionInput = document.querySelector("#descriptionInput");
 const evidenceDetailsInput = document.querySelector("#evidenceDetailsInput");
+const claimRequiredInput = document.querySelector("#claimRequiredInput");
+const noClaimRequiredInput = document.querySelector("#noClaimRequiredInput");
+const reportClaimStatusLabel = document.querySelector("[data-report-claim-status-label]");
 const uploadMessage = document.querySelector("#uploadMessage");
 const reportWarningCard = document.querySelector("#reportWarningCard");
 const submitButton = document.querySelector("#submitButton");
@@ -1259,10 +1412,13 @@ const dashboardNotifications = document.querySelector("#dashboardNotifications")
 const dashboardApprovalRate = document.querySelector("#dashboardApprovalRate");
 const dashboardActiveReports = document.querySelector("#dashboardActiveReports");
 const dashboardActivityList = document.querySelector("#dashboardActivityList");
+const dashboardRecentReportsList = document.querySelector("#dashboardRecentReportsList");
+const dashboardRecentReturnsList = document.querySelector("#dashboardRecentReturnsList");
 const dashboardReportButton = document.querySelector("#dashboardReportButton");
 const dashboardRefreshButton = document.querySelector("#dashboardRefreshButton");
 const dashboardLinkButtons = Array.from(document.querySelectorAll("[data-dashboard-target]"));
 const dashboardAdvancedButtons = Array.from(document.querySelectorAll("[data-dashboard-advanced]"));
+const dashboardTeacherButtons = Array.from(document.querySelectorAll(".dashboard-teacher-action"));
 const locationBrowserTree = document.querySelector("#locationBrowserTree");
 let locationBrowserButtons = Array.from(document.querySelectorAll("[data-location-filter]"));
 let locationTreeGroups = Array.from(document.querySelectorAll("[data-location-group]"));
@@ -1306,6 +1462,12 @@ const accountPageName = document.querySelector("#accountPageName");
 const accountPageIdentity = document.querySelector("#accountPageIdentity");
 const accountAdminBadge = document.querySelector("#accountAdminBadge");
 const accountInfoList = document.querySelector("#accountInfoList");
+const accountEmailForm = document.querySelector("#accountEmailForm");
+const accountEmailInput = document.querySelector("#accountEmailInput");
+const accountEmailSendCodeButton = document.querySelector("#accountEmailSendCodeButton");
+const accountEmailCodeInput = document.querySelector("#accountEmailCodeInput");
+const accountEmailConfirmButton = document.querySelector("#accountEmailConfirmButton");
+const accountEmailMessage = document.querySelector("#accountEmailMessage");
 const advancedModeToggle = document.querySelector("#advancedModeToggle");
 const advancedModeTitle = document.querySelector("#advancedModeTitle");
 const advancedModeStatus = document.querySelector("#advancedModeStatus");
@@ -1345,6 +1507,18 @@ const adminOllamaStatus = document.querySelector("#adminOllamaStatus");
 const adminOllamaModels = document.querySelector("#adminOllamaModels");
 const adminMonitorUpdated = document.querySelector("#adminMonitorUpdated");
 const adminMonitorWarning = document.querySelector("#adminMonitorWarning");
+const adminSmtpStatus = document.querySelector("#adminSmtpStatus");
+const adminSmtpDeliveryMode = document.querySelector("#adminSmtpDeliveryMode");
+const adminSmtpHostConfigured = document.querySelector("#adminSmtpHostConfigured");
+const adminSmtpUsernameConfigured = document.querySelector("#adminSmtpUsernameConfigured");
+const adminSmtpPasswordConfigured = document.querySelector("#adminSmtpPasswordConfigured");
+const adminSmtpSender = document.querySelector("#adminSmtpSender");
+const adminSmtpLastError = document.querySelector("#adminSmtpLastError");
+const adminSmtpWarning = document.querySelector("#adminSmtpWarning");
+const adminSmtpTestForm = document.querySelector("#adminSmtpTestForm");
+const adminSmtpTestEmail = document.querySelector("#adminSmtpTestEmail");
+const adminSmtpTestButton = document.querySelector("#adminSmtpTestButton");
+const adminSmtpTestMessage = document.querySelector("#adminSmtpTestMessage");
 const queryBackButton = document.querySelector("#queryBackButton");
 const queryItemSelect = document.querySelector("#queryItemSelect");
 const refreshQueryItemsButton = document.querySelector("#refreshQueryItemsButton");
@@ -1514,6 +1688,7 @@ function refreshPanelElements() {
     sidebar: sidebarPanel,
     dashboard: dashboardSection,
     reports: reportsPanel,
+    report: reportDialog,
     map: mapSection,
     room: roomSection,
     returned: returnedSection,
@@ -1688,9 +1863,9 @@ function ensureLayoutStructure() {
   cacheLayoutDomReferences();
 }
 
-const secondaryPanelNames = ["map", "room", "returned", "claims", "notifications", "account", "admin", "query"];
+const secondaryPanelNames = ["report", "map", "room", "returned", "claims", "notifications", "account", "admin", "query"];
 const primaryPanelNames = ["dashboard", "reports"];
-const simpleModeSections = new Set(["dashboard", "reports", "map", "room", "returned", "query", "claims", "notifications", "account"]);
+const simpleModeSections = new Set(["dashboard", "reports", "report", "map", "room", "returned", "query", "claims", "notifications", "account"]);
 const advancedModeSections = new Set(["admin"]);
 const LAYOUT_BREAKPOINT = 900;
 const PHONE_LAYOUT_BREAKPOINT = 600;
@@ -2704,6 +2879,9 @@ function selectSchoolLocation(locationId, {
 }
 
 function sectionAvailableInCurrentMode(section) {
+  if (currentUserIsStudent()) {
+    return new Set(["dashboard", "map", "query", "reports", "account", "returned"]).has(section);
+  }
   if (section === "admin") {
     return state.advancedMode && currentUserCanAdmin();
   }
@@ -2718,19 +2896,15 @@ function syncModeLabels() {
   };
   if (state.advancedMode) {
     showDashboardButton.textContent = t("nav.dashboard");
-    if (showMapButton) showMapButton.textContent = "School Map";
+    if (showMapButton) showMapButton.textContent = t("nav.map");
     showReportsButton.textContent = t("nav.reports");
     showReportItemButton.textContent = langText({ en: "Report item", "zh-CN": "提交报告", th: "ส่งรายงาน" });
     showRoomButton.textContent = t("nav.room");
-    showDashboardButton.dataset.navIcon = "D";
-    if (showMapButton) showMapButton.dataset.navIcon = "M";
-    showReportsButton.dataset.navIcon = "R";
-    showRoomButton.dataset.navIcon = "L";
     showClaimsButton.textContent = t("nav.claims");
     showNotificationsButton.textContent = t("notifications.title");
     showAccountButton.textContent = t("nav.account");
     setShortLabel(showDashboardButton, t("nav.dashboard"));
-    setShortLabel(showMapButton, "Map");
+    setShortLabel(showMapButton, t("nav.mapShort"));
     setShortLabel(showReportsButton, t("nav.reports"));
     setShortLabel(showReportItemButton, langText({ en: "Report", "zh-CN": "报告", th: "รายงาน" }));
     setShortLabel(showRoomButton, langText({ en: "Room", "zh-CN": "招领室", th: "ห้อง" }));
@@ -2742,21 +2916,34 @@ function syncModeLabels() {
     return;
   }
 
+  if (currentUserIsStudent()) {
+    showDashboardButton.textContent = t("nav.dashboard");
+    if (showMapButton) showMapButton.textContent = t("nav.map");
+    showQueryButton.textContent = t("nav.query");
+    showReportsButton.textContent = t("nav.reports");
+    showAccountButton.textContent = langText({ en: "Profile", "zh-CN": "个人资料", th: "โปรไฟล์" });
+    showReturnedButton.textContent = langText({ en: "Recently Returned", "zh-CN": "最近归还", th: "เพิ่งถูกรับคืน" });
+    setShortLabel(showDashboardButton, t("nav.dashboard"));
+    setShortLabel(showMapButton, t("nav.mapShort"));
+    setShortLabel(showQueryButton, t("nav.query"));
+    setShortLabel(showReportsButton, t("nav.reports"));
+    setShortLabel(showAccountButton, langText({ en: "Profile", "zh-CN": "资料", th: "โปรไฟล์" }));
+    setShortLabel(showReturnedButton, langText({ en: "Returned", "zh-CN": "归还", th: "รับคืน" }));
+    if (advancedModeTitle) advancedModeTitle.textContent = langText({ en: "Student Mode", "zh-CN": "学生模式", th: "โหมดนักเรียน" });
+    if (advancedModeStatus) advancedModeStatus.textContent = langText({ en: "Focused", "zh-CN": "精简", th: "โฟกัส" });
+    return;
+  }
+
   showDashboardButton.textContent = t("nav.dashboard");
-  if (showMapButton) showMapButton.textContent = "School Map";
+  if (showMapButton) showMapButton.textContent = t("nav.map");
   showReportsButton.textContent = langText({ en: "Claim item", "zh-CN": "认领物品", th: "รับของคืน" });
   showReportItemButton.textContent = langText({ en: "Report", "zh-CN": "报告", th: "รายงาน" });
   showRoomButton.textContent = langText({ en: "Lost & Found Room", "zh-CN": "失物招领室", th: "ห้องของหาย" });
-  showDashboardButton.dataset.navIcon = "D";
-  if (showMapButton) showMapButton.dataset.navIcon = "M";
-  showReportsButton.dataset.navIcon = "C";
-  showReportItemButton.dataset.navIcon = "+";
-  showRoomButton.dataset.navIcon = "L";
   showClaimsButton.textContent = langText({ en: "Claims", "zh-CN": "认领", th: "คำขอ" });
   showNotificationsButton.textContent = t("notifications.title");
   showAccountButton.textContent = langText({ en: "Profile", "zh-CN": "个人资料", th: "โปรไฟล์" });
   setShortLabel(showDashboardButton, t("nav.dashboard"));
-  setShortLabel(showMapButton, "Map");
+  setShortLabel(showMapButton, t("nav.mapShort"));
   setShortLabel(showReportsButton, langText({ en: "Claim", "zh-CN": "认领", th: "รับคืน" }));
   setShortLabel(showReportItemButton, langText({ en: "Report", "zh-CN": "报告", th: "รายงาน" }));
   setShortLabel(showRoomButton, langText({ en: "Room", "zh-CN": "招领室", th: "ห้อง" }));
@@ -2768,29 +2955,48 @@ function syncModeLabels() {
 }
 
 function syncModeUi({ navigateIfNeeded = false } = {}) {
+  if (currentUserIsStudent()) {
+    state.advancedMode = false;
+  }
   appShell?.classList.toggle("is-advanced-mode", state.advancedMode);
   appShell?.classList.toggle("is-simple-mode", !state.advancedMode);
+  appShell?.classList.toggle("is-student-mode", currentUserIsStudent());
   document.body.dataset.experienceMode = state.advancedMode ? "advanced" : "simple";
+  document.body.dataset.userRole = state.user ? currentUserRole() : "";
 
   if (advancedModeToggle) {
     advancedModeToggle.checked = state.advancedMode;
+    advancedModeToggle.disabled = currentUserIsStudent();
     advancedModeToggle.setAttribute("aria-checked", String(state.advancedMode));
   }
 
   const showAdvancedNav = state.advancedMode;
+  const isStudent = currentUserIsStudent();
+  const canCreateContent = currentUserCanCreateContent();
+  showDashboardButton?.classList.remove("is-hidden");
   showMapButton?.classList.remove("is-hidden");
-  showReportItemButton?.classList.toggle("is-hidden", showAdvancedNav);
-  showRoomButton?.classList.remove("is-hidden");
+  showReportItemButton?.classList.toggle("is-hidden", isStudent || showAdvancedNav || !canCreateContent);
+  showRoomButton?.classList.toggle("is-hidden", isStudent);
   showReturnedButton?.classList.remove("is-hidden");
   showQueryButton?.classList.remove("is-hidden");
+  showReportsButton?.classList.remove("is-hidden");
+  showClaimsButton?.classList.toggle("is-hidden", isStudent);
+  showNotificationsButton?.classList.toggle("is-hidden", isStudent);
+  topbarReportButton?.classList.toggle("is-hidden", !canCreateContent);
+  dashboardReportButton?.classList.toggle("is-hidden", !canCreateContent);
+  openReportModalButton?.classList.toggle("is-hidden", !canCreateContent);
   showAdminButton?.classList.toggle("is-hidden", !(showAdvancedNav && currentUserCanAdmin()));
-  logoutButton?.classList.toggle("is-hidden", !showAdvancedNav);
-  roomAdminPanel?.classList.toggle("is-hidden", !(showAdvancedNav && currentUserCanAdmin()));
+  logoutButton?.classList.remove("is-hidden");
+  roomAdminPanel?.classList.toggle("is-hidden", !canCreateContent);
   dashboardAdvancedButtons.forEach((button) => {
     button.classList.toggle("is-hidden", !(showAdvancedNav && currentUserCanAdmin()));
   });
+  dashboardTeacherButtons.forEach((button) => {
+    button.classList.toggle("is-hidden", isStudent);
+  });
 
   syncModeLabels();
+  renderSidebarIcons();
   syncLocationBrowserState();
   syncNewWindowMenu();
 
@@ -2805,6 +3011,9 @@ function syncModeUi({ navigateIfNeeded = false } = {}) {
 }
 
 function setAdvancedMode(enabled, { persist = true, navigateIfNeeded = true } = {}) {
+  if (currentUserIsStudent()) {
+    enabled = false;
+  }
   state.advancedMode = Boolean(enabled);
   if (persist) {
     localStorage.setItem(ADVANCED_MODE_STORAGE_KEY, state.advancedMode ? "true" : "false");
@@ -3106,6 +3315,9 @@ function closePanel(name) {
     return;
   }
   if (secondaryPanelNames.includes(name) && state.currentView === name) {
+    if (name === "report") {
+      resetReportModalState();
+    }
     navigateTo("dashboard");
     return;
   }
@@ -3389,8 +3601,9 @@ function createLucideIcon(iconName) {
 }
 
 function renderSidebarIcons() {
-  document.querySelectorAll(".sidebar-nav-group button[data-nav-icon]").forEach((button) => {
-    const iconName = button.dataset.navIcon || "";
+  const buttons = Array.from(document.querySelectorAll(".sidebar-nav-group button[data-nav-icon]"));
+  buttons.forEach((button) => {
+    const iconName = NAV_ICON_BY_BUTTON_ID[button.id] || button.dataset.navIcon || "";
     const labelText = (button.textContent || button.dataset.navLabel || button.getAttribute("aria-label") || "").trim();
     button.replaceChildren();
 
@@ -3404,8 +3617,24 @@ function renderSidebarIcons() {
 
     button.dataset.navLabel = label.textContent;
     button.dataset.shortLabel = label.textContent;
+    button.dataset.navIcon = iconName;
     button.append(iconWrap, label);
   });
+  logIconDebug();
+}
+
+function logIconDebug() {
+  const buttons = Array.from(document.querySelectorAll(".sidebar-nav-group button[data-nav-icon]"));
+  const visibleCount = buttons.filter((button) => !button.classList.contains("is-hidden") && button.querySelector("svg")).length;
+  console.info(
+    "[ICON DEBUG]",
+    "visible=",
+    `${visibleCount}/${buttons.length}`,
+    "route=",
+    state.currentView || "",
+    "language=",
+    currentLanguage(),
+  );
 }
 
 function renderAssistantButtonIcon() {
@@ -3486,8 +3715,15 @@ function applyTranslations() {
   if (statEyebrow) statEyebrow.textContent = langText({ en: "Trust builder", "zh-CN": "信任指标", th: "ตัวชี้วัดความน่าเชื่อถือ" });
   if (statCopy) statCopy.textContent = langText({ en: "Items returned this week", "zh-CN": "本周归还物品", th: "สิ่งของที่ส่งคืนสัปดาห์นี้" });
   syncModeLabels();
+  updateReportClaimStatusUi();
+  if (state.user) {
+    renderLocationScopedSurfaces();
+    renderRoomItems(state.roomItems || []);
+    if (state.currentView === "account") {
+      renderAccount();
+    }
+  }
   updateLocationBar();
-  renderDashboard();
   renderNotifications(state.notifications);
   renderSidebarIcons();
   renderAssistantButtonIcon();
@@ -4159,6 +4395,26 @@ function emptyAdminMonitor() {
   };
 }
 
+function emptySmtpStatus() {
+  return {
+    configured: false,
+    connected: false,
+    delivery_mode: "development-log",
+    host: "",
+    port: 587,
+    username_configured: false,
+    password_configured: false,
+    from_address: "",
+    from_name: "",
+    sender: "",
+    use_tls: true,
+    use_ssl: false,
+    last_error: "",
+    last_success_at: null,
+    last_failure_at: null,
+  };
+}
+
 function formatDuration(totalSeconds) {
   const seconds = Math.max(0, Number(totalSeconds || 0));
   const hours = Math.floor(seconds / 3600);
@@ -4217,7 +4473,9 @@ function titleCase(value) {
 }
 
 function setLanguage(language) {
+  const oldLanguage = currentLanguage();
   state.language = SUPPORTED_LANGUAGES.includes(language) ? language : "en";
+  console.info("[LANGUAGE DEBUG]", "old_language=", oldLanguage, "new_language=", state.language);
   localStorage.setItem(LANGUAGE_STORAGE_KEY, state.language);
   state.queryCache.clear();
   state.queryResultCache.clear();
@@ -4304,6 +4562,10 @@ function extractApiMessage(data, fallback = "Request failed") {
 
   if (typeof data.detail === "string" && data.detail.trim()) {
     return data.detail.trim();
+  }
+
+  if (data.detail && typeof data.detail === "object" && typeof data.detail.message === "string" && data.detail.message.trim()) {
+    return data.detail.message.trim();
   }
 
   if (data.detail && typeof data.detail === "object" && typeof data.detail.reason === "string" && data.detail.reason.trim()) {
@@ -4724,7 +4986,208 @@ function persistSession(token) {
 function clearSession() {
   state.user = null;
   state.token = "";
+  state.accountEmailChangeEmail = "";
+  state.accountEmailChangeSentAt = 0;
   localStorage.removeItem(SESSION_STORAGE_KEY);
+}
+
+function authVerificationPurpose() {
+  return "register";
+}
+
+function authEmailValue() {
+  return String(authEmail?.value || "").trim().toLowerCase();
+}
+
+function authEmailLooksValid(email = authEmailValue()) {
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
+}
+
+function emailVerificationMatchesCurrentForm() {
+  return Boolean(
+    state.emailVerificationToken
+    && state.emailVerificationEmail === authEmailValue()
+    && state.emailVerificationPurpose === authVerificationPurpose(),
+  );
+}
+
+function resetEmailVerificationState({ keepMessage = false } = {}) {
+  state.emailVerificationToken = "";
+  state.emailVerificationEmail = "";
+  state.emailVerificationPurpose = "";
+  state.emailVerificationSentAt = 0;
+  state.emailVerificationExpiresAt = 0;
+  if (authVerificationCode) authVerificationCode.value = "";
+  if (!keepMessage) {
+    setMessage(authVerificationMeta, "");
+  }
+  syncEmailVerificationUi();
+}
+
+function syncEmailVerificationUi() {
+  const purpose = authVerificationPurpose();
+  const email = authEmailValue();
+  const isVerified = emailVerificationMatchesCurrentForm();
+  const emailIsValid = authEmailLooksValid(email);
+  const isRegister = state.authView === "register";
+  if (authEmail) {
+    authEmail.required = true;
+  }
+  authVerificationPanel?.classList.toggle("is-hidden", !isRegister);
+  authVerificationPanel?.classList.toggle("is-verified", isVerified);
+  if (authVerificationStatus) {
+    authVerificationStatus.textContent = isVerified ? t("auth.emailVerified") : t("auth.emailUnverified");
+  }
+  if (authSendCodeButton) {
+    authSendCodeButton.disabled = !isRegister || !emailIsValid;
+    authSendCodeButton.textContent = state.emailVerificationSentAt ? t("auth.resendCode") : t("auth.sendCode");
+  }
+  if (authVerifyCodeButton) {
+    authVerifyCodeButton.disabled = !isRegister || !emailIsValid || String(authVerificationCode?.value || "").replace(/\D/g, "").length !== EMAIL_VERIFICATION_CODE_LENGTH;
+  }
+  if (authSubmitButton && isRegister) {
+    authSubmitButton.disabled = !isVerified;
+  } else if (authSubmitButton) {
+    authSubmitButton.disabled = false;
+  }
+  authVerificationPanel?.setAttribute("data-purpose", purpose);
+}
+
+async function requestEmailVerificationCode() {
+  if (state.authView !== "register") return;
+  const email = authEmailValue();
+  if (!authEmailLooksValid(email)) {
+    setMessage(authVerificationMeta, langText({
+      en: "Enter a valid email first.",
+      "zh-CN": "请先输入有效邮箱。",
+      th: "กรุณาใส่อีเมลที่ถูกต้องก่อน",
+    }), true);
+    return;
+  }
+
+  setButtonLoading(authSendCodeButton, true);
+  setMessage(authVerificationMeta, langText({ en: "Sending code...", "zh-CN": "正在发送验证码...", th: "กำลังส่งรหัส..." }));
+  try {
+    const data = await apiFetch("/auth/email/request-code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, purpose: authVerificationPurpose() }),
+    });
+    state.emailVerificationToken = "";
+    state.emailVerificationEmail = "";
+    state.emailVerificationPurpose = "";
+    state.emailVerificationSentAt = Date.now();
+    state.emailVerificationExpiresAt = Date.now() + (Number(data.expires_in || 0) * 1000);
+    setMessage(authVerificationMeta, data.delivery === "development-log"
+      ? (data.message || "Email delivery is not configured. Verification codes are currently being written to the development security log.")
+      : langText({
+          en: "Code sent. Check your email and enter the 6 digits.",
+          "zh-CN": "验证码已发送。请查看邮箱并输入 6 位数字。",
+          th: "ส่งรหัสแล้ว โปรดตรวจอีเมลและใส่ตัวเลข 6 หลัก",
+        }),
+      data.delivery === "development-log");
+    authVerificationCode?.focus();
+  } catch (error) {
+    setMessage(authVerificationMeta, error.message, true);
+    logClientError("email verification request failed", error, { purpose: authVerificationPurpose() });
+  } finally {
+    setButtonLoading(authSendCodeButton, false);
+    syncEmailVerificationUi();
+  }
+}
+
+async function verifyEmailCode() {
+  if (state.authView !== "register") return;
+  const email = authEmailValue();
+  const code = String(authVerificationCode?.value || "").replace(/\D/g, "");
+  if (!authEmailLooksValid(email) || code.length !== EMAIL_VERIFICATION_CODE_LENGTH) {
+    setMessage(authVerificationMeta, langText({
+      en: "Enter the email and 6-digit code.",
+      "zh-CN": "请输入邮箱和 6 位验证码。",
+      th: "กรุณาใส่อีเมลและรหัส 6 หลัก",
+    }), true);
+    return;
+  }
+
+  setButtonLoading(authVerifyCodeButton, true);
+  setMessage(authVerificationMeta, langText({ en: "Checking code...", "zh-CN": "正在验证...", th: "กำลังตรวจรหัส..." }));
+  try {
+    const purpose = authVerificationPurpose();
+    const data = await apiFetch("/auth/email/verify-code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, code, purpose }),
+    });
+    state.emailVerificationToken = data.verification_token || "";
+    state.emailVerificationEmail = email;
+    state.emailVerificationPurpose = purpose;
+    setMessage(authVerificationMeta, langText({
+      en: "Email verified.",
+      "zh-CN": "邮箱已验证。",
+      th: "ยืนยันอีเมลแล้ว",
+    }));
+    triggerHaptic("success");
+  } catch (error) {
+    state.emailVerificationToken = "";
+    setMessage(authVerificationMeta, error.message, true);
+    logClientError("email verification failed", error, { purpose: authVerificationPurpose() });
+  } finally {
+    setButtonLoading(authVerifyCodeButton, false);
+    syncEmailVerificationUi();
+  }
+}
+
+function ensureLoginBubbles() {
+  if (!loginBubbleSystem || loginBubbleSystem.children.length) return;
+  for (let index = 0; index < LOGIN_BUBBLE_COUNT; index += 1) {
+    const bubble = document.createElement("span");
+    bubble.className = `login-bubble login-bubble-${index + 1}`;
+    if (index < 4) {
+      bubble.classList.add("has-report-slot");
+      const image = document.createElement("img");
+      image.alt = "";
+      image.decoding = "async";
+      bubble.append(image);
+    }
+    if (index < 3) {
+      const small = document.createElement("span");
+      small.className = "login-bubble-emitter";
+      bubble.append(small);
+    }
+    loginBubbleSystem.append(bubble);
+  }
+}
+
+function updateLoginBubbleImages() {
+  if (!loginBubbleSystem || !state.loginBubbleItems.length) return;
+  const slots = Array.from(loginBubbleSystem.querySelectorAll(".has-report-slot img"));
+  slots.forEach((image, index) => {
+    const item = state.loginBubbleItems[(state.loginBubbleIndex + index) % state.loginBubbleItems.length];
+    const imageUrl = normalizeImageUrl(item?.image_url || "");
+    if (!imageUrl || image.getAttribute("src") === imageUrl) return;
+    image.src = imageUrl;
+    image.title = item?.title || "";
+    image.parentElement?.classList.add("has-report-image");
+  });
+  state.loginBubbleIndex = (state.loginBubbleIndex + 1) % state.loginBubbleItems.length;
+}
+
+async function loadLoginBubbleImages() {
+  ensureLoginBubbles();
+  if (!loginBubbleSystem) return;
+  try {
+    const data = await apiFetch("/auth/login-images");
+    state.loginBubbleItems = Array.isArray(data.items) ? data.items.filter((item) => item?.image_url).slice(0, 5) : [];
+    updateLoginBubbleImages();
+    if (state.loginBubbleTimer) {
+      window.clearInterval(state.loginBubbleTimer);
+    }
+    if (state.loginBubbleItems.length > 1) {
+      state.loginBubbleTimer = window.setInterval(updateLoginBubbleImages, 5200);
+    }
+  } catch (error) {
+    logClientError("loading login bubble images failed", error);
+  }
 }
 
 function persistCurrentItemId(itemId) {
@@ -4837,6 +5300,8 @@ function resetReportModalState() {
   reportDialog?.classList.remove("is-map-report-context");
   clearReportMapLocationMarker();
   form?.reset();
+  if (claimRequiredInput) claimRequiredInput.checked = true;
+  if (noClaimRequiredInput) noClaimRequiredInput.checked = false;
   state.selectedFile = null;
   dropZone?.classList.remove("is-dragging");
   if (dropTitle) {
@@ -4850,6 +5315,7 @@ function resetReportModalState() {
   }
   prefillReporter();
   updateLocationUi();
+  updateReportClaimStatusUi();
   updateReportSubmitState();
   if (state.progressActivityIds?.report) {
     reportProgress?.classList.add("is-hidden");
@@ -4861,31 +5327,63 @@ function resetReportModalState() {
   renderSchoolMap();
 }
 
-function openReportModal() {
-  if (!reportDialog) return;
+function reportClaimRequiredValue() {
+  return noClaimRequiredInput?.checked ? false : true;
+}
+
+function claimRequirementLabel(claimRequired = true) {
+  return claimRequired
+    ? langText({ en: "Claim Required", "zh-CN": "需要认领", th: "ต้องยื่นคำขอ" })
+    : langText({ en: "Direct Collection Allowed", "zh-CN": "允许直接领取", th: "รับได้โดยตรง" });
+}
+
+function directCollectionMessage(item = {}) {
+  return langText({
+    en: `"${item.title || "This item"}" can be collected directly. Please visit the Lost & Found Room or follow the listed location guidance.`,
+    "zh-CN": `“${item.title || "这件物品"}”允许直接领取。请前往失物招领室或按报告中的地点说明领取。`,
+    th: `"${item.title || "สิ่งของนี้"}" สามารถรับได้โดยตรง โปรดไปที่ห้องของหายหรือทำตามสถานที่ที่ระบุไว้`,
+  });
+}
+
+function updateReportClaimStatusUi() {
+  if (reportClaimStatusLabel) {
+    reportClaimStatusLabel.textContent = claimRequirementLabel(reportClaimRequiredValue());
+  }
+}
+
+function prepareReportPage({ reset = false } = {}) {
+  if (reset || !state.activeReportFormContext) {
+    resetReportModalState();
+  }
   state.activeReportFormContext = true;
-  if (state.user && state.currentView !== "map") {
-    navigateTo("map");
-  }
-  reportDialog.classList.remove("is-closing");
-  reportDialog.classList.add("is-map-report-context");
-  delete reportDialog.dataset.closeToken;
-  if (!reportDialog.open) {
-    reportDialog.show();
-  }
-  triggerHaptic("open");
+  reportDialog?.classList.remove("is-map-report-context");
   setWarningCard(reportWarningCard, "");
   assignReportLocationFromSelection();
-  renderSchoolMap();
+  updateReportClaimStatusUi();
+  updateReportSubmitState();
   window.setTimeout(() => {
     titleInput?.focus();
   }, 0);
 }
 
-function closeReportModal() {
-  if (!reportDialog) return;
-  if (reportDialog.open) {
-    closeDialogWithAnimation(reportDialog);
+function openReportModal() {
+  if (!currentUserCanCreateContent()) {
+    setWarningCard(queryWarningCard, langText({
+      en: "Student accounts can search, browse, and send information through query or claim flows.",
+      "zh-CN": "学生账号可以搜索、浏览，并通过查询或认领流程发送信息。",
+      th: "บัญชีนักเรียนสามารถค้นหา เรียกดู และส่งข้อมูลผ่านขั้นตอนการสอบถามหรือคำขอรับคืน",
+    }));
+    navigateTo("query");
+    return;
+  }
+  navigateTo("report");
+  triggerHaptic("open");
+}
+
+function closeReportModal({ navigate = true } = {}) {
+  if (navigate && state.currentView === "report") {
+    resetReportModalState();
+    goBackToPreviousRoute("dashboard");
     return;
   }
   resetReportModalState();
@@ -4913,65 +5411,103 @@ function setAuthConfirmPasswordVisibility(visible) {
 
 function setAuthView(view) {
   state.authView = view;
+  resetEmailVerificationState({ keepMessage: true });
   authSubmitLabel.textContent = t(view === "login" ? "auth.login" : "auth.register");
   loginTab.classList.toggle("is-active", view === "login");
   registerTab.classList.toggle("is-active", view === "register");
-  registerFields.classList.toggle("is-hidden", view !== "register");
+  authUsernameField?.classList.add("is-hidden");
+  if (authUsername) {
+    authUsername.required = false;
+    authUsername.disabled = true;
+    authUsername.value = "";
+  }
+  registerFields.classList.add("is-hidden");
   authPassword.setAttribute("autocomplete", view === "login" ? "current-password" : "new-password");
   if (authConfirmPassword) {
-    authConfirmPassword.required = view === "register";
-    authConfirmPassword.disabled = view !== "register";
+    authConfirmPassword.required = false;
+    authConfirmPassword.disabled = true;
     authConfirmPassword.value = "";
   }
+  if (authInitials) authInitials.disabled = true;
+  if (authClassOf) authClassOf.disabled = true;
   setAuthPasswordVisibility(false);
   setAuthConfirmPasswordVisibility(false);
+  syncEmailVerificationUi();
 }
 
 function currentUserCanAdmin() {
   return Boolean(state.user?.is_admin);
 }
 
+function currentUserRole() {
+  const role = String(state.user?.role || "").trim().toLowerCase();
+  if (role === "student" || role === "teacher") return role;
+  return currentUserCanAdmin() ? "teacher" : "teacher";
+}
+
+function currentUserIsStudent() {
+  return currentUserRole() === "student" && !currentUserCanAdmin();
+}
+
+function currentUserCanCreateContent() {
+  return currentUserCanAdmin() || currentUserRole() === "teacher";
+}
+
+function currentUserCanManageItem(item) {
+  return currentUserCanAdmin()
+    || (currentUserCanCreateContent() && Number(item?.submitted_by_user_id) === Number(state.user?.id));
+}
+
+function defaultSectionForCurrentUser() {
+  return "dashboard";
+}
+
 function tutorialSteps() {
   const steps = [
     {
-      section: "reports",
-      selector: ".topbar",
-      title: t("tutorial.welcomeTitle"),
-      body: t("tutorial.welcomeBody"),
+      section: "dashboard",
+      selector: "#dashboardSection",
+      title: langText({ en: "Start at Dashboard", "zh-CN": "从仪表盘开始", th: "เริ่มที่แดชบอร์ด" }),
+      body: langText({ en: "This is your home base for recent reports, returned items, personal activity, and quick actions.", "zh-CN": "这里集中显示最近报告、归还物品、个人活动和快捷入口。", th: "นี่คือหน้าแรกสำหรับรายงานล่าสุด สิ่งของที่รับคืน กิจกรรมของคุณ และปุ่มลัด" }),
     },
     {
-      section: "reports",
-      selector: "#openReportModalButton",
-      title: t("tutorial.reportsTitle"),
-      body: t("tutorial.reportsBody"),
-      requiresInteraction: true,
+      section: "map",
+      selector: "#mapSection",
+      title: langText({ en: "Open the School Map", "zh-CN": "打开校园地图", th: "เปิดแผนที่โรงเรียน" }),
+      body: langText({ en: "This opens the school map. Browse campus locations, floors, and location-filtered reports here.", "zh-CN": "这里可以打开校园地图，浏览地点、楼层，并按地点筛选报告。", th: "ใช้แผนที่โรงเรียนเพื่อดูสถานที่ ชั้น และรายงานตามตำแหน่ง" }),
+    },
+    {
+      section: "query",
+      selector: "#queryForm",
+      title: langText({ en: "Ask a Query", "zh-CN": "提交查询", th: "ถามคำถาม" }),
+      body: langText({ en: "Use Query when you want to ask about a lost item or search with a photo.", "zh-CN": "如果想询问遗失物品或用照片搜索，请使用查询。", th: "ใช้ Query เมื่อต้องการถามเกี่ยวกับของหายหรือค้นหาด้วยรูปภาพ" }),
     },
     {
       section: "reports",
       selector: "#searchInput",
-      title: t("tutorial.searchTitle"),
-      body: t("tutorial.searchBody"),
-      requiresInteraction: true,
-      onEnter: () => {
-        closeReportModal();
-      },
+      title: langText({ en: "Search Reports", "zh-CN": "搜索报告", th: "ค้นหารายงาน" }),
+      body: langText({ en: "Click here to search reports by item, description, category, or location.", "zh-CN": "点击这里按物品、描述、分类或地点搜索报告。", th: "คลิกที่นี่เพื่อค้นหารายงานตามสิ่งของ รายละเอียด หมวดหมู่ หรือสถานที่" }),
     },
     {
-      section: "reports",
-      selector: () => document.querySelector("[data-claim-button]") ? "[data-claim-button]" : "#reportsSection .browse-panel",
-      title: t("tutorial.claimFlowTitle"),
-      body: t("tutorial.claimFlowBody"),
-      requiresInteraction: true,
+      section: "returned",
+      selector: "#returnedSection",
+      title: langText({ en: "Recently Returned", "zh-CN": "最近归还", th: "เพิ่งถูกรับคืน" }),
+      body: langText({ en: "This is where returned items appear. It stays available without crowding the main student flow.", "zh-CN": "已归还物品会显示在这里。它仍可访问，但不会占据学生主流程。", th: "สิ่งของที่รับคืนแล้วจะแสดงที่นี่ โดยยังเข้าถึงได้แต่ไม่รบกวนขั้นตอนหลักของนักเรียน" }),
+    },
+    {
+      section: "account",
+      selector: "#accountSection",
+      title: langText({ en: "Profile", "zh-CN": "个人资料", th: "โปรไฟล์" }),
+      body: langText({ en: "Profile keeps your account details, language, and school identity in one place.", "zh-CN": "个人资料集中管理账号信息、语言和校园身份。", th: "โปรไฟล์รวมข้อมูลบัญชี ภาษา และตัวตนในโรงเรียนไว้ที่เดียว" }),
     },
   ];
 
-  if (state.advancedMode) {
+  if (!currentUserIsStudent()) {
     steps.push({
-      section: "query",
-      selector: "#queryForm",
-      title: t("tutorial.chatTitle"),
-      body: t("tutorial.chatBody"),
-      requiresInteraction: true,
+      section: "reports",
+      selector: "#openReportModalButton",
+      title: t("tutorial.reportsTitle"),
+      body: t("tutorial.reportsBody"),
     });
   }
 
@@ -5381,6 +5917,19 @@ function closeTutorial({ markSeen = false, rememberSession = true } = {}) {
   }
 }
 
+function showFinderEasterEgg() {
+  if (state.mascotUnlocked) return;
+  state.mascotUnlocked = true;
+  const badge = document.createElement("div");
+  badge.className = "easter-egg-badge";
+  badge.textContent = "Finder mode unlocked";
+  document.body.append(badge);
+  window.setTimeout(() => {
+    badge.classList.add("is-leaving");
+    window.setTimeout(() => badge.remove(), 420);
+  }, 2200);
+}
+
 async function maybeStartTutorial() {
   if (!shouldShowTutorial()) return;
   state.tutorialDismissedForSession = false;
@@ -5611,6 +6160,83 @@ function analysisList(value) {
   return uniqueValues(source.map(analysisText).filter(Boolean)).slice(0, 8);
 }
 
+function isPlainAnalysisObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function fullAnalysisSource(analysis) {
+  if (isPlainAnalysisObject(analysis?.full_json_response)) return analysis.full_json_response;
+  if (isPlainAnalysisObject(analysis?.parsed_json)) return analysis.parsed_json;
+  if (isPlainAnalysisObject(analysis?.llava_response_json)) return analysis.llava_response_json;
+  return isPlainAnalysisObject(analysis) ? analysis : {};
+}
+
+function formatAnalysisDetailValue(value, maxLength = 160) {
+  if (value === null || value === undefined || value === "") return "";
+  if (Array.isArray(value)) {
+    return uniqueValues(value.map((entry) => formatAnalysisDetailValue(entry, 80)).filter(Boolean)).slice(0, 6).join(", ");
+  }
+  if (isPlainAnalysisObject(value)) {
+    return Object.entries(value)
+      .filter(([key]) => !["raw", "output_text", "prompt_text"].includes(String(key).toLowerCase()))
+      .map(([key, entry]) => {
+        const formatted = formatAnalysisDetailValue(entry, 80);
+        return formatted ? `${analysisText(key).replace(/_/g, " ")}: ${formatted}` : "";
+      })
+      .filter(Boolean)
+      .slice(0, 4)
+      .join("; ");
+  }
+  const text = analysisText(value);
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3).trim()}...` : text;
+}
+
+function analysisValueForKeys(analysis, source, keys) {
+  for (const key of keys) {
+    const formatted = formatAnalysisDetailValue(source?.[key]);
+    if (formatted) return formatted;
+  }
+  for (const key of keys) {
+    const formatted = formatAnalysisDetailValue(analysis?.[key]);
+    if (formatted) return formatted;
+  }
+  return "";
+}
+
+function createAiAnalysisDetails(item) {
+  const analysis = item?.llava_analysis || {};
+  const source = fullAnalysisSource(analysis);
+  const entries = [
+    ["Object", ["object_type", "item_classification", "item_subtype", "object"]],
+    ["Colours", ["colours", "colors", "color"]],
+    ["Materials", ["materials", "material"]],
+    ["Brand/text", ["brand", "visible_text", "text"]],
+    ["Markings", ["notable_markings", "markings", "distinguishing_features", "distinctive_features"]],
+    ["Condition", ["condition", "shape", "size_estimate"]],
+    ["Scene", ["scene_context", "location_context", "background"]],
+    ["Category", ["possible_category", "category"]],
+    ["Tags", ["tags"]],
+  ]
+    .map(([label, keys]) => [label, analysisValueForKeys(analysis, source, keys)])
+    .filter(([, value]) => value);
+
+  if (!entries.length) return null;
+
+  const details = document.createElement("dl");
+  details.className = "ai-analysis-details";
+  entries.slice(0, 8).forEach(([label, value]) => {
+    const row = document.createElement("div");
+    row.className = "ai-analysis-detail";
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const description = document.createElement("dd");
+    description.textContent = value;
+    row.append(term, description);
+    details.append(row);
+  });
+  return details;
+}
+
 function analysisConfidenceValue(item) {
   const analysis = item?.llava_analysis || {};
   const raw = analysis.confidence_score ?? analysis.confidence ?? item?.image?.confidence_score;
@@ -5684,6 +6310,10 @@ function createAiAnalysisBlock(item, { heading = "AI Analysis", includeStatus = 
   }
 
   block.append(title, summaryLine, meta);
+  const details = createAiAnalysisDetails(item);
+  if (details) {
+    block.append(details);
+  }
   return block;
 }
 
@@ -5714,7 +6344,9 @@ function renderCurrentAccountChip() {
   }
   accountMeta.textContent = currentUserCanAdmin()
     ? langText({ en: "Admin access", "zh-CN": "管理员权限", th: "สิทธิ์ผู้ดูแล" })
-    : `@${state.user.username}`;
+    : currentUserIsStudent()
+      ? langText({ en: "Student mode", "zh-CN": "学生模式", th: "โหมดนักเรียน" })
+      : langText({ en: "Teacher mode", "zh-CN": "教师模式", th: "โหมดครู" });
 }
 
 function revokeProfilePreviewUrl() {
@@ -6160,28 +6792,25 @@ function prefillReporter() {
 function validateRegisterFields() {
   if (state.authView !== "register") return null;
 
-  const initials = authInitials.value.trim();
-  const classOf = Number(authClassOf.value);
-  if (authConfirmPassword && authPassword.value !== authConfirmPassword.value) {
+  if (!authEmailLooksValid()) {
     return langText({
-      en: "Passwords do not match.",
-      "zh-CN": "两次输入的密码不一致。",
-      th: "รหัสผ่านไม่ตรงกัน",
+      en: "Enter a valid email address.",
+      "zh-CN": "请输入有效邮箱地址。",
+      th: "กรุณาใส่อีเมลที่ถูกต้อง",
     });
   }
-
-  if (!INITIALS_PATTERN.test(initials)) {
+  if (!emailVerificationMatchesCurrentForm()) {
     return langText({
-      en: "Initials must be lowercase and formatted like name.initial.",
-      "zh-CN": "姓名缩写必须为小写，并采用 name.initial 的格式。",
-      th: "ชื่อย่อต้องเป็นตัวพิมพ์เล็กและอยู่ในรูปแบบ name.initial",
+      en: "Verify your email before creating the account.",
+      "zh-CN": "创建账号前请先验证邮箱。",
+      th: "กรุณายืนยันอีเมลก่อนสร้างบัญชี",
     });
   }
-  if (!Number.isInteger(classOf) || classOf < 2025 || classOf > 2035) {
+  if (String(authPassword?.value || "").length < 6) {
     return langText({
-      en: "Class of must be a year between 2025 and 2035.",
-      "zh-CN": "毕业年份必须在 2025 到 2035 之间。",
-      th: "รุ่นจบต้องอยู่ระหว่างปี 2025 ถึง 2035",
+      en: "Password must be at least 6 characters.",
+      "zh-CN": "密码至少需要 6 个字符。",
+      th: "รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร",
     });
   }
   return null;
@@ -6381,7 +7010,7 @@ function readRoute() {
   const raw = window.location.hash.replace(/^#/, "").trim();
   if (!raw) {
     return {
-      section: "dashboard",
+      section: defaultSectionForCurrentUser(),
       itemId: state.currentItemId,
     };
   }
@@ -6392,10 +7021,10 @@ function readRoute() {
     const itemId = Number(raw.slice("query-".length)) || null;
     return { section: "query", itemId };
   }
-  if (["dashboard", "map", "reports", "room", "returned", "claims", "notifications", "account", "admin"].includes(raw)) {
+  if (["dashboard", "report", "map", "reports", "room", "returned", "claims", "notifications", "account", "admin"].includes(raw)) {
     return { section: raw, itemId: state.currentItemId };
   }
-  return { section: "dashboard", itemId: state.currentItemId };
+  return { section: defaultSectionForCurrentUser(), itemId: state.currentItemId };
 }
 
 function navigateTo(section, itemId = null, options = {}) {
@@ -6468,7 +7097,8 @@ function openNewWindowTarget(section) {
 function sectionLabel(section = state.currentView) {
   const labels = {
     dashboard: t("nav.dashboard"),
-    map: "School Map",
+    report: t("nav.report"),
+    map: t("nav.map"),
     reports: t("nav.reports"),
     room: t("nav.room"),
     returned: t("nav.returned"),
@@ -6528,7 +7158,7 @@ function updateTopbarState() {
   toggle(showDashboardButton, state.currentView === "dashboard");
   toggle(showMapButton, state.currentView === "map");
   toggle(showReportsButton, state.currentView === "reports");
-  toggle(showReportItemButton, false);
+  toggle(showReportItemButton, state.currentView === "report");
   toggle(showRoomButton, state.currentView === "room");
   toggle(showReturnedButton, state.currentView === "returned");
   toggle(showQueryButton, state.currentView === "query");
@@ -6539,6 +7169,25 @@ function updateTopbarState() {
   updateLocationBar();
   syncModeUi();
   syncNewWindowMenu();
+  syncNavActivityIndicators();
+}
+
+function setNavActivityIndicator(button, count) {
+  if (!button) return;
+  const value = Math.max(0, Number(count) || 0);
+  button.classList.toggle("has-activity-indicator", value > 0);
+  if (value > 0) {
+    button.dataset.activityCount = value > 99 ? "99+" : String(value);
+  } else {
+    delete button.dataset.activityCount;
+  }
+}
+
+function syncNavActivityIndicators(stats = dashboardStats()) {
+  setNavActivityIndicator(showReportsButton, stats.activeReports);
+  setNavActivityIndicator(showReturnedButton, stats.returnedThisWeek);
+  setNavActivityIndicator(showQueryButton, stats.activeQueries);
+  setNavActivityIndicator(showNotificationsButton, currentUserIsStudent() ? 0 : stats.unreadNotifications);
 }
 
 function switchSection(section) {
@@ -6566,7 +7215,7 @@ async function activateRoute(route = readRoute()) {
 
   const section = route.section || "dashboard";
   if (!sectionAvailableInCurrentMode(section)) {
-    navigateTo("dashboard");
+    navigateTo(defaultSectionForCurrentUser());
     return;
   }
   if (section !== "query" && state.currentView === "query") {
@@ -6602,6 +7251,12 @@ async function activateRoute(route = readRoute()) {
   if (section === "returned") {
     switchSection("returned");
     await loadReturnedItems();
+    return;
+  }
+
+  if (section === "report") {
+    switchSection("report");
+    prepareReportPage();
     return;
   }
 
@@ -6692,8 +7347,11 @@ async function apiFetch(path, options = {}) {
       th: `${message} โปรดรอประมาณ ${retryAfter} วินาทีก่อนลองใหม่`,
     });
   }
-  logClientError("api request failed", new Error(message), { path, status: response.status });
-  throw new Error(message);
+  const error = new Error(message);
+  error.status = response.status;
+  error.payload = responsePayload;
+  logClientError("api request failed", error, { path, status: response.status });
+  throw error;
 }
 
 async function loadFilters() {
@@ -7296,7 +7954,7 @@ function showMapLocationTooltip(target, event, tooltip = schoolMapTooltip, shell
 }
 
 function mapReportContextActive() {
-  return Boolean(state.activeReportFormContext && reportDialog?.open);
+  return Boolean(state.activeReportFormContext && state.currentView === "report");
 }
 
 function primaryRegionForLocation(location) {
@@ -8272,11 +8930,108 @@ function addDashboardActivity({ title, meta, badge, target, tone = "" }) {
   dashboardActivityList.append(item);
 }
 
+function addDashboardListItem(container, { title, meta, badge, target = "reports", itemId = null, imageUrl = "" }) {
+  if (!container) return;
+  const item = document.createElement("button");
+  item.className = "dashboard-activity-item dashboard-list-item";
+  item.type = "button";
+
+  if (imageUrl) {
+    const media = document.createElement("span");
+    media.className = "dashboard-list-media";
+    media.style.backgroundImage = `url("${imageUrl}")`;
+    item.append(media);
+  }
+
+  const copy = document.createElement("span");
+  copy.className = "dashboard-activity-copy";
+  const titleElement = document.createElement("strong");
+  titleElement.textContent = title;
+  const metaElement = document.createElement("span");
+  metaElement.textContent = meta;
+  copy.append(titleElement, metaElement);
+
+  const badgeElement = document.createElement("span");
+  badgeElement.className = "dashboard-activity-badge";
+  badgeElement.textContent = badge;
+  item.append(copy, badgeElement);
+  item.addEventListener("click", () => navigateTo(target, itemId));
+  container.append(item);
+}
+
+function addDashboardEmptyItem(container, message) {
+  if (!container) return;
+  const empty = document.createElement("p");
+  empty.className = "status-message dashboard-empty-message";
+  empty.textContent = message;
+  container.append(empty);
+}
+
+function renderDashboardRecentReports() {
+  if (!dashboardRecentReportsList) return;
+  dashboardRecentReportsList.replaceChildren();
+  const reports = state.items
+    .filter(itemMatchesActiveLocation)
+    .slice()
+    .sort((first, second) => Date.parse(second.created_at || second.event_date || "") - Date.parse(first.created_at || first.event_date || ""))
+    .slice(0, 5);
+  if (!reports.length) {
+    addDashboardEmptyItem(dashboardRecentReportsList, langText({ en: "No recent reports yet.", "zh-CN": "暂无最近报告。", th: "ยังไม่มีรายงานล่าสุด" }));
+    return;
+  }
+  reports.forEach((item) => {
+    addDashboardListItem(dashboardRecentReportsList, {
+      title: item.title || langText({ en: "Untitled report", "zh-CN": "未命名报告", th: "รายงานไม่มีชื่อ" }),
+      meta: `${localizeValue(item.location || "")} - ${formatDateTime(item.created_at || item.event_date)}`,
+      badge: itemStatusLabel(item),
+      target: "reports",
+      imageUrl: resolveImageUrl(item),
+    });
+  });
+}
+
+function renderDashboardRecentReturns() {
+  if (!dashboardRecentReturnsList) return;
+  dashboardRecentReturnsList.replaceChildren();
+  const returns = state.returnedItems
+    .filter(itemMatchesActiveLocation)
+    .slice()
+    .sort((first, second) => Date.parse(second.returned_at || second.updated_at || "") - Date.parse(first.returned_at || first.updated_at || ""))
+    .slice(0, 5);
+  if (!returns.length) {
+    addDashboardEmptyItem(dashboardRecentReturnsList, langText({ en: "No returned items in this view.", "zh-CN": "此视图暂无归还物品。", th: "ยังไม่มีสิ่งของที่รับคืนในมุมมองนี้" }));
+    return;
+  }
+  returns.forEach((item) => {
+    addDashboardListItem(dashboardRecentReturnsList, {
+      title: item.title || langText({ en: "Returned item", "zh-CN": "已归还物品", th: "สิ่งของที่รับคืนแล้ว" }),
+      meta: `${localizeValue(item.location || "")} - ${formatDateTime(item.returned_at || item.updated_at)}`,
+      badge: langText({ en: "Returned", "zh-CN": "已归还", th: "รับคืนแล้ว" }),
+      target: "returned",
+      imageUrl: resolveImageUrl(item),
+    });
+  });
+}
+
 function renderDashboardActivity(stats = dashboardStats()) {
   if (!dashboardActivityList) return;
   dashboardActivityList.replaceChildren();
 
-  if (stats.pendingClaims > 0) {
+  const personalActivities = state.activities.slice(0, 4);
+  if (personalActivities.length) {
+    personalActivities.forEach((activity) => {
+      addDashboardActivity({
+        title: activity.title || activityTitleForType(activity.type),
+        meta: activity.detail || activity.stage || activityStatusCopy(activity.status),
+        badge: activity.status === "running" ? `${Math.round(Number(activity.progress) || 0)}%` : activityStatusCopy(activity.status),
+        target: activity.target || "dashboard",
+        tone: activity.status === "complete" ? "is-green" : activity.status === "warning" ? "is-gold" : "",
+      });
+    });
+    return;
+  }
+
+  if (!currentUserIsStudent() && stats.pendingClaims > 0) {
     addDashboardActivity({
       title: langText({ en: "Claims pending review", "zh-CN": "待审核认领", th: "คำขอรอตรวจสอบ" }),
       meta: langText({ en: "Review ownership evidence", "zh-CN": "审核所有权证据", th: "ตรวจสอบหลักฐานความเป็นเจ้าของ" }),
@@ -8286,7 +9041,7 @@ function renderDashboardActivity(stats = dashboardStats()) {
     });
   }
 
-  if (stats.unreadNotifications > 0) {
+  if (!currentUserIsStudent() && stats.unreadNotifications > 0) {
     addDashboardActivity({
       title: t("notifications.title"),
       meta: langText({ en: "Unread school updates", "zh-CN": "未读校园更新", th: "อัปเดตที่ยังไม่ได้อ่าน" }),
@@ -8297,18 +9052,10 @@ function renderDashboardActivity(stats = dashboardStats()) {
   }
 
   addDashboardActivity({
-    title: langText({ en: "Open item reports", "zh-CN": "开放物品报告", th: "รายงานที่เปิดอยู่" }),
-    meta: langText({ en: `${stats.reportsThisWeek} report${stats.reportsThisWeek === 1 ? "" : "s"} this week`, "zh-CN": `本周 ${stats.reportsThisWeek} 条报告`, th: `${stats.reportsThisWeek} รายงานในสัปดาห์นี้` }),
-    badge: String(stats.activeReports),
-    target: "reports",
-  });
-
-  addDashboardActivity({
-    title: langText({ en: "Items returned", "zh-CN": "已归还物品", th: "สิ่งของที่รับคืนแล้ว" }),
-    meta: langText({ en: "Recovered this week", "zh-CN": "本周找回", th: "รับคืนในสัปดาห์นี้" }),
-    badge: String(stats.returnedThisWeek),
-    target: "returned",
-    tone: "is-green",
+    title: langText({ en: "No recent personal activity", "zh-CN": "暂无个人活动", th: "ยังไม่มีกิจกรรมของคุณ" }),
+    meta: langText({ en: "Your reports, queries, and claims will appear here.", "zh-CN": "你的报告、查询和认领会显示在这里。", th: "รายงาน การค้นหา และคำขอของคุณจะแสดงที่นี่" }),
+    badge: "0",
+    target: currentUserIsStudent() ? "query" : "reports",
   });
 }
 
@@ -8331,7 +9078,10 @@ function renderDashboard() {
   setDashboardText(dashboardNotifications, stats.unreadNotifications);
   setDashboardText(dashboardApprovalRate, `${stats.approvalRate}%`);
   setDashboardText(dashboardActiveReports, stats.activeReports);
+  renderDashboardRecentReports();
+  renderDashboardRecentReturns();
   renderDashboardActivity(stats);
+  syncNavActivityIndicators(stats);
 }
 
 async function refreshCurrentView() {
@@ -8738,7 +9488,7 @@ function populateInlineClaimItemSelect(select, selectedId = null) {
   }), ""));
   const seen = new Set();
   [...(state.queryItems || []), ...(state.items || [])].forEach((item) => {
-    if (!item?.id || item.claimed || seen.has(item.id)) return;
+    if (!item?.id || item.claimed || item.claim_required === false || seen.has(item.id)) return;
     seen.add(item.id);
     const label = [item.title, localizeValue(item.location), `#${item.id}`].filter(Boolean).join(" • ");
     select.append(new Option(label, String(item.id)));
@@ -8801,6 +9551,7 @@ function renderItems(items) {
     const tags = card.querySelector(".tag-row");
     const info = card.querySelector(".info-list");
     const flag = card.querySelector("[data-card-flag]");
+    const cardActions = card.querySelector(".card-actions");
     const claimButton = card.querySelector("[data-claim-button]");
     const openQueryButton = card.querySelector("[data-open-query-button]");
     const markClaimedButton = card.querySelector("[data-mark-claimed-button]");
@@ -8863,6 +9614,7 @@ function renderItems(items) {
 
     renderTags(tags, item.tags || []);
     addInfo(info, langText({ en: "Status", "zh-CN": "状态", th: "สถานะ" }), statusLabel);
+    addInfo(info, langText({ en: "Claim Status", "zh-CN": "认领状态", th: "สถานะคำขอ" }), claimRequirementLabel(item.claim_required !== false));
     addInfo(info, langText({ en: "Reported by", "zh-CN": "报告人", th: "ผู้รายงาน" }), item.reporter_identity || item.reporter_name);
     addInfo(info, langText({ en: "Category", "zh-CN": "分类", th: "หมวดหมู่" }), localizeValue(item.category));
     addInfo(info, langText({ en: "Location", "zh-CN": "地点", th: "สถานที่" }), localizeValue(item.location));
@@ -8874,18 +9626,39 @@ function renderItems(items) {
     addInfo(info, langText({ en: "Risk level", "zh-CN": "风险等级", th: "ระดับความเสี่ยง" }), item.effective_abuse_risk_level || item.abuse_risk_level);
 
     claimButton.disabled = item.claimed;
-    claimButton.textContent = item.claimed
-      ? langText({ en: "Already claimed", "zh-CN": "已被认领", th: "มีผู้รับคืนแล้ว" })
-      : langText({ en: "Claim Item", "zh-CN": "认领物品", th: "ยื่นคำขอรับคืน" });
-    claimButton.addEventListener("click", () => openClaimDialog(item));
+    if (item.claimed) {
+      claimButton.textContent = langText({ en: "Already claimed", "zh-CN": "已被认领", th: "มีผู้รับคืนแล้ว" });
+    } else if (item.claim_required === false) {
+      claimButton.textContent = langText({ en: "Direct collection", "zh-CN": "直接领取", th: "รับได้โดยตรง" });
+      claimButton.addEventListener("click", () => {
+        const message = directCollectionMessage(item);
+        setWarningCard(searchWarningCard, message);
+        setMessage(uploadMessage, message);
+      });
+    } else {
+      claimButton.textContent = langText({ en: "Claim Item", "zh-CN": "认领物品", th: "ยื่นคำขอรับคืน" });
+      claimButton.addEventListener("click", () => openClaimDialog(item));
+    }
 
     openQueryButton.addEventListener("click", () => navigateTo("query", item.id));
 
-    if (currentUserCanAdmin()) {
+    if (currentUserCanManageItem(item)) {
       markClaimedButton.classList.remove("is-hidden");
       markClaimedButton.disabled = item.claimed;
       markClaimedButton.textContent = langText({ en: "Mark as Claimed", "zh-CN": "标记为已认领", th: "ทำเครื่องหมายว่ารับคืนแล้ว" });
       markClaimedButton.addEventListener("click", () => markItemClaimed(item.id, markClaimedButton));
+
+      if (!item.claimed && cardActions) {
+        const claimRequirementButton = document.createElement("button");
+        claimRequirementButton.className = "ghost-button card-button";
+        claimRequirementButton.type = "button";
+        const nextClaimRequired = item.claim_required === false;
+        claimRequirementButton.textContent = nextClaimRequired
+          ? langText({ en: "Require claim", "zh-CN": "改为需要认领", th: "กำหนดให้ยื่นคำขอ" })
+          : langText({ en: "Allow direct collection", "zh-CN": "允许直接领取", th: "อนุญาตให้รับโดยตรง" });
+        claimRequirementButton.addEventListener("click", () => updateItemClaimRequirement(item.id, nextClaimRequired, claimRequirementButton));
+        cardActions.append(claimRequirementButton);
+      }
     } else {
       markClaimedButton.classList.add("is-hidden");
     }
@@ -8986,11 +9759,129 @@ function renderAccount() {
   accountAdminBadge.classList.toggle("is-hidden", !currentUserCanAdmin());
 
   accountInfoList.replaceChildren();
+  addInfo(accountInfoList, langText({ en: "Role", "zh-CN": "角色", th: "บทบาท" }), currentUserIsStudent()
+    ? langText({ en: "Student", "zh-CN": "学生", th: "นักเรียน" })
+    : langText({ en: "Teacher", "zh-CN": "教师", th: "ครู" }));
+  if (state.user.email) {
+    addInfo(accountInfoList, langText({ en: "Email", "zh-CN": "邮箱", th: "อีเมล" }), state.user.email);
+  }
+  addInfo(accountInfoList, langText({ en: "Email status", "zh-CN": "邮箱状态", th: "สถานะอีเมล" }), (state.user.email_verified || state.user.email_verified_at)
+    ? langText({ en: "Verified", "zh-CN": "已验证", th: "ยืนยันแล้ว" })
+    : langText({ en: "Not verified", "zh-CN": "未验证", th: "ยังไม่ยืนยัน" }));
   addInfo(accountInfoList, langText({ en: "Initials", "zh-CN": "姓名缩写", th: "ชื่อย่อ" }), state.user.initials || "-");
   addInfo(accountInfoList, langText({ en: "Class of", "zh-CN": "毕业年份", th: "รุ่นจบ" }), state.user.class_of || "-");
   addInfo(accountInfoList, langText({ en: "Created", "zh-CN": "创建时间", th: "สร้างเมื่อ" }), formatDateTime(state.user.created_at));
   addInfo(accountInfoList, langText({ en: "Admin", "zh-CN": "管理员", th: "ผู้ดูแล" }), currentUserCanAdmin() ? t("common.yes") : t("common.no"));
+  if (accountEmailInput && !state.accountEmailChangeSentAt && document.activeElement !== accountEmailInput) {
+    accountEmailInput.value = state.user.email || "";
+  }
+  syncAccountEmailChangeUi();
   syncModeUi();
+}
+
+function accountEmailChangeValue() {
+  return String(accountEmailInput?.value || "").trim().toLowerCase();
+}
+
+function resetAccountEmailChangeState({ keepMessage = false } = {}) {
+  state.accountEmailChangeEmail = "";
+  state.accountEmailChangeSentAt = 0;
+  if (accountEmailCodeInput) accountEmailCodeInput.value = "";
+  if (!keepMessage) setMessage(accountEmailMessage, "");
+  syncAccountEmailChangeUi();
+}
+
+function syncAccountEmailChangeUi() {
+  const email = accountEmailChangeValue();
+  const currentEmail = String(state.user?.email || "").toLowerCase();
+  const emailIsValid = authEmailLooksValid(email);
+  const codeReady = String(accountEmailCodeInput?.value || "").replace(/\D/g, "").length === EMAIL_VERIFICATION_CODE_LENGTH;
+  const changed = email && email !== currentEmail;
+  if (accountEmailSendCodeButton) {
+    accountEmailSendCodeButton.disabled = !emailIsValid || !changed;
+    accountEmailSendCodeButton.textContent = state.accountEmailChangeSentAt ? t("auth.resendCode") : t("auth.sendCode");
+  }
+  if (accountEmailConfirmButton) {
+    accountEmailConfirmButton.disabled = !emailIsValid || !changed || !codeReady || state.accountEmailChangeEmail !== email;
+  }
+}
+
+async function requestAccountEmailChangeCode() {
+  const email = accountEmailChangeValue();
+  if (!authEmailLooksValid(email)) {
+    setMessage(accountEmailMessage, langText({
+      en: "Enter a valid email first.",
+      "zh-CN": "请先输入有效邮箱。",
+      th: "กรุณาใส่อีเมลที่ถูกต้องก่อน",
+    }), true);
+    return;
+  }
+
+  setButtonLoading(accountEmailSendCodeButton, true);
+  setMessage(accountEmailMessage, langText({ en: "Sending code...", "zh-CN": "正在发送验证码...", th: "กำลังส่งรหัส..." }));
+  try {
+    const data = await apiFetch("/account/email/request-code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    state.accountEmailChangeEmail = email;
+    state.accountEmailChangeSentAt = Date.now();
+    setMessage(accountEmailMessage, data.delivery === "development-log"
+      ? (data.message || "Email delivery is not configured. Verification codes are currently being written to the development security log.")
+      : langText({
+          en: "Code sent. Check the new email address.",
+          "zh-CN": "验证码已发送。请查看新邮箱。",
+          th: "ส่งรหัสแล้ว โปรดตรวจอีเมลใหม่",
+        }),
+      data.delivery === "development-log");
+    accountEmailCodeInput?.focus();
+  } catch (error) {
+    setMessage(accountEmailMessage, error.message, true);
+    logClientError("account email verification request failed", error);
+  } finally {
+    setButtonLoading(accountEmailSendCodeButton, false);
+    syncAccountEmailChangeUi();
+  }
+}
+
+async function submitAccountEmailChange(event) {
+  event.preventDefault();
+  const email = accountEmailChangeValue();
+  const code = String(accountEmailCodeInput?.value || "").replace(/\D/g, "");
+  if (!authEmailLooksValid(email) || code.length !== EMAIL_VERIFICATION_CODE_LENGTH) {
+    setMessage(accountEmailMessage, langText({
+      en: "Enter the new email and 6-digit code.",
+      "zh-CN": "请输入新邮箱和 6 位验证码。",
+      th: "กรุณาใส่อีเมลใหม่และรหัส 6 หลัก",
+    }), true);
+    return;
+  }
+
+  setButtonLoading(accountEmailConfirmButton, true);
+  setMessage(accountEmailMessage, langText({ en: "Verifying email...", "zh-CN": "正在验证邮箱...", th: "กำลังยืนยันอีเมล..." }));
+  try {
+    const data = await apiFetch("/account/email/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, code }),
+    });
+    state.user = applyFreshUser(data.user);
+    resetAccountEmailChangeState({ keepMessage: true });
+    renderCurrentAccountChip();
+    renderAccount();
+    setMessage(accountEmailMessage, langText({
+      en: "Email updated.",
+      "zh-CN": "邮箱已更新。",
+      th: "อัปเดตอีเมลแล้ว",
+    }));
+  } catch (error) {
+    setMessage(accountEmailMessage, error.message, true);
+    logClientError("account email change failed", error);
+  } finally {
+    setButtonLoading(accountEmailConfirmButton, false);
+    syncAccountEmailChangeUi();
+  }
 }
 
 function renderAdminMonitor(monitor = state.adminMonitor || emptyAdminMonitor()) {
@@ -9025,10 +9916,38 @@ function renderAdminMonitor(monitor = state.adminMonitor || emptyAdminMonitor())
     ? (ollama.text_ready ? "" : `Ollama is connected, but model "${ollama.text_model || "unconfigured"}" was not detected.`)
     : (ollama.message || "Ollama is disconnected. AI features will use safe fallbacks where available.");
   setWarningCard(adminMonitorWarning, warningMessage);
+  renderAdminSmtpStatus();
+}
+
+function yesNo(value) {
+  return value ? t("common.yes") : t("common.no");
+}
+
+function renderAdminSmtpStatus(status = state.smtpStatus || emptySmtpStatus()) {
+  const configured = Boolean(status.configured);
+  const connected = Boolean(status.connected);
+  const deliveryMode = status.delivery_mode === "real-email" ? "Real Email" : "Development Log";
+  const lastError = String(status.last_error || "").trim();
+  const sender = String(status.sender || status.from_address || "").trim();
+  if (adminSmtpStatus) {
+    adminSmtpStatus.textContent = connected ? "Connected" : "Not Connected";
+    adminSmtpStatus.classList.toggle("is-success", connected);
+    adminSmtpStatus.classList.toggle("is-error", !connected);
+  }
+  if (adminSmtpDeliveryMode) {
+    adminSmtpDeliveryMode.textContent = deliveryMode;
+  }
+  if (adminSmtpHostConfigured) adminSmtpHostConfigured.textContent = yesNo(configured);
+  if (adminSmtpUsernameConfigured) adminSmtpUsernameConfigured.textContent = yesNo(status.username_configured);
+  if (adminSmtpPasswordConfigured) adminSmtpPasswordConfigured.textContent = yesNo(status.password_configured);
+  if (adminSmtpSender) adminSmtpSender.textContent = sender || "--";
+  if (adminSmtpLastError) adminSmtpLastError.textContent = lastError || "None";
+  setWarningCard(adminSmtpWarning, configured ? "" : "Email delivery is not configured. Verification codes are currently being written to the development security log.");
 }
 
 function resetAdminMonitor() {
   state.adminMonitor = emptyAdminMonitor();
+  state.smtpStatus = emptySmtpStatus();
   renderAdminMonitor();
 }
 
@@ -9039,11 +9958,18 @@ async function loadAdminMonitor() {
 
   state.adminMonitorRequestInFlight = true;
   try {
-    const data = await apiFetch("/health/detailed");
+    const [data, smtpData] = await Promise.all([
+      apiFetch("/health/detailed"),
+      apiFetch("/debug/smtp-status"),
+    ]);
     state.adminMonitor = {
       ...emptyAdminMonitor(),
       ...data,
       fetched_at: new Date().toISOString(),
+    };
+    state.smtpStatus = {
+      ...emptySmtpStatus(),
+      ...smtpData,
     };
     renderAdminMonitor();
   } catch (error) {
@@ -9059,6 +9985,40 @@ async function loadAdminMonitor() {
     logClientError("loading admin monitor failed", error);
   } finally {
     state.adminMonitorRequestInFlight = false;
+  }
+}
+
+async function sendAdminSmtpTestEmail(event) {
+  event.preventDefault();
+  if (!currentUserCanAdmin()) return;
+  const email = String(adminSmtpTestEmail?.value || "").trim().toLowerCase();
+  if (!authEmailLooksValid(email)) {
+    setMessage(adminSmtpTestMessage, "Enter a valid test recipient email.", true);
+    return;
+  }
+
+  setButtonLoading(adminSmtpTestButton, true);
+  setMessage(adminSmtpTestMessage, "Sending SMTP test email...");
+  try {
+    const data = await apiFetch("/debug/smtp-test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    state.smtpStatus = {
+      ...emptySmtpStatus(),
+      ...(data.config || {}),
+    };
+    renderAdminSmtpStatus();
+    setMessage(adminSmtpTestMessage, data.success
+      ? "SMTP test accepted by the mail server. Check the recipient inbox."
+      : (data.error || data.message || "SMTP test failed."),
+      !data.success);
+  } catch (error) {
+    setMessage(adminSmtpTestMessage, error.message, true);
+    logClientError("smtp test failed", error);
+  } finally {
+    setButtonLoading(adminSmtpTestButton, false);
   }
 }
 
@@ -9180,9 +10140,15 @@ function renderAdminUsers(users) {
     identityCell.textContent = `${user.identity || `${user.initials || "-"} / ${user.class_of || "-"}`} • ${langText({ en: "Trust", "zh-CN": "可信分数", th: "คะแนนความน่าเชื่อถือ" })} ${user.trust_score ?? 50}/100`;
 
     const roleCell = document.createElement("td");
+    const schoolRole = String(user.role || "").toLowerCase() === "student"
+      ? langText({ en: "Student", "zh-CN": "学生", th: "นักเรียน" })
+      : langText({ en: "Teacher", "zh-CN": "教师", th: "ครู" });
+    const roleSource = user.role_source === "assigned"
+      ? langText({ en: "manual", "zh-CN": "手动", th: "กำหนดเอง" })
+      : langText({ en: "auto", "zh-CN": "自动", th: "อัตโนมัติ" });
     roleCell.textContent = user.is_admin
-      ? langText({ en: "Admin", "zh-CN": "管理员", th: "ผู้ดูแล" })
-      : langText({ en: "User", "zh-CN": "用户", th: "ผู้ใช้" });
+      ? `${schoolRole} (${roleSource}) / ${langText({ en: "Admin", "zh-CN": "管理员", th: "ผู้ดูแล" })}`
+      : `${schoolRole} (${roleSource})`;
 
     const createdCell = document.createElement("td");
     createdCell.textContent = formatDateTime(user.created_at) || "-";
@@ -9207,6 +10173,22 @@ function renderAdminUsers(users) {
     demoteButton.disabled = !user.is_admin || user.id === state.user?.id;
     demoteButton.addEventListener("click", () => handleAdminUserRoleAction(user, "demote"));
 
+    const schoolRoleSelect = document.createElement("select");
+    schoolRoleSelect.className = "admin-role-select";
+    schoolRoleSelect.setAttribute("aria-label", "School role");
+    [
+      ["auto", `Auto (${String(user.auto_detected_role || "teacher") === "student" ? "Student" : "Teacher"})`],
+      ["student", "Student"],
+      ["teacher", "Teacher"],
+    ].forEach(([value, label]) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      schoolRoleSelect.append(option);
+    });
+    schoolRoleSelect.value = user.assigned_role || "auto";
+    schoolRoleSelect.addEventListener("change", () => handleAdminSchoolRoleChange(user, schoolRoleSelect.value, schoolRoleSelect));
+
     const deleteButton = document.createElement("button");
     deleteButton.className = "ghost-button small-button danger-button";
     deleteButton.type = "button";
@@ -9221,7 +10203,7 @@ function renderAdminUsers(users) {
       }),
     }));
 
-    wrap.append(promoteButton, demoteButton, deleteButton);
+    wrap.append(schoolRoleSelect, promoteButton, demoteButton, deleteButton);
     actions.append(wrap);
     row.append(actions);
     adminUsersBody.append(row);
@@ -9266,6 +10248,7 @@ function renderAdminItems(items) {
     const info = document.createElement("dl");
     info.className = "info-list";
     addInfo(info, "ID", item.id);
+    addInfo(info, langText({ en: "Claim Status", "zh-CN": "认领状态", th: "สถานะคำขอ" }), claimRequirementLabel(item.claim_required !== false));
     addInfo(info, langText({ en: "Reporter", "zh-CN": "报告人", th: "ผู้รายงาน" }), item.reporter_identity || item.reporter_name || "");
     addInfo(info, langText({ en: "Evidence", "zh-CN": "证据摘要", th: "สรุปหลักฐาน" }), item.evidence_summary || "");
     addInfo(info, langText({ en: "Missing info", "zh-CN": "缺失信息", th: "ข้อมูลที่ขาด" }), item.evidence_missing_info || "");
@@ -9867,6 +10850,35 @@ async function handleAdminUserRoleAction(user, action) {
       }
     },
   });
+}
+
+async function handleAdminSchoolRoleChange(user, role, select) {
+  const previousValue = user.assigned_role || "auto";
+  select.disabled = true;
+  setMessage(adminMessage, "Updating school role...");
+  try {
+    const data = await apiFetch(`/admin/users/${user.id}/role`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role }),
+    });
+    setMessage(adminMessage, data.message || "User role updated.");
+    triggerHaptic("success");
+    await loadAdminData();
+    if (Number(user.id) === Number(state.user?.id)) {
+      const sessionData = await apiFetch("/session");
+      state.user = applyFreshUser(sessionData.user || state.user);
+      syncModeUi({ navigateIfNeeded: true });
+      renderCurrentAccountChip();
+      renderAccount();
+    }
+  } catch (error) {
+    select.value = previousValue;
+    setMessage(adminMessage, error.message, true);
+    logClientError("admin school role update failed", error, { userId: user.id, role });
+  } finally {
+    select.disabled = false;
+  }
 }
 
 async function handleAdminItemReview(itemId, status) {
@@ -11922,6 +12934,14 @@ async function submitAuth(event) {
     setMessage(authMessage, registerError, true);
     return;
   }
+  if (state.authView === "login" && !authEmailLooksValid()) {
+    setMessage(authMessage, langText({
+      en: "Enter a valid email address.",
+      "zh-CN": "请输入有效邮箱地址。",
+      th: "กรุณาใส่อีเมลที่ถูกต้อง",
+    }), true);
+    return;
+  }
 
   setButtonLoading(authSubmitButton, true);
   setMessage(authMessage, langText({
@@ -11933,13 +12953,12 @@ async function submitAuth(event) {
   try {
     const payload = state.authView === "register"
       ? {
-          username: authUsername.value.trim(),
+          email: authEmailValue(),
           password: authPassword.value,
-          initials: authInitials.value.trim(),
-          class_of: Number(authClassOf.value),
+          email_verification_token: state.emailVerificationToken,
         }
       : {
-          username: authUsername.value.trim(),
+          email: authEmailValue(),
           password: authPassword.value,
         };
 
@@ -11952,6 +12971,7 @@ async function submitAuth(event) {
     state.user = applyFreshUser(data.user);
     setLanguage(state.user?.preferred_language || state.language);
     authForm.reset();
+    resetEmailVerificationState({ keepMessage: true });
     setMessage(authMessage, state.authView === "login"
       ? langText({ en: "Logged in.", "zh-CN": "已登录。", th: "เข้าสู่ระบบแล้ว" })
       : langText({ en: "Account created.", "zh-CN": "账号已创建。", th: "สร้างบัญชีแล้ว" }));
@@ -12011,11 +13031,12 @@ async function enterAuthenticatedApp({ playIntro = false } = {}) {
   }
   startNotificationPolling();
   if (playIntro) {
-    const mapHash = buildHash("map");
-    if (window.location.hash !== mapHash) {
-      window.location.hash = mapHash;
+    const landingSection = currentUserIsStudent() ? "query" : "map";
+    const landingHash = buildHash(landingSection);
+    if (window.location.hash !== landingHash) {
+      window.location.hash = landingHash;
     }
-    await activateRoute({ section: "map", itemId: null });
+    await activateRoute({ section: landingSection, itemId: null });
   } else {
     await activateRoute(readRoute());
     await maybeStartTutorial();
@@ -12024,6 +13045,11 @@ async function enterAuthenticatedApp({ playIntro = false } = {}) {
 
 async function submitReport(event) {
   event.preventDefault();
+  if (!currentUserCanCreateContent()) {
+    setMessage(uploadMessage, "Student accounts cannot create reports.", true);
+    setWarningCard(reportWarningCard, "Student accounts cannot create reports.");
+    return;
+  }
   if (submitButton.disabled) return;
   setWarningCard(reportWarningCard, "");
   const validationMessage = validateReportForm();
@@ -12044,6 +13070,7 @@ async function submitReport(event) {
     locationMeta: location.meta,
     category: categoryInput.value,
     eventDate: dateInput.value,
+    claimRequired: reportClaimRequiredValue(),
   };
   const activityId = createActivity({
     type: "report",
@@ -12088,6 +13115,7 @@ async function submitReport(event) {
       secondary_location: reportDraft.locationMeta,
       category: reportDraft.category,
       event_date: reportDraft.eventDate,
+      claim_required: reportDraft.claimRequired,
       time_slot: "Unknown",
       student_id: "",
       contact_info: "",
@@ -12124,8 +13152,11 @@ async function submitReport(event) {
     dropTitle.textContent = t("report.dropTitle");
     dropHint.textContent = t("report.dropHint");
     dateInput.value = todayIso();
+    if (claimRequiredInput) claimRequiredInput.checked = true;
+    if (noClaimRequiredInput) noClaimRequiredInput.checked = false;
     prefillReporter();
     updateLocationUi();
+    updateReportClaimStatusUi();
     updateReportSubmitState();
     await completeProgress("report");
     completeActivity(activityId, {
@@ -12290,6 +13321,10 @@ async function uploadProfileImage() {
 }
 
 async function uploadRoomItems() {
+  if (!currentUserCanCreateContent()) {
+    setMessage(roomUploadMessage, "Student accounts cannot create returned-item posts.", true);
+    return;
+  }
   const files = Array.from(roomUploadInput.files || []);
   if (!files.length) {
     setMessage(roomUploadMessage, langText({
@@ -12361,7 +13396,7 @@ async function uploadRoomItems() {
       progress: 68,
       stage: langText({ en: "Uploading to room", "zh-CN": "正在上传到招领室", th: "กำลังอัปโหลดเข้าห้อง" }),
     });
-    const data = await apiFetch("/admin/room/items", {
+    const data = await apiFetch("/room/items", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -12373,7 +13408,7 @@ async function uploadRoomItems() {
     roomLabelInput.value = "";
     setMessage(roomUploadMessage, data.message || "Item added to Lost & Found Room");
     triggerHaptic("success");
-    await refreshItemSurfaces({ includeAdmin: true, includeNotifications: true });
+    await refreshItemSurfaces({ includeAdmin: currentUserCanAdmin(), includeNotifications: true });
     completeActivity(activityId, {
       stage: langText({ en: "Room upload complete", "zh-CN": "招领室上传完成", th: "อัปโหลดเข้าห้องเสร็จแล้ว" }),
       detail: data.message || langText({
@@ -13138,7 +14173,7 @@ function renderClaimDraftItemOptions(selectedItem = null) {
   }), ""));
   const seen = new Set();
   const items = [...(state.queryItems || []), ...(state.items || [])].filter((item) => {
-    if (!item?.id || seen.has(item.id) || item.claimed) return false;
+    if (!item?.id || seen.has(item.id) || item.claimed || item.claim_required === false) return false;
     seen.add(item.id);
     return true;
   });
@@ -13164,6 +14199,12 @@ function handleClaimDraftItemSelection() {
 function openClaimDialog(item = null, previewAnalysis = null, draft = null) {
   if (item?.claimed) {
     setMessage(uploadMessage, langText({ en: "This item has already been marked as claimed.", "zh-CN": "该物品已被标记为已认领。", th: "สิ่งของนี้ถูกทำเครื่องหมายว่ารับคืนแล้ว" }), true);
+    return;
+  }
+  if (item && item.claim_required === false) {
+    const message = directCollectionMessage(item);
+    setWarningCard(searchWarningCard, message);
+    setMessage(claimMessage, message);
     return;
   }
 
@@ -13338,6 +14379,30 @@ async function markItemClaimed(itemId, button) {
   }
 }
 
+async function updateItemClaimRequirement(itemId, claimRequired, button) {
+  setButtonLoading(button, true);
+  try {
+    await apiFetch(`/items/${itemId}/claim-requirement`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ claim_required: Boolean(claimRequired) }),
+    });
+    invalidateSearchCache();
+    await Promise.all([
+      loadItems(),
+      loadRoomItems(),
+      loadReturnedItems(),
+      currentUserCanAdmin() ? loadAdminData() : Promise.resolve(),
+    ]);
+    triggerHaptic("success");
+  } catch (error) {
+    setWarningCard(searchWarningCard, error.message);
+    logClientError("updating claim requirement failed", error, { itemId, claimRequired });
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
 function selectFile(file) {
   if (!file) {
     state.selectedFile = null;
@@ -13374,10 +14439,12 @@ function resetPreviewUrls() {
 }
 
 function logout() {
+  const logoutUser = state.user ? (state.user.username || userDisplayName(state.user)) : "";
+  const logoutRole = state.user ? currentUserRole() : "";
   stopQueryCamera();
   clearSession();
   closeTutorial({ markSeen: false, rememberSession: false });
-  closeReportModal();
+  closeReportModal({ navigate: false });
   closeConfirmModal();
   closeImagePreview();
   closeRoomClaimPreview();
@@ -13523,6 +14590,7 @@ function logout() {
   window.location.hash = "";
   state.currentView = "dashboard";
   renderDefaultLayout();
+  console.info("[LOGOUT DEBUG]", "user=", logoutUser, "role=", logoutRole, "success=", !state.user && !state.token);
 }
 
 function bindEvents() {
@@ -13532,6 +14600,14 @@ function bindEvents() {
     [authForm, "submit", submitAuth, "auth form submit"],
     [loginTab, "click", () => setAuthView("login"), "login tab"],
     [registerTab, "click", () => setAuthView("register"), "register tab"],
+    [authEmail, "input", () => resetEmailVerificationState({ keepMessage: true }), "auth email change"],
+    [authSendCodeButton, "click", requestEmailVerificationCode, "send email verification code"],
+    [authVerificationCode, "input", syncEmailVerificationUi, "auth code input"],
+    [authVerifyCodeButton, "click", verifyEmailCode, "verify email code"],
+    [accountEmailInput, "input", () => resetAccountEmailChangeState({ keepMessage: true }), "account email input"],
+    [accountEmailSendCodeButton, "click", requestAccountEmailChangeCode, "account email send code"],
+    [accountEmailCodeInput, "input", syncAccountEmailChangeUi, "account email code input"],
+    [accountEmailForm, "submit", submitAccountEmailChange, "account email change submit"],
     [authPasswordToggle, "click", () => setAuthPasswordVisibility(authPassword?.type === "password"), "password visibility"],
     [authConfirmPasswordToggle, "click", () => setAuthConfirmPasswordVisibility(authConfirmPassword?.type === "password"), "confirm password visibility"],
     [showDashboardButton, "click", () => navigateTo("dashboard"), "dashboard nav"],
@@ -13548,6 +14624,7 @@ function bindEvents() {
     [newWindowButton, "click", toggleNewWindowMenu, "new window menu"],
     [topbarReportButton, "click", openReportModal, "topbar report"],
     [topbarRefreshButton, "click", () => { void refreshCurrentView(); }, "topbar refresh"],
+    [helpButton, "click", () => { void openTutorial(); }, "help walkthrough"],
     [topbarAccountButton, "click", () => navigateTo("account"), "topbar account"],
     [sidebarLauncherButton, "click", openLocationDrawer, "location browser launcher"],
     [sidebarDrawerBackdrop, "click", closeLocationDrawer, "location browser backdrop"],
@@ -13573,6 +14650,8 @@ function bindEvents() {
     [form, "submit", submitReport, "report form submit"],
     [imageInput, "change", () => selectFile(imageInput?.files?.[0] || null), "report image input"],
     [reportCameraInput, "change", () => selectFile(reportCameraInput?.files?.[0] || null), "report camera input"],
+    [claimRequiredInput, "change", updateReportClaimStatusUi, "claim required option"],
+    [noClaimRequiredInput, "change", updateReportClaimStatusUi, "no claim required option"],
     [reportCameraButton, "click", () => { void openReportCamera(); }, "report camera button"],
     [reportCameraCaptureButton, "click", async () => {
       try {
@@ -13754,11 +14833,6 @@ function bindEvents() {
     }
   }, { label: "language select" });
 
-  bindListener(reportDialog, "cancel", (event) => {
-    event.preventDefault();
-    closeReportModal();
-  }, { label: "report dialog cancel" });
-  bindListener(reportDialog, "close", resetReportModalState, { label: "report dialog close reset" });
   bindListener(claimDialog, "cancel", (event) => {
     event.preventDefault();
     closeClaimModal();
@@ -13791,6 +14865,7 @@ function bindEvents() {
       await loadAdminMonitor();
     }
   }, { label: "admin monitor tab" });
+  bindListener(adminSmtpTestForm, "submit", sendAdminSmtpTestEmail, { label: "admin smtp test submit" });
 
   bindListener(queryInput, "keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -13896,6 +14971,9 @@ function bindEvents() {
     notificationButton?.setAttribute("aria-expanded", "false");
   }, { label: "document notification dismiss" });
   bindListener(document, "keydown", (event) => {
+    if (event.altKey && String(event.key || "").toLowerCase() === "f") {
+      showFinderEasterEgg();
+    }
     if (event.key === "Escape") {
       closeNewWindowMenu();
       if (state.locationDrawerOpen) {
@@ -13936,6 +15014,7 @@ async function initUI() {
   initializeTheme();
   setLanguage(state.language);
   setAuthView("login");
+  await loadLoginBubbleImages();
   resetAdminMonitor();
   switchAdminTab("users");
   renderDefaultLayout();

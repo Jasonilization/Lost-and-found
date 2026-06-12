@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from datetime import datetime
 from unittest.mock import patch
 
 from sqlalchemy import create_engine
@@ -71,11 +72,18 @@ class AdminBootstrapTests(unittest.TestCase):
         self.assertTrue(backend_app.verify_password("studentpass", saved_user.password_hash))
 
     def test_registered_users_are_not_auto_admins(self) -> None:
+        email = "student1@students.example.edu"
+        record, _code = backend_app.create_email_verification_record(self.db, email=email, purpose="register")
+        record.consumed_at = datetime.utcnow()
+        self.db.commit()
+        self.db.refresh(record)
         payload = backend_app.RegisterPayload(
             username="student1",
+            email=email,
             password="strongpass",
             initials="student.one",
             class_of=2030,
+            email_verification_token=backend_app.create_email_verification_token(record),
         )
 
         response = backend_app.register(payload, db=self.db)

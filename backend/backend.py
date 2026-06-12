@@ -13,6 +13,7 @@ import re
 import requests
 import shutil
 import signal
+import smtplib
 import subprocess
 import sys
 import secrets
@@ -22,6 +23,8 @@ import time
 from collections import Counter
 from difflib import SequenceMatcher
 from datetime import date, datetime, timedelta
+from email.message import EmailMessage
+from email.utils import formataddr
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -56,7 +59,7 @@ except ImportError:  # pragma: no cover - Unix-only runtime helper
 
 from backend.ai_assistant import AI_MODEL, analyze_claim_match, analyze_evidence, analyze_report_abuse, generate_site_helper_package, model_size_label, normalize_language
 from backend.ai_moderation import classify_user_input
-from backend.database import AIInspectionLog, AuditLog, Claim, ClaimDraft, ItemQuery, LostFoundItem, MapRegion, Notification, QueryMessage, QuestionPost, QuestionReply, ReturnedItemDispute, SessionLocal, UploadObject, User, UserSession, init_db
+from backend.database import AIInspectionLog, AuditLog, Claim, ClaimDraft, EmailVerificationCode, ItemQuery, LostFoundItem, MapRegion, Notification, QueryMessage, QuestionPost, QuestionReply, ReturnedItemDispute, SessionLocal, SystemMigration, UploadObject, User, UserSession, init_db
 from backend.moderation import BLOCKED_WORDS, clean_text, validate_class_of, validate_initials, validate_text_input
 from backend.ollama_tagger import (
     build_search_text,
@@ -94,6 +97,11 @@ def env_int(name: str, default: int, *, minimum: int = 0) -> int:
         return max(minimum, default)
 
 
+USER_ROLE_STUDENT = "student"
+USER_ROLE_TEACHER = "teacher"
+USER_ROLES = {USER_ROLE_STUDENT, USER_ROLE_TEACHER}
+
+
 app = FastAPI(title="School Lost and Found", debug=False)
 
 CORS_ALLOWED_ORIGINS = env_csv("CORS_ALLOWED_ORIGINS", ["*"])
@@ -120,6 +128,7 @@ MAP_IMAGE_URL = "/uploads/map.png"
 MAP_IMAGE_SOURCE_WIDTH = 4484
 MAP_IMAGE_SOURCE_HEIGHT = 3036
 LOADING_VIDEO_URL = "/uploads/loading.mp4"
+LOADING_VIDEO_PATH = (UPLOAD_DIR / "loading.mp4").resolve()
 MAP_IMAGE_PATH = (UPLOAD_DIR / "map.png").resolve()
 UPLOAD_CACHE_DIR = Path(os.getenv("UPLOAD_CACHE_DIR", "/tmp/lostfound-uploads")).expanduser().resolve()
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -129,6 +138,34 @@ FRONTEND_API_BASE_URL = os.getenv("PUBLIC_API_BASE_URL", os.getenv("API_BASE_URL
 FRONTEND_API_DEBUG = env_flag("API_DEBUG_LOGGING", True)
 REQUEST_DEBUG_LOGGING = env_flag("REQUEST_DEBUG_LOGGING", True)
 REQUEST_DEBUG_PAYLOAD_MAX_CHARS = env_int("REQUEST_DEBUG_PAYLOAD_MAX_CHARS", 4000, minimum=0)
+PUBLIC_APP_URL = os.getenv("PUBLIC_APP_URL", "").strip().rstrip("/")
+SESSION_SECRET = os.getenv("SESSION_SECRET", "local-session-secret-change-me").strip()
+EMAIL_VERIFICATION_SECRET = os.getenv("EMAIL_VERIFICATION_SECRET", SESSION_SECRET).strip() or "local-email-secret-change-me"
+EMAIL_VERIFICATION_CODE_TTL_SECONDS = env_int("EMAIL_VERIFICATION_CODE_TTL_SECONDS", 600, minimum=60)
+EMAIL_VERIFICATION_TOKEN_TTL_SECONDS = env_int("EMAIL_VERIFICATION_TOKEN_TTL_SECONDS", 900, minimum=60)
+EMAIL_VERIFICATION_RESEND_SECONDS = env_int("EMAIL_VERIFICATION_RESEND_SECONDS", 60, minimum=15)
+EMAIL_VERIFICATION_MAX_ATTEMPTS = env_int("EMAIL_VERIFICATION_MAX_ATTEMPTS", 5, minimum=1)
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
+SMTP_PORT = env_int("SMTP_PORT", 587, minimum=1)
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "jasonilization@gmail.com").strip()
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "dkpvjysslqxpnpjl").strip()
+SMTP_USE_TLS = env_flag("SMTP_USE_TLS", True)
+SMTP_USE_SSL = env_flag("SMTP_USE_SSL", False)
+SMTP_FROM_ADDRESS = (
+    os.getenv("SMTP_FROM_ADDRESS", "jasonilization@gmail.com").strip()
+    or os.getenv("SMTP_FROM_EMAIL", "").strip()
+    or SMTP_USERNAME
+    or "lostfound@localhost"
+)
+SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "SHR-LOST-AND-FOUND").strip()
+SCHOOL_EMAIL_DOMAINS = [value.lower() for value in env_csv("SCHOOL_EMAIL_DOMAINS", [])]
+SMTP_LAST_RESULT: dict[str, Any] = {
+    "connected": False,
+    "last_error": "",
+    "last_success_at": None,
+    "last_failure_at": None,
+}
+SMTP_LAST_RESULT_LOCK = threading.Lock()
 
 if UPLOAD_STORAGE_BACKEND == "database":
     UPLOAD_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -803,6 +840,8 @@ RATE_LIMITS = {
     "chat": {"limit": 10, "window": timedelta(seconds=30)},
     "report": {"limit": 5, "window": timedelta(minutes=1)},
     "claim": {"limit": 3, "window": timedelta(minutes=1)},
+    "email_code": {"limit": 4, "window": timedelta(minutes=15)},
+    "email_verify": {"limit": 8, "window": timedelta(minutes=15)},
 }
 CLAIM_MATCH_MIN_SCORE = 35
 QUESTION_TYPES = {"seen_item", "has_this_been_found", "lost_not_listed"}
@@ -841,15 +880,42 @@ CPU_SAMPLE = {
 
 
 class RegisterPayload(BaseModel):
-    username: str
+    username: str = ""
+    email: str
     password: str
-    initials: str
-    class_of: int
+    initials: str = ""
+    class_of: Optional[int] = None
+    email_verification_token: str
 
 
 class LoginPayload(BaseModel):
-    username: str
+    email: str = ""
     password: str
+    username: str = ""
+
+
+class EmailVerificationRequestPayload(BaseModel):
+    email: str
+    purpose: str = "register"
+
+
+class EmailVerificationConfirmPayload(BaseModel):
+    email: str
+    code: str
+    purpose: str = "register"
+
+
+class EmailChangePayload(BaseModel):
+    email: str
+
+
+class EmailChangeConfirmPayload(BaseModel):
+    email: str
+    code: str
+
+
+class SmtpDiagnosticPayload(BaseModel):
+    email: str
 
 
 class ClaimPayload(BaseModel):
@@ -918,6 +984,7 @@ class ReportPayload(BaseModel):
     color: str = ""
     time_slot: str = "Unknown"
     event_date: Optional[date] = None
+    claim_required: bool = True
     image: Optional[ReportImagePayload] = None
 
 
@@ -941,8 +1008,16 @@ class AdminAbuseOverridePayload(BaseModel):
     notes: str = ""
 
 
+class ClaimRequirementPayload(BaseModel):
+    claim_required: bool
+
+
 class AdminClaimDecisionPayload(BaseModel):
     status: str
+
+
+class AdminUserRolePayload(BaseModel):
+    role: str
 
 
 class RoomUploadPayload(BaseModel):
@@ -981,6 +1056,7 @@ def on_startup() -> None:
     init_db()
     with SessionLocal() as db:
         ensure_admin_user(db)
+        run_existing_user_role_detection_migration(db)
 
 
 def get_db():
@@ -1030,6 +1106,17 @@ def serve_school_map() -> FileResponse:
     )
 
 
+@app.get(LOADING_VIDEO_URL)
+def serve_loading_video() -> FileResponse:
+    if not LOADING_VIDEO_PATH.is_file():
+        raise HTTPException(status_code=404, detail="Loading video not found.")
+    return FileResponse(
+        LOADING_VIDEO_PATH,
+        media_type="video/mp4",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 @app.get("/uploads/{upload_path:path}")
 def serve_database_upload(upload_path: str, db: Session = Depends(get_db)):
     if UPLOAD_STORAGE_BACKEND != "database":
@@ -1052,6 +1139,12 @@ def serve_database_upload(upload_path: str, db: Session = Depends(get_db)):
                 MAP_IMAGE_PATH,
                 media_type="image/png",
                 headers={"Cache-Control": "no-store, max-age=0"},
+            )
+        if normalized_path == LOADING_VIDEO_URL and LOADING_VIDEO_PATH.is_file():
+            return FileResponse(
+                LOADING_VIDEO_PATH,
+                media_type="video/mp4",
+                headers={"Cache-Control": "public, max-age=86400"},
             )
         raise HTTPException(status_code=404, detail="Upload not found.")
 
@@ -1123,6 +1216,10 @@ def bootstrap_admin_from_env(db: Session) -> Optional[User]:
         initials="admin.user",
         class_of=None,
         is_admin=True,
+        role=detect_role_from_identifiers(username, ""),
+        auto_detected_role=detect_role_from_identifiers(username, ""),
+        assigned_role="",
+        auth_provider="password",
     )
     db.add(user)
     db.commit()
@@ -1150,6 +1247,202 @@ def security_log(event: str, *, level: int = logging.INFO, **details: object) ->
         for key in sorted(details)
     )
     security_logger.log(level, "%s %s", event, payload)
+
+
+def normalize_user_role(value: str, *, default: str = USER_ROLE_TEACHER) -> str:
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in USER_ROLES else default
+
+
+def normalize_optional_user_role(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in USER_ROLES else ""
+
+
+def detect_role_from_identifiers(username: str = "", email: str = "") -> str:
+    combined = f"{username or ''} {email or ''}"
+    return USER_ROLE_STUDENT if re.search(r"\d", combined) else USER_ROLE_TEACHER
+
+
+def role_detection_log(user: Optional[User], *, detected_role: str, source: str) -> None:
+    security_logger.info(
+        "[ROLE DETECTION] user=%s email=%s detected_role=%s source=%s",
+        getattr(user, "username", "") or "",
+        getattr(user, "email", "") or "",
+        detected_role,
+        source,
+    )
+
+
+def detect_user_auto_role(user: User) -> str:
+    return detect_role_from_identifiers(user.username or "", user.email or "")
+
+
+def apply_user_role_detection(user: User, *, source: str, force: bool = False) -> bool:
+    detected_role = detect_user_auto_role(user)
+    role_detection_log(user, detected_role=detected_role, source=source)
+
+    current_auto_role = normalize_optional_user_role(getattr(user, "auto_detected_role", ""))
+    assigned_role = normalize_optional_user_role(getattr(user, "assigned_role", ""))
+    current_effective_role = normalize_optional_user_role(getattr(user, "role", ""))
+    effective_role = assigned_role or detected_role
+    changed = False
+
+    if force or current_auto_role != detected_role:
+        user.auto_detected_role = detected_role
+        changed = True
+    if getattr(user, "assigned_role", "") and not assigned_role:
+        user.assigned_role = ""
+        changed = True
+    if current_effective_role != effective_role:
+        user.role = effective_role
+        changed = True
+    return changed
+
+
+def ensure_user_role_assignment(db: Session, user: User, *, source: str, force: bool = False) -> User:
+    if apply_user_role_detection(user, source=source, force=force):
+        db.commit()
+        db.refresh(user)
+    return user
+
+
+def user_role(user: Optional[User]) -> str:
+    if not user:
+        return USER_ROLE_TEACHER
+    assigned_role = normalize_optional_user_role(getattr(user, "assigned_role", ""))
+    if assigned_role:
+        return assigned_role
+    auto_detected_role = normalize_optional_user_role(getattr(user, "auto_detected_role", ""))
+    if auto_detected_role:
+        return auto_detected_role
+    return normalize_user_role(getattr(user, "role", ""), default=USER_ROLE_TEACHER)
+
+
+def user_is_student(user: Optional[User]) -> bool:
+    return user_role(user) == USER_ROLE_STUDENT and not bool(user and user.is_admin)
+
+
+def user_can_create_content(user: Optional[User]) -> bool:
+    return bool(user and (user.is_admin or user_role(user) == USER_ROLE_TEACHER))
+
+
+def user_can_manage_item(user: Optional[User], item: LostFoundItem) -> bool:
+    if not user:
+        return False
+    if user.is_admin:
+        return True
+    return user_role(user) == USER_ROLE_TEACHER and item.submitted_by_user_id == user.id
+
+
+def ensure_can_manage_item(current_user: User, item: LostFoundItem) -> None:
+    if not user_can_manage_item(current_user, item):
+        raise HTTPException(status_code=403, detail="You can only manage content you created.")
+
+
+def normalize_email(email: str) -> str:
+    return str(email or "").strip().lower()
+
+
+def validate_email_syntax(email: str) -> str:
+    normalized = normalize_email(email)
+    if len(normalized) > 254 or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", normalized):
+        raise HTTPException(status_code=400, detail="Enter a valid email address.")
+    return normalized
+
+
+def validate_email_address(email: str) -> str:
+    normalized = validate_email_syntax(email)
+    if SCHOOL_EMAIL_DOMAINS and not email_matches_domain_rules(normalized, SCHOOL_EMAIL_DOMAINS):
+        raise HTTPException(status_code=403, detail="Use an approved school email address.")
+    return normalized
+
+
+def username_candidate_from_email(email: str) -> str:
+    local_part = normalize_email(email).split("@", 1)[0]
+    candidate = re.sub(r"[^a-z0-9_.-]+", "", local_part.lower()).strip("._-")
+    if len(candidate) < 3:
+        candidate = f"{candidate}user" if candidate else "user"
+    return candidate[:48]
+
+
+def unique_username_from_email(db: Session, email: str) -> str:
+    base = username_candidate_from_email(email)
+    candidate = base
+    suffix = 2
+    while db.query(User).filter(User.username == candidate).first():
+        suffix_text = f"-{suffix}"
+        candidate = f"{base[:48 - len(suffix_text)]}{suffix_text}"
+        suffix += 1
+    return candidate
+
+
+def default_initials_from_email(email: str) -> str:
+    local_part = normalize_email(email).split("@", 1)[0]
+    words = re.findall(r"[a-z]+", local_part.lower())
+    if len(words) >= 2:
+        return f"{words[0]}.{words[1]}"
+    if words and words[0] != "user":
+        return f"{words[0]}.user"
+    return "school.user"
+
+
+def default_class_of_from_email(email: str) -> int:
+    local_part = normalize_email(email).split("@", 1)[0]
+    for match in re.finditer(r"(?<!\d)(20)?([2-3]\d)(?!\d)", local_part):
+        year = int(match.group(0) if match.group(1) else f"20{match.group(2)}")
+        if 2025 <= year <= 2035:
+            return year
+    return 2030
+
+
+def user_email_is_verified(user: User) -> bool:
+    return bool(getattr(user, "email_verified", False) or user.email_verified_at)
+
+
+def email_domain(email: str) -> str:
+    normalized = normalize_email(email)
+    return normalized.split("@", 1)[1] if "@" in normalized else ""
+
+
+def domain_matches_rule(domain: str, rule: str) -> bool:
+    normalized_domain = str(domain or "").strip().lower()
+    normalized_rule = str(rule or "").strip().lower().lstrip("@")
+    if not normalized_domain or not normalized_rule:
+        return False
+    if normalized_rule.startswith("."):
+        return normalized_domain.endswith(normalized_rule)
+    return normalized_domain == normalized_rule or normalized_domain.endswith(f".{normalized_rule}")
+
+
+def email_matches_domain_rules(email: str, rules: list[str]) -> bool:
+    domain = email_domain(email)
+    return any(domain_matches_rule(domain, rule) for rule in rules)
+
+
+def email_is_school_account(email: str) -> bool:
+    if SCHOOL_EMAIL_DOMAINS:
+        return email_matches_domain_rules(email, SCHOOL_EMAIL_DOMAINS)
+    return False
+
+
+ROLE_DETECTION_MIGRATION_NAME = "role_detection_numeric_v1"
+
+
+def run_existing_user_role_detection_migration(db: Session) -> None:
+    existing = db.query(SystemMigration).filter(SystemMigration.name == ROLE_DETECTION_MIGRATION_NAME).first()
+    if existing:
+        return
+
+    users = db.query(User).order_by(User.id.asc()).all()
+    changed = 0
+    for user in users:
+        if apply_user_role_detection(user, source="existing_user", force=True):
+            changed += 1
+
+    db.add(SystemMigration(name=ROLE_DETECTION_MIGRATION_NAME, completed_at=datetime.utcnow()))
+    db.commit()
+    security_log("role_detection_migration_complete", migration=ROLE_DETECTION_MIGRATION_NAME, users=len(users), changed=changed)
 
 
 def raise_rate_limit(scope: str, *, retry_after_seconds: int) -> None:
@@ -1207,6 +1500,7 @@ def snapshot_item(item: LostFoundItem) -> dict[str, Any]:
         "category": item.category,
         "status": item.status,
         "claimed": bool(item.claimed),
+        "claim_required": bool(item.claim_required),
         "is_room_item": bool(item.is_room_item),
         "llava_analysis": item.llava_analysis,
         "ai_analysis_status": item.ai_analysis_status or AI_ANALYSIS_SUCCESS,
@@ -1274,10 +1568,18 @@ def snapshot_user(user: User) -> dict[str, Any]:
     return {
         "id": user.id,
         "username": user.username,
+        "email": user.email or "",
+        "email_verified": user_email_is_verified(user),
+        "email_verified_at": user.email_verified_at.isoformat() if user.email_verified_at else None,
+        "role": user_role(user),
+        "auto_detected_role": normalize_optional_user_role(user.auto_detected_role) or USER_ROLE_TEACHER,
+        "assigned_role": normalize_optional_user_role(user.assigned_role),
+        "auth_provider": user.auth_provider or "password",
         "initials": user.initials,
         "class_of": user.class_of,
         "is_admin": bool(user.is_admin),
         "preferred_language": normalize_language(user.preferred_language),
+        "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
         "created_at": user.created_at.isoformat() if user.created_at else None,
     }
 
@@ -1946,6 +2248,353 @@ def require_admin_user(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 
+def require_teacher_user(current_user: User = Depends(get_current_user)) -> User:
+    if not user_can_create_content(current_user):
+        raise HTTPException(status_code=403, detail="Teacher role required.")
+    return current_user
+
+
+def b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def b64url_decode(value: str) -> bytes:
+    padded = value + "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode(padded.encode("ascii"))
+
+
+def normalize_verification_purpose(purpose: str) -> str:
+    normalized = str(purpose or "").strip().lower()
+    if normalized not in {"register", "email_change"}:
+        raise HTTPException(status_code=400, detail="Unsupported verification purpose.")
+    return normalized
+
+
+def enforce_subject_rate_limit(scope: str, subject: str, *, route: str = "") -> None:
+    config = RATE_LIMITS[scope]
+    now = datetime.utcnow()
+    key = f"{scope}:{subject}"
+    with REQUEST_TIMESTAMPS_LOCK:
+        timestamps = REQUEST_TIMESTAMPS.setdefault(key, [])
+        cutoff = now - config["window"]
+        timestamps[:] = [timestamp for timestamp in timestamps if timestamp >= cutoff]
+        if len(timestamps) >= config["limit"]:
+            retry_after_seconds = max(
+                1,
+                int((timestamps[0] + config["window"] - now).total_seconds()) + 1,
+            )
+            security_log(
+                "rate_limit_blocked",
+                level=logging.WARNING,
+                scope=scope,
+                subject=subject,
+                route=route,
+                limit=config["limit"],
+                retry_after=retry_after_seconds,
+            )
+            raise_rate_limit(scope, retry_after_seconds=retry_after_seconds)
+        timestamps.append(now)
+
+
+def email_verification_secret() -> bytes:
+    return EMAIL_VERIFICATION_SECRET.encode("utf-8")
+
+
+def hash_email_code(email: str, purpose: str, code: str, salt: str) -> str:
+    payload = f"{normalize_email(email)}|{purpose}|{salt}|{code}".encode("utf-8")
+    return hmac.new(email_verification_secret(), payload, hashlib.sha256).hexdigest()
+
+
+def email_code_digest(email: str, purpose: str, code: str) -> str:
+    salt = secrets.token_hex(12)
+    return f"{salt}${hash_email_code(email, purpose, code, salt)}"
+
+
+def verify_email_code_digest(email: str, purpose: str, code: str, code_hash: str) -> bool:
+    try:
+        salt, stored = str(code_hash or "").split("$", 1)
+    except ValueError:
+        return False
+    candidate = hash_email_code(email, purpose, code, salt)
+    return hmac.compare_digest(candidate, stored)
+
+
+def create_email_verification_record(
+    db: Session,
+    *,
+    email: str,
+    purpose: str,
+    request: Optional[Request] = None,
+) -> tuple[EmailVerificationCode, str]:
+    now = datetime.utcnow()
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    record = EmailVerificationCode(
+        email=email,
+        purpose=purpose,
+        code_hash=email_code_digest(email, purpose, code),
+        expires_at=now + timedelta(seconds=EMAIL_VERIFICATION_CODE_TTL_SECONDS),
+        attempts=0,
+        request_ip=get_client_ip(request) if request else "",
+        user_agent=str(request.headers.get("user-agent", ""))[:240] if request else "",
+        created_at=now,
+        last_sent_at=now,
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return record, code
+
+
+def smtp_sender_header() -> str:
+    return formataddr((SMTP_FROM_NAME, SMTP_FROM_ADDRESS)) if SMTP_FROM_NAME else SMTP_FROM_ADDRESS
+
+
+def record_smtp_result(*, connected: bool, error: str = "") -> None:
+    now = datetime.utcnow().isoformat()
+    with SMTP_LAST_RESULT_LOCK:
+        SMTP_LAST_RESULT["connected"] = connected
+        SMTP_LAST_RESULT["last_error"] = error
+        if connected:
+            SMTP_LAST_RESULT["last_success_at"] = now
+        else:
+            SMTP_LAST_RESULT["last_failure_at"] = now
+
+
+def smtp_unconfigured_message() -> str:
+    return "Email delivery is not configured. Verification codes are currently being written to the development security log."
+
+
+def smtp_config_status() -> dict[str, Any]:
+    with SMTP_LAST_RESULT_LOCK:
+        last_result = dict(SMTP_LAST_RESULT)
+    configured = bool(SMTP_HOST)
+    connected = bool(configured and last_result.get("connected"))
+    return {
+        "configured": configured,
+        "connected": connected,
+        "status": "connected" if connected else "not_connected",
+        "host": SMTP_HOST,
+        "port": SMTP_PORT,
+        "username_configured": bool(SMTP_USERNAME),
+        "password_configured": bool(SMTP_PASSWORD),
+        "from_address": SMTP_FROM_ADDRESS,
+        "from_name": SMTP_FROM_NAME,
+        "sender": smtp_sender_header(),
+        "use_tls": SMTP_USE_TLS,
+        "use_ssl": SMTP_USE_SSL,
+        "delivery_mode": "real-email" if configured else "development-log",
+        "last_error": str(last_result.get("last_error") or ("" if configured else smtp_unconfigured_message())),
+        "last_success_at": last_result.get("last_success_at"),
+        "last_failure_at": last_result.get("last_failure_at"),
+    }
+
+
+def send_smtp_email(to_email: str, subject: str, body: str) -> None:
+    if not SMTP_HOST:
+        raise RuntimeError("SMTP_HOST is not configured.")
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = smtp_sender_header()
+    message["To"] = to_email
+    message.set_content(body)
+
+    if SMTP_USE_SSL:
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=10) as smtp:
+            smtp.ehlo()
+            if SMTP_USERNAME or SMTP_PASSWORD:
+                smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
+            smtp.send_message(message)
+        return
+
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as smtp:
+        smtp.ehlo()
+        if SMTP_USE_TLS:
+            smtp.starttls()
+            smtp.ehlo()
+        if SMTP_USERNAME or SMTP_PASSWORD:
+            smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
+        smtp.send_message(message)
+
+
+def send_email_verification_code(email: str, code: str, *, purpose: str) -> bool:
+    subject = "Your Lost and Found verification code"
+    body = (
+        "Use this verification code to continue with the school Lost and Found system:\n\n"
+        f"{code}\n\n"
+        f"This code expires in {EMAIL_VERIFICATION_CODE_TTL_SECONDS // 60} minute(s)."
+    )
+    if not SMTP_HOST:
+        security_log("email_verification_code_dev", email=email, purpose=purpose, code=code)
+        return False
+
+    try:
+        send_smtp_email(email, subject, body)
+    except (RuntimeError, OSError, smtplib.SMTPException) as exc:
+        error_message = str(exc)
+        record_smtp_result(connected=False, error=error_message)
+        security_log(
+            "email_verification_send_failed",
+            level=logging.WARNING,
+            email=email,
+            purpose=purpose,
+            reason=error_message,
+            smtp_host=SMTP_HOST,
+            smtp_port=SMTP_PORT,
+            smtp_use_tls=SMTP_USE_TLS,
+            smtp_use_ssl=SMTP_USE_SSL,
+            smtp_from_address=SMTP_FROM_ADDRESS,
+            smtp_from_name=SMTP_FROM_NAME,
+        )
+        raise HTTPException(status_code=502, detail="Could not send verification email right now.") from exc
+
+    record_smtp_result(connected=True)
+    security_log("email_verification_code_sent", email=email, purpose=purpose)
+    return True
+
+
+def run_smtp_diagnostic_email(recipient: str) -> dict[str, Any]:
+    config = smtp_config_status()
+    subject = "Lost and Found SMTP diagnostic"
+    body = (
+        "This is a diagnostic email from the school Lost and Found system.\n\n"
+        "If you received it, the SMTP provider accepted mail from this application."
+    )
+    if not SMTP_HOST:
+        error_message = smtp_unconfigured_message()
+        record_smtp_result(connected=False, error=error_message)
+        security_log("smtp_test_failed", level=logging.WARNING, recipient=recipient, error=error_message, **config)
+        return {
+            "success": False,
+            "smtp_connection": False,
+            "smtp_delivery_accepted": False,
+            "message": error_message,
+            "error": error_message,
+            "config": smtp_config_status(),
+        }
+
+    try:
+        send_smtp_email(recipient, subject, body)
+    except (RuntimeError, OSError, smtplib.SMTPException) as exc:
+        error_message = str(exc)
+        record_smtp_result(connected=False, error=error_message)
+        security_log("smtp_test_failed", level=logging.WARNING, recipient=recipient, error=error_message, **config)
+        return {
+            "success": False,
+            "smtp_connection": False,
+            "smtp_delivery_accepted": False,
+            "message": "SMTP diagnostic failed.",
+            "error": error_message,
+            "config": smtp_config_status(),
+        }
+
+    record_smtp_result(connected=True)
+    security_log("smtp_test_success", recipient=recipient, **config)
+    return {
+        "success": True,
+        "smtp_connection": True,
+        "smtp_delivery_accepted": True,
+        "message": "SMTP diagnostic email accepted by the mail server.",
+        "error": "",
+        "config": smtp_config_status(),
+    }
+
+
+def latest_pending_email_code(db: Session, *, email: str, purpose: str) -> Optional[EmailVerificationCode]:
+    now = datetime.utcnow()
+    return (
+        db.query(EmailVerificationCode)
+        .filter(
+            EmailVerificationCode.email == email,
+            EmailVerificationCode.purpose == purpose,
+            EmailVerificationCode.consumed_at.is_(None),
+            EmailVerificationCode.expires_at > now,
+        )
+        .order_by(EmailVerificationCode.created_at.desc())
+        .first()
+    )
+
+
+def consume_email_verification_code(
+    db: Session,
+    *,
+    email: str,
+    purpose: str,
+    code: str,
+) -> tuple[EmailVerificationCode, datetime]:
+    cleaned_code = re.sub(r"\D+", "", str(code or ""))
+    if not re.fullmatch(r"\d{6}", cleaned_code):
+        raise HTTPException(status_code=400, detail="Enter the 6-digit verification code.")
+
+    record = latest_pending_email_code(db, email=email, purpose=purpose)
+    if not record:
+        raise HTTPException(status_code=400, detail="Verification code expired. Request a new code.")
+    if int(record.attempts or 0) >= EMAIL_VERIFICATION_MAX_ATTEMPTS:
+        raise HTTPException(status_code=429, detail="Too many incorrect code attempts. Request a new code.")
+
+    record.attempts = int(record.attempts or 0) + 1
+    if not verify_email_code_digest(email, purpose, cleaned_code, record.code_hash):
+        db.commit()
+        raise HTTPException(status_code=400, detail="Verification code is incorrect.")
+
+    now = datetime.utcnow()
+    record.consumed_at = now
+    return record, now
+
+
+def create_email_verification_token(record: EmailVerificationCode) -> str:
+    expires_at = datetime.utcnow() + timedelta(seconds=EMAIL_VERIFICATION_TOKEN_TTL_SECONDS)
+    payload = {
+        "email": record.email,
+        "purpose": record.purpose,
+        "verification_id": record.id,
+        "exp": int(expires_at.timestamp()),
+    }
+    encoded_payload = b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    signature = hmac.new(email_verification_secret(), encoded_payload.encode("ascii"), hashlib.sha256).digest()
+    return f"{encoded_payload}.{b64url_encode(signature)}"
+
+
+def parse_email_verification_token(
+    db: Session,
+    token: str,
+    *,
+    expected_email: str,
+    expected_purpose: str,
+) -> EmailVerificationCode:
+    try:
+        encoded_payload, encoded_signature = str(token or "").split(".", 1)
+        expected = hmac.new(email_verification_secret(), encoded_payload.encode("ascii"), hashlib.sha256).digest()
+        actual = b64url_decode(encoded_signature)
+        if not hmac.compare_digest(expected, actual):
+            raise ValueError("signature mismatch")
+        payload = json.loads(b64url_decode(encoded_payload).decode("utf-8"))
+    except (ValueError, json.JSONDecodeError, binascii.Error, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid email verification token.") from exc
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid email verification token.")
+    email = normalize_email(str(payload.get("email") or ""))
+    purpose = normalize_verification_purpose(str(payload.get("purpose") or ""))
+    exp = int(payload.get("exp") or 0)
+    verification_id = int(payload.get("verification_id") or 0)
+    if email != expected_email or purpose != expected_purpose:
+        raise HTTPException(status_code=400, detail="Email verification does not match this account action.")
+    if exp <= 0 or datetime.utcnow().timestamp() > exp:
+        raise HTTPException(status_code=400, detail="Email verification expired. Request a new code.")
+
+    record = db.query(EmailVerificationCode).filter(EmailVerificationCode.id == verification_id).first()
+    if not record or record.email != email or record.purpose != purpose or not record.consumed_at:
+        raise HTTPException(status_code=400, detail="Email verification has not been completed.")
+    return record
+
+
+def issue_user_session(db: Session, user: User) -> str:
+    token = issue_session_token()
+    db.add(UserSession(user_id=user.id, token=token))
+    db.commit()
+    return token
+
+
 def decode_image_payload(image: Optional[ReportImagePayload], *, upload_subdir: Optional[str] = None) -> Optional[str]:
     if not image or not image.data.strip():
         return None
@@ -2609,6 +3258,9 @@ def moderate_claim_submission(
 
 
 def ensure_submission_allowed(db: Session, current_user: User) -> None:
+    if not user_can_create_content(current_user):
+        raise HTTPException(status_code=403, detail="Student accounts cannot create reports.")
+
     if current_user.is_admin:
         return
 
@@ -2926,6 +3578,7 @@ def serialize_item(item: LostFoundItem, reporter: Optional[User]) -> dict:
         "reporter_name": item.reporter_name,
         "reporter_identity": user_identity(reporter),
         "reporter_avatar_url": safe_user_avatar_url(reporter),
+        "submitted_by_user_id": item.submitted_by_user_id,
         "student_id": item.student_id,
         "contact_info": item.contact_info,
         "title": item.title,
@@ -2938,6 +3591,7 @@ def serialize_item(item: LostFoundItem, reporter: Optional[User]) -> dict:
         "event_date": item.event_date.isoformat() if item.event_date else None,
         "status": item.status,
         "claimed": bool(item.claimed),
+        "claim_required": bool(item.claim_required),
         "is_room_item": bool(item.is_room_item),
         "room_label": item.room_label or "",
         "room_recorded_at": item.room_recorded_at.isoformat() if item.room_recorded_at else None,
@@ -3326,12 +3980,22 @@ def serialize_user(user: User) -> dict:
     return {
         "id": user.id,
         "username": user.username,
+        "email": user.email or "",
+        "email_verified": user_email_is_verified(user),
+        "email_verified_at": user.email_verified_at.isoformat() if user.email_verified_at else None,
+        "role": user_role(user),
+        "auto_detected_role": normalize_optional_user_role(user.auto_detected_role) or USER_ROLE_TEACHER,
+        "assigned_role": normalize_optional_user_role(user.assigned_role),
+        "role_source": "assigned" if normalize_optional_user_role(user.assigned_role) else "auto",
+        "school_account": email_is_school_account(user.email or ""),
+        "auth_provider": user.auth_provider or "password",
         "initials": user.initials,
         "class_of": user.class_of,
         "identity": user_identity(user),
         "is_admin": bool(user.is_admin),
         "avatar_url": safe_user_avatar_url(user),
         "preferred_language": normalize_language(user.preferred_language),
+        "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
         "created_at": user.created_at.isoformat() if user.created_at else None,
     }
 
@@ -3410,11 +4074,21 @@ def serialize_admin_user(db: Session, user: User) -> dict:
     return {
         "id": user.id,
         "username": user.username,
+        "email": user.email or "",
+        "email_verified": user_email_is_verified(user),
+        "role": user_role(user),
+        "auto_detected_role": normalize_optional_user_role(user.auto_detected_role) or USER_ROLE_TEACHER,
+        "assigned_role": normalize_optional_user_role(user.assigned_role),
+        "role_source": "assigned" if normalize_optional_user_role(user.assigned_role) else "auto",
+        "email_verified_at": user.email_verified_at.isoformat() if user.email_verified_at else None,
+        "school_account": email_is_school_account(user.email or ""),
+        "auth_provider": user.auth_provider or "password",
         "initials": user.initials,
         "class_of": user.class_of,
         "identity": user_identity(user),
         "is_admin": bool(user.is_admin),
         "avatar_url": safe_user_avatar_url(user),
+        "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "trust_score": int(trust["score"]),
         "trust_factors": trust["factors"],
@@ -4488,12 +5162,109 @@ def admin_stop_ollama(current_user: User = Depends(require_admin_user)) -> dict[
     }
 
 
+@app.get("/auth/login-images")
+def login_report_images(db: Session = Depends(get_db)) -> dict[str, Any]:
+    items = (
+        db.query(LostFoundItem)
+        .filter(
+            LostFoundItem.deleted_at.is_(None),
+            LostFoundItem.image_path.is_not(None),
+            LostFoundItem.image_path != "",
+        )
+        .order_by(LostFoundItem.created_at.desc(), LostFoundItem.id.desc())
+        .limit(5)
+        .all()
+    )
+    return {
+        "items": [
+            {
+                "id": item.id,
+                "title": item.title,
+                "image_url": item.image_path,
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+            }
+            for item in items
+            if item.image_path
+        ],
+    }
+
+
+@app.post("/auth/email/request-code")
+def request_email_verification_code(
+    payload: EmailVerificationRequestPayload,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    email = validate_email_address(payload.email)
+    purpose = normalize_verification_purpose(payload.purpose)
+    if purpose != "register":
+        raise HTTPException(status_code=400, detail="Use the account email-change flow for this verification purpose.")
+    enforce_rate_limit("email_code", request=request, current_user=None)
+    enforce_subject_rate_limit("email_code", f"email:{email}", route=request.url.path)
+
+    if db.query(User).filter(User.email == email).first():
+        raise HTTPException(status_code=409, detail="That email is already connected to an account.")
+
+    pending = latest_pending_email_code(db, email=email, purpose=purpose)
+    if pending and pending.last_sent_at:
+        retry_after = int((pending.last_sent_at + timedelta(seconds=EMAIL_VERIFICATION_RESEND_SECONDS) - datetime.utcnow()).total_seconds())
+        if retry_after > 0:
+            raise_rate_limit("email verification code", retry_after_seconds=retry_after)
+
+    record, code = create_email_verification_record(db, email=email, purpose=purpose, request=request)
+    sent = send_email_verification_code(email, code, purpose=purpose)
+    return {
+        "message": "Verification code sent." if sent else smtp_unconfigured_message(),
+        "email": email,
+        "purpose": purpose,
+        "expires_in": EMAIL_VERIFICATION_CODE_TTL_SECONDS,
+        "resend_after": EMAIL_VERIFICATION_RESEND_SECONDS,
+        "delivery": "real-email" if sent else "development-log",
+        "verification_id": record.id,
+    }
+
+
+@app.post("/auth/email/verify-code")
+def verify_email_verification_code(
+    payload: EmailVerificationConfirmPayload,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    email = validate_email_address(payload.email)
+    purpose = normalize_verification_purpose(payload.purpose)
+    if purpose != "register":
+        raise HTTPException(status_code=400, detail="Use the account email-change flow for this verification purpose.")
+
+    enforce_rate_limit("email_verify", request=request, current_user=None)
+    enforce_subject_rate_limit("email_verify", f"email:{email}", route=request.url.path)
+    record, now = consume_email_verification_code(db, email=email, purpose=purpose, code=payload.code)
+    user = db.query(User).filter(User.email == email).first()
+    if user and not user_email_is_verified(user):
+        user.email_verified = True
+        user.email_verified_at = now
+    db.commit()
+    db.refresh(record)
+    if user:
+        db.refresh(user)
+
+    return {
+        "message": "Email verified.",
+        "email": email,
+        "purpose": purpose,
+        "verification_token": create_email_verification_token(record),
+        "verified_at": now.isoformat(),
+        "token_expires_in": EMAIL_VERIFICATION_TOKEN_TTL_SECONDS,
+    }
+
+
 @app.post("/register")
 def register(payload: RegisterPayload, db: Session = Depends(get_db)) -> dict:
-    username = payload.username.strip()
+    email = validate_email_address(payload.email)
+    requested_username = str(payload.username or "").strip()
+    username = requested_username or unique_username_from_email(db, email)
     password = payload.password.strip()
-    initials = validate_initials(payload.initials)
-    class_of = validate_class_of(payload.class_of)
+    initials = validate_initials(payload.initials or default_initials_from_email(email))
+    class_of = validate_class_of(payload.class_of if payload.class_of is not None else default_class_of_from_email(email))
 
     if len(username) < 3:
         raise HTTPException(status_code=400, detail="Username must be at least 3 characters.")
@@ -4501,41 +5272,152 @@ def register(payload: RegisterPayload, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
     if db.query(User).filter(User.username == username).first():
         raise HTTPException(status_code=409, detail="Username already exists.")
+    if db.query(User).filter(User.email == email).first():
+        raise HTTPException(status_code=409, detail="Email already exists.")
 
+    parse_email_verification_token(
+        db,
+        payload.email_verification_token,
+        expected_email=email,
+        expected_purpose="register",
+    )
+
+    detected_role = detect_role_from_identifiers(username, email)
     user = User(
         username=username,
         password_hash=hash_password(password),
+        email=email,
+        email_verified=True,
+        email_verified_at=datetime.utcnow(),
         initials=initials,
         class_of=class_of,
         is_admin=False,
+        role=detected_role,
+        auto_detected_role=detected_role,
+        assigned_role="",
+        auth_provider="password",
+        last_login_at=datetime.utcnow(),
     )
     db.add(user)
     db.commit()
     db.refresh(user)
+    role_detection_log(user, detected_role=detected_role, source="manual_signup")
 
-    token = issue_session_token()
-    db.add(UserSession(user_id=user.id, token=token))
-    db.commit()
+    token = issue_user_session(db, user)
 
     return {"token": token, "user": serialize_user(user)}
 
 
 @app.post("/login")
 def login(payload: LoginPayload, db: Session = Depends(get_db)) -> dict:
-    username = payload.username.strip()
-    user = db.query(User).filter(User.username == username).first()
+    email = normalize_email(payload.email)
+    username = str(payload.username or "").strip()
+    user = None
+    if email:
+        user = db.query(User).filter(User.email == email).first()
+    elif username:
+        user = db.query(User).filter(User.username == username).first()
     if not user or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid username or password.")
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
 
-    token = issue_session_token()
-    db.add(UserSession(user_id=user.id, token=token))
-    db.commit()
+    if user.email_verified_at and not getattr(user, "email_verified", False):
+        user.email_verified = True
+    user.last_login_at = datetime.utcnow()
+    ensure_user_role_assignment(db, user, source="existing_user")
+    if user.last_login_at:
+        db.commit()
+        db.refresh(user)
+    token = issue_user_session(db, user)
     return {"token": token, "user": serialize_user(user)}
 
 
 @app.get("/session")
 def session_status(current_user: User = Depends(get_current_user)) -> dict:
     return {"user": serialize_user(current_user)}
+
+
+@app.post("/account/email/request-code")
+def request_account_email_change_code(
+    payload: EmailChangePayload,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    email = validate_email_address(payload.email)
+    current_email = normalize_email(current_user.email or "")
+    if email == current_email and user_email_is_verified(current_user):
+        raise HTTPException(status_code=400, detail="This email is already verified on your account.")
+    existing = db.query(User).filter(User.email == email, User.id != current_user.id).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="That email is already connected to an account.")
+
+    purpose = "email_change"
+    enforce_rate_limit("email_code", request=request, current_user=current_user)
+    enforce_subject_rate_limit("email_code", f"user:{current_user.id}:email:{email}", route=request.url.path)
+    pending = latest_pending_email_code(db, email=email, purpose=purpose)
+    if pending and pending.last_sent_at:
+        retry_after = int((pending.last_sent_at + timedelta(seconds=EMAIL_VERIFICATION_RESEND_SECONDS) - datetime.utcnow()).total_seconds())
+        if retry_after > 0:
+            raise_rate_limit("email verification code", retry_after_seconds=retry_after)
+
+    record, code = create_email_verification_record(db, email=email, purpose=purpose, request=request)
+    sent = send_email_verification_code(email, code, purpose=purpose)
+    return {
+        "message": "Verification code sent." if sent else smtp_unconfigured_message(),
+        "email": email,
+        "purpose": purpose,
+        "expires_in": EMAIL_VERIFICATION_CODE_TTL_SECONDS,
+        "resend_after": EMAIL_VERIFICATION_RESEND_SECONDS,
+        "delivery": "real-email" if sent else "development-log",
+        "verification_id": record.id,
+    }
+
+
+@app.post("/account/email/confirm")
+def confirm_account_email_change(
+    payload: EmailChangeConfirmPayload,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    email = validate_email_address(payload.email)
+    existing = db.query(User).filter(User.email == email, User.id != current_user.id).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="That email is already connected to an account.")
+
+    purpose = "email_change"
+    enforce_rate_limit("email_verify", request=request, current_user=current_user)
+    enforce_subject_rate_limit("email_verify", f"user:{current_user.id}:email:{email}", route=request.url.path)
+    _record, now = consume_email_verification_code(db, email=email, purpose=purpose, code=payload.code)
+    old_email = current_user.email or ""
+    current_user.email = email
+    current_user.email_verified = True
+    current_user.email_verified_at = now
+    db.commit()
+    db.refresh(current_user)
+    security_log("account_email_changed", user_id=current_user.id, old_email=old_email, new_email=email)
+    return {
+        "message": "Email updated.",
+        "email": email,
+        "verified_at": now.isoformat(),
+        "user": serialize_user(current_user),
+    }
+
+
+@app.post("/debug/smtp-test")
+def debug_smtp_test(
+    payload: SmtpDiagnosticPayload,
+    current_user: User = Depends(require_admin_user),
+) -> dict[str, Any]:
+    del current_user
+    recipient = validate_email_syntax(payload.email)
+    return run_smtp_diagnostic_email(recipient)
+
+
+@app.get("/debug/smtp-status")
+def debug_smtp_status(current_user: User = Depends(require_admin_user)) -> dict[str, Any]:
+    del current_user
+    return smtp_config_status()
 
 
 @app.post("/account/preferences/language")
@@ -4926,17 +5808,29 @@ def llava_analysis_payload(
             "moderation": inspection.get("moderation", ""),
             "item_description": clean_ai_text(inspection.get("item_description") or inspection.get("object_description")),
             "object_type": clean_ai_text(inspection.get("object_type") or inspection.get("item_classification")),
+            "item_subtype": clean_ai_text(inspection.get("item_subtype")),
             "colours": clean_ai_list(inspection.get("colours")),
+            "materials": clean_ai_list(inspection.get("materials")),
+            "brand": clean_ai_text(inspection.get("brand")),
+            "visible_text": clean_ai_list(inspection.get("visible_text")),
             "notable_markings": clean_ai_list(inspection.get("notable_markings")),
+            "distinguishing_features": clean_ai_list(inspection.get("distinguishing_features") or inspection.get("distinctive_features")),
+            "condition": clean_ai_text(inspection.get("condition")),
+            "shape": clean_ai_text(inspection.get("shape")),
+            "size_estimate": clean_ai_text(inspection.get("size_estimate")),
             "possible_category": clean_ai_text(inspection.get("possible_category")),
             "confidence_score": clean_ai_confidence(inspection.get("confidence_score")),
             "object_description": clean_ai_text(inspection.get("object_description")),
             "item_classification": clean_ai_text(inspection.get("item_classification")),
             "scene_context": clean_ai_text(inspection.get("scene_context")),
+            "uncertainty_notes": clean_ai_text(inspection.get("uncertainty_notes")),
+            "safety_notes": clean_ai_text(inspection.get("safety_notes")),
             "tags": inspection.get("tags", []),
             "tag_validation_error": inspection.get("tag_validation_error", ""),
             "tag_validation_warnings": inspection.get("tag_validation_warnings", []),
             "validation_strength": inspection.get("validation_strength", ""),
+            "full_json_response": inspection.get("full_json_response") or inspection.get("parsed_json") or {},
+            "parsed_json": inspection.get("parsed_json") or inspection.get("full_json_response") or {},
             "raw": raw_output,
             "output_text": raw_output,
             "model": clean_ai_text(inspection.get("model")),
@@ -4959,6 +5853,7 @@ def llava_analysis_payload(
         "llava_called": payload.get("llava_called", False),
         "llava_attempted": payload.get("llava_attempted", True),
         "model": payload.get("model", ""),
+        "full_json_response_present": bool(payload.get("full_json_response")),
     }
     return payload
 
@@ -6061,10 +6956,11 @@ def list_recently_returned_items(
     }
 
 
+@app.post("/room/items")
 @app.post("/admin/room/items")
 def admin_upload_room_items(
     payload: RoomUploadPayload,
-    current_user: User = Depends(require_admin_user),
+    current_user: User = Depends(require_teacher_user),
     db: Session = Depends(get_db),
 ) -> dict:
     if not payload.images:
@@ -6185,12 +7081,13 @@ def admin_upload_room_items(
             tag_source=ai_result.get("tag_source", "fallback-text"),
             submitted_by_user_id=current_user.id,
             claimed=False,
+            claim_required=True,
             is_room_item=True,
             room_label=cleaned_label,
             room_recorded_at=datetime.utcnow(),
-            evidence_validity="Admin uploaded",
+            evidence_validity="Teacher uploaded",
             review_status="approved",
-            review_notes="Admin uploaded directly to Lost & Found Room.",
+            review_notes="Teacher uploaded directly to Lost & Found Room.",
         )
         item.evidence_images = [image_path] if image_path else []
         db.add(item)
@@ -6224,7 +7121,7 @@ async def report_item(
     payload: ReportPayload,
     request: Request,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_teacher_user),
     db: Session = Depends(get_db),
 ) -> dict:
     del background_tasks
@@ -6446,6 +7343,7 @@ async def report_item(
         tag_source=ai_result.get("tag_source", "fallback-text"),
         submitted_by_user_id=current_user.id,
         claimed=False,
+        claim_required=bool(payload.claim_required),
     )
     item.evidence_images = [image_path] if image_path else []
     db.add(item)
@@ -6573,13 +7471,14 @@ def list_items(
 def update_item_status(
     item_id: int,
     status: str = Form(...),
-    current_user: User = Depends(require_admin_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     if status not in STATUSES:
         raise HTTPException(status_code=400, detail="Invalid status.")
 
     item = fetch_item_or_404(db, item_id)
+    ensure_can_manage_item(current_user, item)
     before_state = snapshot_item(item)
     item.status = status
     item.claimed = status == "Claimed"
@@ -6598,6 +7497,39 @@ def update_item_status(
     log_admin_action(current_user, "update-item-status", item=item, note=f"item_status={item.status}")
     reporter = db.query(User).filter(User.id == item.submitted_by_user_id).first() if item.submitted_by_user_id else None
     return {"message": "Status updated.", "item": serialize_item(item, reporter)}
+
+
+@app.patch("/items/{item_id}/claim-requirement")
+def update_item_claim_requirement(
+    item_id: int,
+    payload: ClaimRequirementPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    item = fetch_item_or_404(db, item_id)
+    ensure_can_manage_item(current_user, item)
+    before_state = snapshot_item(item)
+    item.claim_required = bool(payload.claim_required)
+    create_audit_log(
+        db,
+        user_id=current_user.id,
+        action_type="report_edited",
+        entity_type="report",
+        entity_id=item.id,
+        before_state=before_state,
+        after_state=snapshot_item(item),
+        metadata={"subaction": "claim_requirement_updated", "claim_required": bool(item.claim_required)},
+    )
+    db.commit()
+    db.refresh(item)
+    log_admin_action(
+        current_user,
+        "update-claim-requirement",
+        item=item,
+        note=f"claim_required={bool(item.claim_required)}",
+    )
+    reporter = db.query(User).filter(User.id == item.submitted_by_user_id).first() if item.submitted_by_user_id else None
+    return {"message": "Claim requirement updated.", "item": serialize_item(item, reporter)}
 
 
 @app.post("/items/{item_id}/claim")
@@ -6619,6 +7551,8 @@ def claim_item(
     item = fetch_item_or_404(db, item_id)
     if item.claimed:
         raise HTTPException(status_code=400, detail="This item is already marked as claimed.")
+    if not item.claim_required:
+        raise HTTPException(status_code=400, detail="This report allows direct collection and does not require a claim.")
 
     existing_claim = db.query(Claim).filter(Claim.item_id == item_id, Claim.user_id == current_user.id).first()
     if existing_claim:
@@ -6735,6 +7669,8 @@ def create_claim_draft(
     item = fetch_item_or_404(db, payload.item_id) if payload.item_id else None
     if item and item.claimed:
         raise HTTPException(status_code=400, detail="This item is already marked as claimed.")
+    if item and not item.claim_required:
+        raise HTTPException(status_code=400, detail="This report allows direct collection and does not require a claim.")
 
     title_source = payload.title.strip() or (item.title if item else "")
     title = clean_text(title_source)[:100]
@@ -7035,6 +7971,59 @@ def admin_demote_user(
     db.refresh(user)
     log_admin_action(current_user, "demote-user", note=f"target_user_id={user.id}")
     return {"message": "Admin rights removed.", "user": serialize_admin_user(db, user)}
+
+
+@app.post("/admin/users/{user_id}/role")
+def admin_set_user_school_role(
+    user_id: int,
+    payload: AdminUserRolePayload,
+    current_user: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    ensure_target_is_manageable(current_user, user, action="change role for")
+
+    requested_role = str(payload.role or "").strip().lower()
+    if requested_role in {"", "auto", "detected"}:
+        assigned_role = ""
+    else:
+        assigned_role = normalize_optional_user_role(requested_role)
+        if not assigned_role:
+            raise HTTPException(status_code=400, detail="Role must be student, teacher, or auto.")
+
+    before_state = snapshot_user(user)
+    detected_role = detect_user_auto_role(user)
+    role_detection_log(user, detected_role=detected_role, source="existing_user")
+    user.auto_detected_role = detected_role
+    user.assigned_role = assigned_role
+    user.role = assigned_role or detected_role
+    create_audit_log(
+        db,
+        user_id=current_user.id,
+        action_type="user_role_updated",
+        entity_type="user",
+        entity_id=user.id,
+        before_state=before_state,
+        after_state=snapshot_user(user),
+        metadata={
+            "assigned_role": assigned_role,
+            "auto_detected_role": detected_role,
+            "role_source": "assigned" if assigned_role else "auto",
+        },
+    )
+    db.commit()
+    db.refresh(user)
+    log_admin_action(
+        current_user,
+        "set-user-role",
+        note=f"target_user_id={user.id} assigned_role={assigned_role or 'auto'} auto_detected_role={detected_role}",
+    )
+    return {
+        "message": "User role updated.",
+        "user": serialize_admin_user(db, user),
+    }
 
 
 @app.get("/admin/claims")
@@ -7474,10 +8463,11 @@ def admin_undo_claim_decision(
 @app.post("/items/{item_id}/mark-claimed")
 def mark_item_claimed(
     item_id: int,
-    current_user: User = Depends(require_admin_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     item = fetch_item_or_404(db, item_id)
+    ensure_can_manage_item(current_user, item)
     before_state = snapshot_item(item)
     mark_item_returned(item)
     create_audit_log(
